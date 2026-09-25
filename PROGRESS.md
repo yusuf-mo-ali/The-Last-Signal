@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-**Phase 0: Project Foundation.** Step 0.1 (toolchain scaffold) is complete; step 0.2 has not started.
+**Phase 0: Project Foundation.** Steps 0.1 (toolchain scaffold) and 0.2 (core primitives) are complete; step 0.3 has not started.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -33,10 +33,17 @@
 - [x] **Phase 0.1: Toolchain scaffold** (D-031).
   - Added `package.json` + `package-lock.json`, `tsconfig.json` (strict), `vite.config.ts` (with Vitest config), `eslint.config.js` (type-aware + layer rules), Prettier config, `.gitignore`, `.nvmrc`, `.editorconfig`, `index.html`, `src/main.ts` + `src/style.css` (placeholder screen), and `tests/toolchain.test.ts`.
   - Verified: `npm run typecheck`, `lint`, `format:check`, `test` (2 tests) and `build` all pass. The layer rule fires on a probe file that breaks it, and is removed after. `npm run dev` loads in headless Chromium with no console errors or failed requests.
+- [x] **Phase 0.2: Core primitives** (D-032). All are simulation-layer code with no browser dependencies, and each has its own test file:
+  - `src/core/EventBus.ts`: typed pub/sub, FIFO queue for re-entrant emits, error isolation, and scopes for run-lifetime subscriptions.
+  - `src/core/Time.ts`: fixed-step clock with time scale, frame clamp, step cap with backlog drop, and interpolation `alpha`.
+  - `src/core/GameState.ts`: all 12 plan states, with `PLAYING` as the parent of the five run phases, a push-down `PAUSED`, one transition table, strict mode, and queued re-entrant transitions.
+  - `src/utils/Rng.ts`: seeded sfc32 with `int`, `range`, `chance`, `pick`, `weighted`, `shuffle`, `fork` and save/restore of state.
+  - `src/utils/Pool.ts`: acquire/release with reset on release, misuse detection, prewarm, `maxFree`, `releaseAll` and `clear`.
+  - Verified: 247 new unit tests pass (249 in the suite), including all 132 source/target transition combinations checked against an independently written expected table. Eight deliberately planted bugs were each caught by the tests. `npm run check` and `npm run build` pass.
 
 ## Active Task
 
-None. Waiting for approval to start **Phase 0.2**.
+None. Waiting for approval to start **Phase 0.3**.
 
 ## Known Bugs
 
@@ -44,7 +51,9 @@ None.
 
 ## Next Task
 
-**Phase 0.2: Core primitives**: `EventBus`, `Time`, the `GameState` FSM, `utils/Rng`, `utils/Pool`, all with unit tests. Details are in the Phase 0 plan below.
+**Phase 0.3: Render foundation**: `render/Renderer` (WebGL2 check, DPR cap, resize), the `core/Game` bootstrap and fixed-step loop wiring `Time` + `GameStateMachine`, a test scene and camera. Details are in the Phase 0 plan below.
+
+**Deferred from 0.2 on purpose.** State-scoped timers (ARCHITECTURE §4) and the `GameEvents` map of event payloads are added with the first system that needs them. The hooks and scopes they build on already exist.
 
 ## Blocked Tasks
 
@@ -72,7 +81,7 @@ Each step is one small commit (plan §37). Every step must end with typecheck, l
 | Step | Scope | Acceptance |
 |---|---|---|
 | **0.1 Toolchain scaffold** ✅ | `package.json` (npm; Node ≥22.12 engines). Dependencies: `three@0.186.1`; dev dependencies from D-002. `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `erasableSyntaxOnly`). ESLint flat config (typescript-eslint type-checked plus the layer import rules from ARCHITECTURE §2). Prettier, Vitest, `.gitignore`, `.nvmrc`, `.editorconfig`. `index.html` and a minimal `src/main.ts`. Scripts: `dev`, `build`, `preview`, `typecheck`, `lint`, `format`, `test`. | `npm ci`, `typecheck`, `lint`, `test` and `build` all pass. `npm run dev` serves a page with no console errors |
-| **0.2 Core primitives** | `EventBus` (typed), `Time` (fixed-step clock, time scale), `GameState` (12 states, hierarchy, pause stack, transition table), `utils/Rng` (seeded), `utils/Pool` | Unit tests cover every legal and illegal transition, pause/resume restoring the child state, and event ordering and re-entrancy |
+| **0.2 Core primitives** ✅ | `EventBus` (typed), `Time` (fixed-step clock, time scale), `GameState` (12 states, hierarchy, pause stack, transition table), `utils/Rng` (seeded), `utils/Pool` | Unit tests cover every legal and illegal transition, pause/resume restoring the child state, and event ordering and re-entrancy |
 | **0.3 Render foundation** | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
 | **0.4 Input** | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |
 | **0.5 Config, debug, errors** | `core/Config.ts`, `src/config/` type skeletons, `debug/` (dev-only dynamic import, `window.tls` stub, FPS counter overlay), `core/ErrorHandler` (global errors, WebGL missing, context lost) | Production build contains no debug code (bundle checked); a forced error shows the error screen |

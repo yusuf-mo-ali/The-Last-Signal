@@ -109,6 +109,7 @@ stateDiagram-v2
     BOOT --> MAIN_MENU: boot complete
     MAIN_MENU --> LOADING: start run
     LOADING --> PLAYING: run ready
+    LOADING --> MAIN_MENU: load failed or cancelled
 
     state PLAYING {
         [*] --> WAVE_START
@@ -125,7 +126,7 @@ stateDiagram-v2
     PAUSED --> LOADING: restart
     PAUSED --> MAIN_MENU: quit
     PLAYING --> GAME_OVER: player died
-    PLAYING --> VICTORY: final wave complete
+    PLAYING --> VICTORY: final wave complete (from WAVE_COMPLETE)
     GAME_OVER --> LOADING: restart
     GAME_OVER --> MAIN_MENU: quit
     VICTORY --> MAIN_MENU: continue
@@ -135,8 +136,12 @@ stateDiagram-v2
 - **`PAUSED` is a push-down state.** Entering it stores the current child state and resuming restores it. It can be entered from any child of `PLAYING`, including `UPGRADE_SELECTION`.
 - **`BOSS` replaces `WAVE_ACTIVE`** for any wave whose `bossFlag` is true.
 - **`GAME_OVER` can be entered from every child of `PLAYING`,** covering death during a wave transition (§28).
-- **One table declares every legal transition.** Anything else is rejected and logged, and throws in dev builds. This covers "unexpected state changes" (§28) and makes transitions unit-testable.
-- **Each state has `onEnter` and `onExit` hooks.** Timers and subscriptions created inside a state are **state-scoped** and cancelled on exit. This handles boss death during a special event and restart while paused.
+- **`VICTORY` is only reachable from `WAVE_COMPLETE`** (the final wave cleared), never directly from `WAVE_ACTIVE` or `BOSS`.
+- **One table (`TRANSITIONS` in `src/core/GameState.ts`) declares every legal transition.** Anything else is rejected: the call returns `false` and `onInvalidTransition` is told, or, with `strict: true` (dev builds and tests), `InvalidTransitionError` is thrown. This covers "unexpected state changes" (§28) and makes transitions unit-testable.
+- **A transition requested from inside a hook is queued** and runs after the current one completes. Hook errors never leave the machine half-transitioned.
+- **`pause()` and `resume()` are idempotent conveniences.** `pause()` outside a run or when already paused returns `false`, since blur and pointer-lock loss often arrive together. `transition()` itself stays strict.
+- **Each state has `onEnter` and `onExit` hooks.** Parents enter before children and exit after them. Leaving `PAUSED` by restart or quit exits `PAUSED`, then the suspended phase, then `PLAYING`.
+- **Timers and subscriptions created inside a state will be state-scoped** and cancelled on exit. This handles boss death during a special event and restart while paused. The hooks exist now (Phase 0.2); the scoped timers arrive with the first system that needs them.
 - **Implementation:** a small hand-written typed FSM. State IDs are an `as const` object plus a union type, with no TS `enum` (D-027).
 
 ---

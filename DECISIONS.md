@@ -45,6 +45,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-029 | Player can only be damaged during WAVE_ACTIVE / BOSS | Proposed |
 | D-030 | Blockout-first visuals, swappable art | Accepted |
 | D-031 | Phase 0.1 tooling configuration details | Accepted |
+| D-032 | Phase 0.2 core primitive semantics | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open |
 
 ---
@@ -438,6 +439,36 @@ A flat machine would bring back hidden flags (such as "state before pause"), whi
 - **No `@types/node`.** Nothing in `src/`, `tests/` or `vite.config.ts` uses Node APIs yet, and `skipLibCheck` covers the Node types referenced inside Vite's own declarations. Add it only when code actually needs Node APIs.
 - **The first test verifies the headless assumption.** It checks that `three` math and the `Octree`/`Capsule` add-ons work in Node against an octree built from raw triangles. This backs D-003 and D-006 before any system depends on them.
 - **`npm run check`** runs typecheck, lint, format check and tests. It is the gate before every commit.
+
+
+## D-032 — Phase 0.2 core primitive semantics
+**Status:** Accepted · **Date:** 2026-09-25
+
+Refines D-004, D-005, D-014 and D-015 with the behaviour the code and tests now pin down.
+
+**Game state machine (`src/core/GameState.ts`).**
+- Two transitions are added to the ARCHITECTURE §4 diagram:
+  - `LOADING → MAIN_MENU`, so a failed or cancelled load has somewhere to go.
+  - `VICTORY` is reachable only from `WAVE_COMPLETE`, not from any run phase.
+- Pausing *suspends* the run phase: no exit or enter hooks fire for it on pause or resume. Restart or quit from `PAUSED` exits `PAUSED`, then the suspended phase, then `PLAYING`.
+- `transition()` is strict and returns `false` for illegal requests. `strict: true` throws `InvalidTransitionError` instead. `pause()`/`resume()` are idempotent no-ops when they don't apply, because platform events such as blur and pointer-lock loss arrive in bursts.
+- Transitions requested from hooks are queued. A queued request that has become illegal by the time it runs is rejected like any other.
+- Hook errors are collected and rethrown after the transition completes (or sent to `onListenerError`), so the machine is never left half-transitioned. The event bus handles listener errors the same way.
+
+**Clock (`src/core/Time.ts`).**
+- The clock never reads the wall clock; the caller passes frame time.
+- Invalid frame times count as 0.
+- When a frame owes more than `maxStepsPerFrame` steps, the backlog is dropped and counted in `droppedTime`. A frame that owes exactly the maximum drops nothing.
+- `simTime` is `stepCount × fixedDt`, so it never drifts.
+
+**Rng (`src/utils/Rng.ts`).**
+- sfc32, seeded through splitmix32 with 12 warm-up rounds. String seeds are hashed with 32-bit FNV-1a.
+- The tests compare the output against an independently written sfc32 reference and published FNV-1a vectors, plus fixed golden values. That comparison caught a counter-ordering slip during development.
+
+**Pool (`src/utils/Pool.ts`).**
+- Objects are reset on *release*, so idle objects are always clean.
+- Double release and foreign release throw.
+- Idle objects over `maxFree` and objects removed by `clear()` go to `dispose`.
 
 ---
 
