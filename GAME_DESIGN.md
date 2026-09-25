@@ -90,11 +90,12 @@ Plan §3 controls are kept. Controls must be rebindable later, so bindings live 
 
 - **Health:** 100. No armor in v1; the plan says "armor if implemented".
 - **No passive health regeneration [Proposed].** Healing comes from upgrades (Vampire, Second Wind), rare pickups, and a partial heal at wave completion. This keeps the Survival build meaningful.
-- **Movement intents** (starting points, to be tuned for feel in Phase 1):
-  - Walking is brisk.
-  - Sprint is about 1.5× walk speed and lowers the weapon; firing cancels sprint.
-  - Crouch is about 0.5× walk speed and tightens weapon spread.
-  - A jump clears low cover.
+- **Movement intents** (Phase 1 values in `src/config/player.ts`, D-038; feel still to be confirmed by hand):
+  - Walking is brisk: 5 m/s, full speed in 0.1 s, a stop in about 0.13 s.
+  - Sprint is 1.5× walk speed (7.5 m/s), forward only; it lowers the weapon and firing cancels it (Phase 2).
+  - Crouch is 0.5× walk speed, held on C; it lowers the eyes from 1.62 m to 0.95 m, fits under 1.25 m, and tightens weapon spread (Phase 2).
+  - A jump reaches 1.15 m: it clears low cover (up to ~1 m) and the loading dock, not a 1.6 m crate. Small forgiveness windows: 0.1 s coyote time, 0.12 s jump buffer.
+  - Mouse look: 60° vertical FOV (about 90° horizontal at 16:9), pitch limited to ±89°, subtle head bob (3 cm) while moving on the ground only.
 - **Damage window [Proposed, D-029].** The player can only take damage during `WAVE_ACTIVE` and `BOSS`. This removes a whole class of edge cases, such as dying on the upgrade screen.
 
 ---

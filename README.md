@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 0 (project foundation) complete.** The toolchain, core primitives, render foundation, input, configuration, debug tools, error handling and the test harness are in place. There is **no playable build yet**: Phase 1 (FPS controller) is next.
+> **Status: Phase 1 (first-person foundation) complete.** You can enter a grey-box prototype map and walk, strafe, sprint, crouch, jump and look around with full collision. There are no weapons or zombies yet: Phase 2 (weapon framework) is next.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -61,7 +61,7 @@ npm run check        # typecheck + lint + format check + tests; run before every
 npm run test:e2e     # browser tests against the dev server and a production build (see TESTING.md)
 ```
 
-The dev server currently shows the Phase 0 test scene: a spinning signal beacon driven by the fixed-step simulation. Click to capture the mouse; Esc releases it. Keys and mouse are read, but nothing moves yet: the player controller and gameplay come in Phase 1.
+The game currently opens on the Phase 1 blockout map: a compact facility with a yard, a control room, a crawl duct, a corridor, a generator hall, a catwalk and a loading dock. Click to capture the mouse and start; Esc releases it and pauses. Add `?quality=low|medium|high|ultra` to the URL to pick a graphics preset (default High).
 
 **Target browsers:** desktop Chrome, Edge and Firefox. Keyboard and mouse required.
 
@@ -72,25 +72,27 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
 - **Backquote** (`` ` ``) toggles the stats overlay: FPS, frame cost, draw calls, game state.
 - **`tls.help()`** in the browser console lists every command. Examples:
   - `tls.state()` and `tls.stats()` report the current state and frame statistics.
+  - `tls.player()` reports position, speed and movement state; `tls.teleportPlayer(x, y, z, yaw?)` and `tls.look(yaw, pitch?)` move and turn the player.
+  - `tls.view({ fov: 75, sensitivity: 1.5, invertY: false, headBob: true })` changes view settings live.
   - `tls.transition('LOADING')` requests a game state change.
   - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
   - `tls.throwError()` shows the error screen.
-- The plan's gameplay commands (`giveAmmo`, `spawnEnemy`, `startWave`, …) are listed already. They report which phase will implement them.
+- The plan's other gameplay commands (`giveAmmo`, `spawnEnemy`, `startWave`, …) are listed already. They report which phase will implement them.
 
-## Controls (planned)
+## Controls
 
-| Action | Key |
-|---|---|
-| Move | W A S D |
-| Look | Mouse |
-| Fire / Aim | Left click / Right click |
-| Reload | R |
-| Sprint | Shift |
-| Crouch | C (Ctrl available as a rebind) |
-| Jump | Space |
-| Weapons | 1 / 2 / 3 |
-| Interact / Melee | E / V (proposed) |
-| Pause | Esc |
+| Action | Key | Status |
+|---|---|---|
+| Move | W A S D | Working |
+| Look | Mouse | Working |
+| Sprint | Shift (forward) | Working |
+| Crouch | C, held (Ctrl available as a rebind) | Working |
+| Jump | Space | Working |
+| Pause | Esc | Working |
+| Fire / Aim | Left click / Right click | Phase 2 |
+| Reload | R | Phase 2 |
+| Weapons | 1 / 2 / 3 | Phase 2 |
+| Interact / Melee | E / V (proposed) | Later phases |
 
 Controls will be rebindable. Crouch defaults to C rather than Ctrl because browsers do not let pages block Ctrl+W, so crouch-walking with Ctrl would close the tab.
 

@@ -1,12 +1,13 @@
 /**
  * Composition root: the only place that wires browser APIs to the game.
- * Simulation (`core/`, `world/TestScene`) and platform code (`input/`) stay browser-independent;
+ * Simulation (`core/`, `world/`, `player/`) and platform code (`input/`) stay browser-independent;
  * everything that needs the DOM, WebGL or requestAnimationFrame is created here and injected
  * (ARCHITECTURE.md §2, D-003, D-034, D-035).
  */
 
 import './style.css';
 import { boundKeyCodes, DEFAULT_BINDINGS } from './config/input';
+import { ENGINE_CONFIG, parseGraphicsPreset, type ViewSettings } from './core/Config';
 import { ErrorHandler } from './core/ErrorHandler';
 import { Game, type FrameScheduler } from './core/Game';
 import { ActionMap } from './input/ActionMap';
@@ -15,12 +16,17 @@ import { BrowserInput } from './input/BrowserInput';
 import { InputState } from './input/InputState';
 import { PointerLock } from './input/PointerLock';
 import { attachStepInput } from './input/stepInput';
+import { CameraController } from './player/CameraController';
+import { Player } from './player/Player';
+import { PlayerController } from './player/PlayerController';
+import { createCamera } from './render/camera';
 import { Renderer } from './render/Renderer';
 import { detectWebGL2 } from './render/webglSupport';
 import { LockPrompt } from './ui/LockPrompt';
 import { StatusScreen } from './ui/StatusScreen';
-import { TestScene } from './world/TestScene';
-import { TestSceneView } from './world/TestSceneView';
+import { FACILITY, FACILITY_BEACON_POSITION } from './world/levels/facility';
+import { World } from './world/World';
+import { WorldView } from './world/WorldView';
 
 const browserFrames: FrameScheduler = {
   request: (callback) => requestAnimationFrame(callback),
@@ -68,19 +74,24 @@ function boot(app: HTMLElement): () => void {
 
   const game = new Game({ strict: import.meta.env.DEV });
   running.game = game;
-  const testScene = new TestScene();
-  game.addSystem(testScene);
+  const world = new World(FACILITY);
+  game.addSystem(world);
 
+  // Graphics quality preset (D-037): the configured default, or `?quality=low|medium|high|ultra`
+  // until the settings menu exists.
+  const presetId =
+    parseGraphicsPreset(new URLSearchParams(location.search).get('quality')) ??
+    ENGINE_CONFIG.graphics.defaultPreset;
   let renderer: Renderer;
   try {
-    renderer = new Renderer(app);
+    renderer = new Renderer(app, { quality: ENGINE_CONFIG.graphics.presets[presetId] });
   } catch (error) {
     // The probe passed but the real context could not be created (e.g. GPU blocklisted).
     console.error('Could not create the WebGL 2 renderer', error);
     status.show('webgl-unsupported');
     return runAll(cleanups);
   }
-  const view = new TestSceneView(renderer, testScene);
+  const view = new WorldView(renderer, world, { beaconPosition: FACILITY_BEACON_POSITION });
 
   // ---- Input (D-017, D-034) ----------------------------------------------------------------
   const input = new InputState();
@@ -98,6 +109,50 @@ function boot(app: HTMLElement): () => void {
   const stepActions = new ActionMap(stepReader, DEFAULT_BINDINGS);
   const frameActions = new ActionMap(frameReader, DEFAULT_BINDINGS);
 
+  // ---- Player (D-038) ----------------------------------------------------------------------
+  // Movement runs in the fixed step, only while a run is being played. Look runs every frame.
+  const controller = new PlayerController(stepActions);
+  const player = new Player({
+    world: world.collision,
+    level: FACILITY,
+    intent: () => controller.read(),
+    active: () => game.state.isIn('PLAYING'),
+  });
+  game.addSystem(player);
+  const camera = createCamera();
+  const cameraController = new CameraController(camera, player, ENGINE_CONFIG.view);
+  cameraController.update(0, 0);
+  view.prewarm(camera);
+
+  /** Applies view settings (FOV, sensitivity, invert-Y, head bob) to the camera and the look. */
+  const applyView = (settings: ViewSettings): ViewSettings => {
+    cameraController.applySettings(settings);
+    player.look.setSettings({
+      ...player.look.getSettings(),
+      sensitivity: settings.sensitivity,
+      invertY: settings.invertY,
+    });
+    return settings;
+  };
+
+  cleanups.push(
+    game.state.onEnter('PLAYING', () => {
+      // A new run (not a resume): back to the spawn point.
+      player.respawn();
+      cameraController.bob.reset();
+    }),
+  );
+  cleanups.push(
+    game.addFrameSystem({
+      frameUpdate: () => {
+        frameReader.sample(); // this frame's input window: edges and mouse delta since last frame
+        if (pointerLock.isLocked && game.state.isIn('PLAYING') && game.time.scale > 0) {
+          player.look.applyMouseDelta(frameReader.mouseDeltaX, frameReader.mouseDeltaY);
+        }
+      },
+    }),
+  );
+
   cleanups.push(
     installAutoPause(game.state, {
       onPointerLockLost: (listener) =>
@@ -111,13 +166,17 @@ function boot(app: HTMLElement): () => void {
     }),
   );
 
-  // Clicking the prompt is the user gesture that (re)acquires the lock, and resumes if paused.
+  // Clicking the prompt is the user gesture that (re)acquires the lock. From the main menu it
+  // starts a run (LOADING is instant until there is something to load); while paused, it resumes.
   const prompt = new LockPrompt(app, () => {
     void pointerLock.request().then((result) => {
-      if (result.locked) {
-        game.state.resume();
-      } else {
+      if (!result.locked) {
         prompt.show('refused');
+      } else if (game.state.current === 'MAIN_MENU') {
+        game.state.transition('LOADING');
+        game.state.transition('PLAYING');
+      } else {
+        game.state.resume();
       }
     });
   });
@@ -139,7 +198,7 @@ function boot(app: HTMLElement): () => void {
           status.show('context-lost');
           break;
         case 'restored':
-          view.prewarm();
+          view.prewarm(camera);
           status.hide();
           break;
         case 'restore-timeout':
@@ -150,9 +209,10 @@ function boot(app: HTMLElement): () => void {
   );
 
   game.setPresentation({
-    render: (alpha) => {
-      frameReader.sample(); // this frame's input window: edges and mouse delta since last frame
-      view.render(alpha);
+    render: (alpha, frameDt) => {
+      // Simulated time only: the head bob holds still while paused.
+      cameraController.update(alpha, frameDt * game.time.scale);
+      view.render(alpha, camera);
     },
   });
   game.start(browserFrames);
@@ -172,7 +232,19 @@ function boot(app: HTMLElement): () => void {
         pointerLock,
         errors,
         container: app,
-        extras: { testScene, stepActions, frameActions, prompt, status, view },
+        player,
+        applyView,
+        getView: () => cameraController.getSettings(),
+        extras: {
+          world,
+          cameraController,
+          camera,
+          stepActions,
+          frameActions,
+          prompt,
+          status,
+          view,
+        },
       }).dispose;
     });
     cleanups.push(() => {

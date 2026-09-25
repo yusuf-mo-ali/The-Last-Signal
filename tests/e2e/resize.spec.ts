@@ -25,8 +25,14 @@ test('matches the drawing buffer to every target resolution', async ({ page, iss
   expect(issues.problems()).toEqual([]);
 });
 
-test('follows live device-pixel-ratio changes, capped at 2', async ({ page, context, issues }) => {
-  await openGame(page);
+// The pixel-ratio cap comes from the graphics quality preset (D-037): high (default) 1.5,
+// ultra 2, low 1.
+test('follows live device-pixel-ratio changes, capped by the quality preset', async ({
+  page,
+  context,
+  issues,
+}) => {
+  await openGame(page, '?quality=ultra');
   const cdp = await context.newCDPSession(page);
   for (const dpr of [2, 1.25, 3]) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -48,11 +54,24 @@ test('follows live device-pixel-ratio changes, capped at 2', async ({ page, cont
 test.describe('on a 3× display', () => {
   test.use({ deviceScaleFactor: 3 });
 
-  test('starts with the pixel ratio capped at 2', async ({ page, issues }) => {
-    await openGame(page);
-    expect(await canvasSize(page)).toMatchObject({ width: 2732, height: 1536 });
-    expect(issues.problems()).toEqual([]);
-  });
+  for (const [query, ratio] of [
+    ['', 1.5],
+    ['?quality=ultra', 2],
+    ['?quality=low', 1],
+    ['?quality=nonsense', 1.5],
+  ] as const) {
+    test(`caps the pixel ratio at ${ratio} with "${query || 'no query'}"`, async ({
+      page,
+      issues,
+    }) => {
+      await openGame(page, query);
+      expect(await canvasSize(page)).toMatchObject({
+        width: Math.floor(1366 * ratio),
+        height: Math.floor(768 * ratio),
+      });
+      expect(issues.problems()).toEqual([]);
+    });
+  }
 });
 
 test('skips drawing in a collapsed container and recovers', async ({ page, issues }) => {

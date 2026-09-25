@@ -2,7 +2,7 @@
 
 How the project is tested, how to run each level, what is covered, and what still needs a human in a real browser. Required by plan §36; strategy from plan §27 and ARCHITECTURE.md §9 (D-021, D-036).
 
-> **Status (end of Phase 0):** 420 unit tests; 40 end-to-end tests (20 specs × `dev` and `prod`: 33 run, 7 skipped by design); manual QA checklist not yet run in a real browser (see §6).
+> **Status (end of Phase 1):** 525 unit and integration tests; 64 end-to-end tests (32 tests × `dev` and `prod`: 49 run, 15 skipped by design); manual QA checklist not yet run in a real browser (see §6).
 
 ---
 
@@ -11,7 +11,7 @@ How the project is tested, how to run each level, what is covered, and what stil
 | Level | Tool | Where | Runs in | Purpose |
 |---|---|---|---|---|
 | **Unit** | Vitest | `src/**/*.test.ts` (next to the code) | Node | Every module's rules and edge cases, deterministic |
-| **Integration** | Vitest + headless `Game` | `src/**/*.test.ts`, `tests/*.test.ts` | Node | Systems working together through the real loop (e.g. `Game` + `TestScene` + input readers), driven by a manual frame queue |
+| **Integration** | Vitest + headless `Game` | `src/**/*.test.ts`, `tests/*.test.ts` | Node | Systems working together through the real loop (e.g. `Game` + `World` + `Player` + input readers walking the whole map), driven by a manual frame queue |
 | **End-to-end** | Playwright | `tests/e2e/*.spec.ts` | Chromium, against the dev server **and** a production build | What only a browser can show: WebGL rendering, resize/DPR, DOM input, pointer lock, error screens, context loss, dev-vs-prod differences |
 | **Manual QA** | A person, real browsers | §6 checklist | Chrome, Edge, Firefox on real hardware | Feel, and browser behaviour headless Chromium cannot reproduce (§5) |
 
@@ -50,7 +50,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 
 ---
 
-## 3. What is covered (Phase 0)
+## 3. What is covered (Phases 0–1)
 
 | Area | Unit / integration | End-to-end |
 |---|---|---|
@@ -65,7 +65,14 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Rendering** | `render/viewport.test.ts`: sizes and DPR at every target resolution | `smoke.spec`: WebGL 2, pixels drawn, animation. `resize.spec`: 5 resolutions, live DPR 2/1.25/3, DPR cap, collapsed container |
 | **Input** | `input/*.test.ts`: readers, edges at any frame/step ratio, wheel notches, glitch motion, real DOM listener path on Node `EventTarget`s, pointer-lock success/fallback/refusal/legacy/timeout, auto-pause, step discard | `input.spec`: default suppression, physical keys (AZERTY), edges, lock on click, motion/buttons/wheel, lock loss → pause, refusal → "click again", resume, blur/hidden |
 | **Errors / WebGL** | `core/ErrorHandler.test.ts`, `render/webglSupport.test.ts`, `render/ContextLossMonitor.test.ts` | `resilience.spec`: context loss/restore/timeout, forced frame/async/rejection errors, missing WebGL 2, renderer failure |
-| **Debug tools** | `debug/DebugCommands.test.ts`, `debug/FrameStats.test.ts` | `debug.spec`: `tls`, plan §29 stubs, overlay (dev); nothing in production |
+| **Debug tools** | `debug/DebugCommands.test.ts`, `debug/FrameStats.test.ts` | `debug.spec`: `tls`, plan §29 stubs, player commands, overlay (dev); nothing in production |
+| **Player config** (Phase 1) | `config/player.test.ts`: body proportions, speed order, responsiveness, `jumpSpeed`, fit with the blockout (dock jumpable, duct crouch-only) | — |
+| **Level geometry** | `world/levels/geometry.test.ts`: outward normals for boxes, ramps in all 4 directions and stairs; stairs render as steps and collide as a ramp; grouping by surface | — |
+| **Blockout map** | `world/levels/facility.test.ts`: brushes well-formed and in bounds, triangle budget, walkable slopes, clear spawn, clear ground at every route waypoint, duct fits crouched not standing, beacon clear | `smoke.spec`: map renders, beacon visible from the spawn |
+| **Collision** | `physics/CollisionWorld.test.ts`: floor / wall contacts reported separately, deepest first; one-sided faces; raycast range and back faces | `player.spec`: walls, desk, duct |
+| **Movement** | `player/PlayerMotor.test.ts` (37 tests): direction per key and yaw, acceleration, braking without backslide, diagonal speed, sprint rules, crouch speed / eye ease / headroom / tunnel, jump apex and air time, no repeat, no air jump, jump buffer on/off, coyote time on/off, gravity and terminal speed, ledges, ramp up / sprint down (snap), no sliding standing or landing on a ramp, steep slopes, wall stop and slide, no tunnelling through thin floors and walls, never below the floor, kill-plane respawn | `player.spec`: WASD, turned-view movement, sprint 1.5×, crouch, jump height, no bunny-hop, never below the floor |
+| **Look and camera** | `player/PlayerLook.test.ts`: direction, invert-Y, sensitivity scaling, pitch clamp and recovery, yaw wrap, validation. `player/HeadBob.test.ts`: none when still, subtle amplitude, sprint cap, distance-based rhythm, eased fade, paused, disabled | `player.spec`: real mouse → yaw/pitch, sensitivity 2×, clamp at ±89°, invert-Y, FOV, camera follows look; head bob visible when walking, none when still or disabled |
+| **Controller and loop** | `player/PlayerController.test.ts` (with the real `InputState`/`ActionMap`); `core/Game.test.ts`: frame systems before steps, while frozen, removal; `player/traversal.test.ts`: player only moves while playing, respawn per run, **identical positions at 30/60/75/144/240 Hz**, **headless walk of the whole map** | `player.spec`: click to play starts the run; **walk of the whole map with real keys** (W/Shift held, C through the duct, Space at the dock); `prod`: strafing and turning move the beacon on screen |
 
 **Every end-to-end test also asserts a clean page:** no console errors or warnings, page errors, failed requests or HTTP errors. The only exceptions are ones a test deliberately provokes, and those are listed in the test.
 
@@ -82,6 +89,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 - **Tests must be able to fail.** For important behaviour, plant a realistic bug and confirm a test goes red.
   - Phases 0.2 and 0.4: 16 of 16 unit-level mutations were caught.
   - Phase 0.6: a planted e2e bug (refusal feedback removed) failed in both projects.
+  - Phase 1: 9 of 9 movement mutations caught (no sub-steps, no headroom check, no diagonal normalisation, sprint in any direction, no coyote time, no jump buffer, sliding on slopes, no ground snap, no kill plane). The first run caught 5; the 4 survivors exposed weak test setups, which were fixed.
   - Mutations are always reverted.
 - **Naming.** Unit/integration files are `*.test.ts` (Vitest); end-to-end files are `*.spec.ts` (Playwright). They never overlap.
 - **Development vs production.** E2E specs branch on the project name. Checks needing `window.tls` run only in `dev`; `prod` verifies that the debug tools are absent.
@@ -98,7 +106,7 @@ Headless Chromium does not reproduce some browser behaviour. Each case is covere
 | **Chromium refuses a re-lock shortly after Esc** | No cooldown | The canvas's `requestPointerLock` is made to reject once with Chromium's exact `SecurityError`, so the real click → request → "refused" path runs |
 | **Switching tabs/windows fires `blur` and `visibilitychange`** | Pages always look visible and focused | The same events are dispatched; unit tests cover the handlers |
 | **Raw (`unadjustedMovement`) mouse input on Chromium** | Unsupported | The fallback path runs for real |
-| **GPU rendering and frame rates** | Software rendering (SwiftShader) | Performance is measured manually (§7) |
+| **GPU rendering and frame rates** | Software rendering (SwiftShader), ~7–12 FPS | Performance is measured manually (§7). Movement assertions use simulated time (`tls.player()`), not wall-clock distances, because a slow software frame drops simulated time (max 5 steps per frame) |
 
 ---
 
@@ -113,13 +121,13 @@ Record the date, browser version and results in PROGRESS.md.
 **Status: not yet run.** The Claude Code container has only headless Chromium, and its network policy blocks the Vercel preview.
 
 ### Load and rendering
-- [ ] **Load and render:** the page loads with no console errors, the test scene renders (floor, crates, red spinning beacon), and "Click to play" is shown.
+- [ ] **Load and render:** the page loads with no console errors, the blockout map renders (yard, tower with the red spinning beacon, buildings), and "Click to play" is shown.
 - [ ] **Resolution:** 1920×1080, 1600×900, 1366×768 and a small window are sharp, not stretched, and the aspect ratio stays correct while resizing.
 - [ ] **Browser zoom:** Ctrl/Cmd +/−, and moving the window to a monitor with a different scaling, re-render sharp (pixel ratio capped at 2).
 
 ### Pointer lock and input
 - [ ] **Capture:** clicking "Click to play" hides the cursor and the prompt.
-- [ ] **Esc:** releases the cursor and shows the prompt again. In a run (dev: `tls.transition('LOADING'); tls.transition('PLAYING')`) it shows "Paused" and `tls.state()` reports `PAUSED`.
+- [ ] **Esc:** releases the cursor and shows "Paused"; `tls.state()` reports `PAUSED`. Clicking resumes where the player stood.
 - [ ] **Chrome, re-lock cooldown:** click again immediately (under 1 s) after Esc. Expect "Mouse not captured … Click again"; a click a second later captures.
 - [ ] **Focus loss:** Alt+Tab / Cmd+Tab and switching browser tabs while captured pause the run. A key held during the switch is no longer held on return: `tls.inspect().input.isKeyDown('KeyW')` is `false`.
 - [ ] **Raw input:** the overlay's `lock` line shows `on raw` in Chrome/Edge where supported, and `on accel` in Firefox.
@@ -129,6 +137,16 @@ Record the date, browser version and results in PROGRESS.md.
   - Space does not scroll;
   - Ctrl+R / Cmd+R still reload.
 - [ ] **Keyboard layout:** with an AZERTY (or other) OS layout, the physical W key reports `moveForward`: `tls.inspect().frameActions.isDown('moveForward')` is true while held.
+
+### Movement and camera (Phase 1)
+- [ ] **Feel:** walking, strafing and stopping feel immediate (no ice, no floatiness); diagonal movement is not faster.
+- [ ] **Sprint (Shift)** is clearly faster, forward only. **Crouch (C, held)** lowers the view smoothly and slows down; releasing it under the duct ceiling keeps you crouched until you are out.
+- [ ] **Jump (Space):** a tap jumps once; holding does not repeat; you can jump onto the loading dock and the small crates, not onto the tall crate or the container.
+- [ ] **Mouse look:** smooth at 60/120/144 Hz monitors, no jitter while strafing and turning; looking straight up/down stops just short of vertical without flipping.
+- [ ] **Settings (dev):** `tls.view({ fov: 90 })`, `tls.view({ sensitivity: 2 })`, `tls.view({ invertY: true })`, `tls.view({ headBob: false })` take effect immediately.
+- [ ] **Head bob:** subtle while walking, a little stronger sprinting, none when standing still or in the air.
+- [ ] **Collision:** no wall, corner or doorway lets you through or snags you; sliding along walls is smooth; the stairs and ramps are smooth to walk up and down; you never fall through the floor (`tls.player().respawns` stays 0).
+- [ ] **Whole map:** walk the loop from the yard through the control room, crawl duct (crouch), service corridor, generator hall, west annex, stairs, catwalk (and drop through the railing gap), ramp, loading bay, dock and back.
 
 ### Resilience
 - [ ] **Context loss** (dev, real GPU): `tls.loseContext()` shows "Graphics paused"; `tls.restoreContext()` restores the scene and "Paused" → click resumes.
@@ -162,7 +180,7 @@ Record the date, browser version and results in PROGRESS.md.
    - Latest Chrome, and Edge or Firefox as a second browser. No other tabs or apps running.
    - Laptops plugged in; OS power plan set to High performance.
    - Browser window fullscreen (F11) at 1920×1080, browser zoom 100%.
-3. **Preset:** Low on the weak reference, High on capable hardware. From Phase 1: `?quality=low` or `?quality=high`.
+3. **Preset:** Low on the weak reference, High on capable hardware: open the build with `?quality=low` or `?quality=high` (default High).
 4. **Scenario:** use the phase's scenario (table below). Let the scene settle for 10 s, then record for **60 s**.
 5. **Frame rate** (works in production): Chrome DevTools → More tools → Rendering → **Frame Rendering Stats**, plus a Performance-panel recording of the 60 s.
 6. **Our CPU cost** (development build, same scenario): the overlay and `tls.stats()`, which report cost avg/p95/max per frame, draw calls and steps per frame.
@@ -183,14 +201,27 @@ Record the date, browser version and results in PROGRESS.md.
 
 | Date | Commit | Build | Machine | Browser | Preset | Resolution | Scenario | Avg FPS | p95 / 1% low (ms) | CPU cost p95 (ms) | Draw calls | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — | — | *No reference measurements yet. The first is due in Phase 1, once the prototype map exists.* | | | | |
+| — | — | — | — | — | — | — | — | *No reference-machine measurements yet. Phase 1's map is ready for the first one (scenario: Phase 1 row above); it needs the physical machines.* | | | | |
 
 ### 7.4 Figures from the Claude Code container
 
-Software rendering (SwiftShader) with no GPU, so these are not representative:
-- our frame cost is about 0.5–1.3 ms;
-- 14 draw calls, 146 triangles, 3 shader programs;
-- frame-probe overhead is about 130 ns per frame when on and 0 when off.
+Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *rates* are not representative. Our own CPU cost and the scene's size are.
+
+**Phase 0 test scene:** frame cost about 0.5–1.3 ms; 14 draw calls, 146 triangles, 3 shader programs; frame-probe overhead about 130 ns per frame when on and 0 when off.
+
+**Phase 1 baseline (2026-09-25, development build, sprinting and turning around the yard for 5 s):**
+
+| Resolution | Preset | FPS (SwiftShader) | Our frame cost avg / p95 / max (ms) | Steps per frame | Draw calls | Triangles | Programs |
+|---|---|---|---|---|---|---|---|
+| 1920×1080 | High (default) | 7.1 | 0.97 / 1.7 / 2.8 | 4.3 | 11 | 1,124 | 4 |
+| 1920×1080 | Low | 8.4 | 1.14 / 2.6 / 3.1 | 4.2 | 11 | 1,124 | 4 |
+| 1366×768 | High | 12.0 | 0.93 / 2.0 / 3.3 | 4.4 | 11 | 1,124 | 4 |
+| 1280×720 | Ultra | 10.1 | 0.94 / 1.7 / 3.8 | 4.2 | 11 | 1,124 | 4 |
+
+- **Player simulation (Node, headless):** 5.0 µs per step standing, 6.0 µs sprinting in the open, 10.3 µs pushing into a wall. At 60 steps/s that is under 0.1 % of a frame. Level collision: 480 triangles; world build ≈ 50 ms once at startup (including JIT warm-up).
+- **Reading:** our CPU work is ~1 ms per frame. SwiftShader's CPU rasteriser is the entire bottleneck (7 FPS at 1080p), so these rates say nothing about the GTX 750. The blockout is far inside every budget (draw calls 11 of 250).
+- **Dropped time:** below ~12 FPS a frame needs more than 5 steps, so simulated time runs slower than real time by design (ARCHITECTURE §3). This is why e2e movement checks read simulated state instead of wall-clock distances.
+- **Not optimised.** Nothing in Phase 1 was tuned for speed; there is no evidence it needs to be (D-037 §3).
 
 ---
 
@@ -199,4 +230,5 @@ Software rendering (SwiftShader) with no GPU, so these are not representative:
 - **No CI yet.** Recommended next infrastructure step: a GitHub Actions workflow running `npm ci`, `npm run check`, `npm run build` and `npm run test:e2e` on every PR. That would make "green" objective for every change.
 - **Vercel preview not reachable from the Claude Code container.** Its network policy denies `*.vercel.app`; allowing it would let the e2e suite run against each preview (`E2E_BASE_URL`).
 - **Manual QA (§6) pending** in real Chrome, Edge and Firefox.
+- **Phase 1 feel is verified by numbers, not by hands.** Acceleration, speeds, jump height and camera behaviour are asserted, but "feels like a real FPS" needs the manual checklist (§6) on real hardware and monitors.
 - **Future test targets (plan §27).** Unit tests for damage, wave generation, difficulty scaling, upgrade and mutation selection, economy and save/load. Headless integration scenarios for shooting, killing, wave completion, upgrades, boss spawning, game over and restart. Each lands with its phase.

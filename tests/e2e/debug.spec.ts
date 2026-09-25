@@ -14,7 +14,6 @@ const PLAN_29_COMMANDS = [
   'spawnBoss',
   'setGodMode',
   'setInfiniteAmmo',
-  'teleportPlayer',
 ];
 
 test('development build: tls commands, plan §29 stubs and the stats overlay', async ({
@@ -29,7 +28,18 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
   for (const name of PLAN_29_COMMANDS) {
     expect(commands.get(name), name).toBe(false); // registered as stubs until their phases
   }
-  for (const name of ['inspect', 'state', 'stats', 'overlay', 'loseContext', 'throwError']) {
+  for (const name of [
+    'inspect',
+    'state',
+    'stats',
+    'overlay',
+    'loseContext',
+    'throwError',
+    'player',
+    'teleportPlayer',
+    'look',
+    'view',
+  ]) {
     expect(commands.get(name), name).toBe(true);
   }
   expect(await page.evaluate(() => window.tls!.giveAmmo())).toMatchObject({

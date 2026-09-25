@@ -11,12 +11,14 @@
  */
 
 import './debug.css';
-import { ENGINE_CONFIG } from '../core/Config';
+import { Vector3 } from 'three';
+import { ENGINE_CONFIG, type ViewSettings } from '../core/Config';
 import type { ErrorHandler } from '../core/ErrorHandler';
 import type { Game } from '../core/Game';
 import { GameStateId } from '../core/GameState';
 import type { InputState } from '../input/InputState';
 import type { PointerLock } from '../input/PointerLock';
+import type { Player } from '../player/Player';
 import type { Renderer } from '../render/Renderer';
 import { DebugCommands, type DebugApi } from './DebugCommands';
 import { DebugOverlay } from './DebugOverlay';
@@ -30,7 +32,12 @@ export interface DebugContext {
   readonly pointerLock: PointerLock;
   readonly errors: ErrorHandler;
   readonly container: HTMLElement;
-  /** Extra objects exposed through `tls.inspect()` (e.g. the test scene). */
+  /** The player, for `tls.player()`, `tls.teleportPlayer()` and `tls.look()`. */
+  readonly player?: Player;
+  /** View settings access, for `tls.view()`. */
+  readonly getView?: () => ViewSettings;
+  readonly applyView?: (settings: ViewSettings) => ViewSettings;
+  /** Extra objects exposed through `tls.inspect()` (e.g. the world and the camera). */
   readonly extras?: Readonly<Record<string, unknown>>;
 }
 
@@ -52,7 +59,6 @@ const PLANNED_COMMANDS: readonly (readonly [string, string, string])[] = [
   ['setInfiniteAmmo', 'Toggle infinite ammunition', 'Phase 2 (weapon framework)'],
   ['healPlayer', 'Restore full health', 'Phase 3 (combat: health and damage)'],
   ['setGodMode', 'Toggle invulnerability', 'Phase 3 (combat: health and damage)'],
-  ['teleportPlayer', 'Move the player to a position', 'Phase 1 (FPS controller)'],
   ['spawnEnemy', 'Spawn an enemy of a given type', 'Phase 4 (zombie foundation)'],
   ['killAll', 'Kill every enemy', 'Phase 4 (zombie foundation)'],
   ['startWave', 'Start a given wave number', 'Phase 6 (wave system)'],
@@ -118,12 +124,13 @@ export function installDebug(context: DebugContext): DebugTools {
     input,
     pointerLock,
     errors,
+    ...(context.player ? { player: context.player } : {}),
     ...context.extras,
   });
 
   commands.register(
     'inspect',
-    'Live objects: game, renderer, input, pointerLock, errors, …',
+    'Live objects: game, renderer, input, pointerLock, errors, player, world, camera, …',
     () => inspectable,
   );
   commands.register('state', 'Current game state (and the suspended phase while paused)', () => ({
@@ -197,6 +204,7 @@ export function installDebug(context: DebugContext): DebugTools {
       return `forced ${kind} error scheduled`;
     },
   );
+  registerPlayerCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -221,6 +229,60 @@ export function installDebug(context: DebugContext): DebugTools {
   };
 }
 
+function registerPlayerCommands(commands: DebugCommands, context: DebugContext): void {
+  const { player, getView, applyView } = context;
+  if (player) {
+    const { motor, look } = player;
+    commands.register(
+      'player',
+      'Player position, velocity, grounded/crouch state and look',
+      () => ({
+        position: motor.position.toArray(),
+        velocity: motor.velocity.toArray(),
+        speed: motor.horizontalSpeed,
+        grounded: motor.grounded,
+        crouched: motor.crouched,
+        sprinting: motor.sprinting,
+        eyeHeight: motor.eyeHeight,
+        yaw: look.yaw,
+        pitch: look.pitch,
+        respawns: motor.respawns,
+        groundDistance: motor.groundDistance,
+      }),
+    );
+    commands.register(
+      'teleportPlayer',
+      'Move the player to a position (feet): tls.teleportPlayer(x, y, z, yaw?)',
+      (x: number, y: number, z: number, yaw?: number) => {
+        if (![x, y, z].every(Number.isFinite)) {
+          throw new Error('teleportPlayer(x, y, z, yaw?) needs three finite numbers');
+        }
+        motor.teleport(new Vector3(x, y, z));
+        if (yaw !== undefined) {
+          look.setAngles(yaw, 0);
+        }
+        return motor.position.toArray();
+      },
+    );
+    commands.register(
+      'look',
+      'Set the view angles in radians: tls.look(yaw, pitch?) (yaw 0 faces north, −z)',
+      (yaw: number, pitch?: number) => {
+        look.setAngles(yaw, pitch);
+        return { yaw: look.yaw, pitch: look.pitch };
+      },
+    );
+  }
+  if (getView && applyView) {
+    commands.register(
+      'view',
+      'Get or change view settings: tls.view({ fov: 75, sensitivity: 1.5, invertY: false, headBob: true })',
+      (changes?: Partial<ViewSettings>) =>
+        changes ? applyView({ ...getView(), ...changes }) : getView(),
+    );
+  }
+}
+
 function throwingPresentation(error: Error) {
   return {
     render: (): void => {
@@ -230,7 +292,7 @@ function throwingPresentation(error: Error) {
 }
 
 function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
-  const { game, renderer, input, pointerLock } = context;
+  const { game, renderer, input, pointerLock, player } = context;
   const info = renderer.webgl.info;
   const v = renderer.viewport;
   const state = game.state.pausedState
@@ -243,6 +305,14 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     `draws ${info.render.calls}  tris ${info.render.triangles}  programs ${info.programs?.length ?? 0}`,
     `view ${v.width}×${v.height} @${v.pixelRatio}  ctx ${renderer.context.lost ? 'LOST' : 'ok'}`,
     `state ${state}`,
+    ...(player ? [formatPlayer(player)] : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
+}
+
+function formatPlayer(player: Player): string {
+  const m = player.motor;
+  const [x, y, z] = m.position.toArray().map((v) => v.toFixed(2));
+  const mode = m.crouched ? 'crouch' : m.sprinting ? 'sprint' : 'walk';
+  return `player ${x} ${y} ${z}  ${m.horizontalSpeed.toFixed(1)} m/s  ${m.grounded ? 'ground' : 'air'} ${mode}`;
 }

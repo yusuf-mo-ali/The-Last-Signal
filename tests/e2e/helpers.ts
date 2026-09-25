@@ -10,7 +10,10 @@ import type { ActionMap } from '../../src/input/ActionMap';
 import type { InputState } from '../../src/input/InputState';
 import type { PointerLock } from '../../src/input/PointerLock';
 import type { Renderer } from '../../src/render/Renderer';
-import type { TestScene } from '../../src/world/TestScene';
+import type { PerspectiveCamera } from 'three';
+import type { ViewSettings } from '../../src/core/Config';
+import type { Player } from '../../src/player/Player';
+import type { World } from '../../src/world/World';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -19,8 +22,25 @@ export interface DevHandles {
   readonly input: InputState;
   readonly pointerLock: PointerLock;
   readonly errors: ErrorHandler;
-  readonly testScene: TestScene;
+  readonly world: World;
+  readonly player: Player;
+  readonly camera: PerspectiveCamera;
   readonly frameActions: ActionMap;
+}
+
+/** What `tls.player()` returns. */
+export interface PlayerSnapshot {
+  readonly position: [number, number, number];
+  readonly velocity: [number, number, number];
+  readonly speed: number;
+  readonly grounded: boolean;
+  readonly crouched: boolean;
+  readonly sprinting: boolean;
+  readonly eyeHeight: number;
+  readonly yaw: number;
+  readonly pitch: number;
+  readonly respawns: number;
+  readonly groundDistance: number;
 }
 
 /** The `window.tls` commands used by the specs (see src/debug/installDebug.ts). */
@@ -30,6 +50,10 @@ export interface TlsApi {
   state(): unknown;
   stats(): { overlayVisible: boolean };
   giveAmmo(): unknown;
+  player(): PlayerSnapshot;
+  teleportPlayer(x: number, y: number, z: number, yaw?: number): unknown;
+  look(yaw: number, pitch?: number): unknown;
+  view(changes?: Partial<ViewSettings>): ViewSettings;
   loseContext(): unknown;
   restoreContext(): unknown;
   throwError(kind?: 'frame' | 'async' | 'rejection'): unknown;
@@ -88,9 +112,9 @@ export function isDev(testInfo: TestInfo): boolean {
   return testInfo.project.name === 'dev';
 }
 
-/** Opens the game and waits until it has drawn a few frames. */
-export async function openGame(page: Page): Promise<void> {
-  await page.goto('/');
+/** Opens the game (optionally with a query, e.g. `?quality=ultra`) and waits for a few frames. */
+export async function openGame(page: Page, query = ''): Promise<void> {
+  await page.goto(`/${query}`);
   await page.locator('canvas.game-canvas').waitFor();
   await frames(page, 10);
 }
@@ -158,9 +182,12 @@ export async function isPointerLocked(page: Page): Promise<boolean> {
 
 /**
  * Colour statistics of a screenshot, decoded inside the browser (no image library needed):
- * `colors` = distinct coarse colours, `red` = pixels of the red signal beacon.
+ * `colors` = distinct coarse colours, `red` = pixels of the red signal beacon, `redX` = their mean
+ * horizontal position (0 = left edge, 1 = right edge; NaN when there are none).
  */
-export async function pixelStats(page: Page): Promise<{ colors: number; red: number }> {
+export async function pixelStats(
+  page: Page,
+): Promise<{ colors: number; red: number; redX: number }> {
   const png = (await page.screenshot()).toString('base64');
   return page.evaluate(async (b64) => {
     const img = new Image();
@@ -177,6 +204,7 @@ export async function pixelStats(page: Page): Promise<{ colors: number; red: num
     const data = ctx.getImageData(0, 0, img.width, img.height).data;
     const colors = new Set<string>();
     let red = 0;
+    let redXSum = 0;
     for (let i = 0; i < data.length; i += 4 * 97) {
       const r = data[i] ?? 0;
       const g = data[i + 1] ?? 0;
@@ -184,13 +212,25 @@ export async function pixelStats(page: Page): Promise<{ colors: number; red: num
       colors.add(`${r >> 3},${g >> 3},${b >> 3}`);
       if (r > 120 && g < 90) {
         red++;
+        redXSum += ((i / 4) % img.width) / img.width;
       }
     }
-    return { colors: colors.size, red };
+    return { colors: colors.size, red, redX: red > 0 ? redXSum / red : Number.NaN };
   }, png);
 }
 
-/** Puts the dev build into a run (WAVE_START). */
+/** Holds `keys` down for `ms` of real time, then releases them. */
+export async function holdKeys(page: Page, keys: readonly string[], ms: number): Promise<void> {
+  for (const key of keys) {
+    await page.keyboard.down(key);
+  }
+  await page.waitForTimeout(ms);
+  for (const key of [...keys].reverse()) {
+    await page.keyboard.up(key);
+  }
+}
+
+/** Puts the dev build into a run (WAVE_START) without capturing the mouse. */
 export async function enterRun(page: Page): Promise<void> {
   await page.evaluate(() => {
     const { game } = window.tls!.inspect();

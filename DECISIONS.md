@@ -51,6 +51,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-035 | Engine config, debug tooling, error and context-loss handling | Accepted |
 | D-036 | End-to-end harness and Phase 0 verification conventions | Accepted |
 | D-037 | Performance targets, reference hardware and graphics quality scaling (resolves O-9) | Accepted |
+| D-038 | Phase 1 first-person foundation: movement model, collision, look, blockout, run entry | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open (O-9 resolved by D-037) |
 
 ---
@@ -674,6 +675,44 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 - ARCHITECTURE §8's budgets are now stated for the weak reference at Low, 1080p.
 - D-022's "at most 2 shadow casters" becomes a per-preset value.
 - TESTING.md §7 holds the measurement protocol and the results log.
+
+---
+
+## D-038 — Phase 1 first-person foundation: movement model, collision, look, blockout, run entry
+**Status:** Accepted · **Date:** 2026-09-25 · **Implements:** plan §8 (Phase 1), D-004, D-006, D-013, D-030, D-037 §8
+
+**Context.** Phase 1 needs a controller that "feels like a real FPS", collides reliably with a blockout map, and is identical at any refresh rate, without a physics engine.
+
+**Decision.**
+
+1. **Split of the player** (ARCHITECTURE §3.3): `Player` (fixed-step system), `PlayerMotor` (body and collision, the plan's `PlayerMovement`), `PlayerLook` (yaw/pitch), `PlayerController` (actions → intent), `CameraController` and `HeadBob` (presentation). The simulation never reads the camera.
+2. **Movement model** (values in `config/player.ts`, tuned for feel, logged in BALANCING.md from Phase 2):
+   - Walk 5 m/s; sprint 1.5× (forward only, not crouched); crouch 0.5×.
+   - Ground acceleration 50 m/s², braking 40 m/s²: full speed in 0.1–0.15 s, a stop in about 0.13 s. Responsive without being twitchy.
+   - Air control 12 m/s² toward the wished velocity; no input in the air keeps momentum.
+   - Jump to 1.15 m under 22 m/s² gravity (a snappier arc than 9.8 m/s², usual for FPS feel). Coyote time 0.1 s and jump buffer 0.12 s as forgiveness. Jump is an edge: holding Space never repeats.
+   - Capsule radius 0.35 m, height 1.8 m standing / 1.1 m crouched; eyes at 1.62 m / 0.95 m, eased between.
+3. **Collision** (ARCHITECTURE §7.6): per-contact resolution against the level octree (walkable contacts push straight up, others push along their normal and cancel the velocity into them), sub-steps of at most half the radius, a downward ground probe with a snap distance, exact gravity integration, headroom check before standing, and a kill plane that respawns the player.
+4. **Look.** Mouse look runs in a new `Game.addFrameSystem` hook before the fixed steps (completing D-004). Pitch is clamped to ±89°. FOV (60° vertical ≈ 90° horizontal at 16:9), sensitivity, invert-Y and head bob are `ENGINE_CONFIG.view` defaults, changeable at runtime through one `applyView` function (`tls.view()` in dev).
+5. **Blockout map** (`world/levels/facility.ts`): a 48 × 48 m compact facility with a yard, a roofed control room with three entrances, a crouch-only crawl duct (1.25 m), a service corridor, a generator hall, a raised catwalk (2.5 m) reached by stairs and a ramp with a drop gap in its railing, and a loading dock (0.9 m, a jump up or a ramp). Ramps and stairs are at most ~20°. Stairs collide as their ramp. It renders as 6 merged meshes; no art (D-030).
+6. **Run entry.** Clicking "Click to play" in `MAIN_MENU` captures the mouse and runs `LOADING → PLAYING` (loading is instant for now). The player simulates only while `isIn('PLAYING')` (in Phase 1 the run rests in `WAVE_START`, as waves are not implemented), and respawns on each new run. Losing the lock pauses as before.
+7. **Graphics preset at load.** `?quality=low|medium|high|ultra` picks the D-037 profile; default High. `Renderer` and `WorldView` read their values from it.
+8. **Config restructure.** `ENGINE_CONFIG.render` keeps only non-quality settings; GPU-quality values moved to `ENGINE_CONFIG.graphics.presets` (D-037); `camera` holds look/bob tuning; `view` holds player-facing view settings.
+
+**Why.**
+- Per-contact resolution is what makes floors, walls and ceilings behave differently when touched together (walking into a wall, crouching under a ledge), which `Octree.capsuleIntersect`'s single merged push cannot.
+- Pushing straight up on walkable ground removes the classic "slide down ramps while standing" artefact of a capsule controller.
+- Exact vertical integration and fixed steps make the jump apex and all movement independent of display refresh rate (tested at 30–240 Hz).
+
+**Alternatives.**
+- `Octree.capsuleIntersect` as in three.js's `games_fps`: simpler, but it blends normals and needs gravity every frame to detect the floor, which causes micro-bouncing and slope sliding. Rejected.
+- A physics engine (Rapier, cannon-es): unnecessary for a kinematic controller against static geometry (D-006).
+- A menu screen before the run: deferred to the UI phase; the prompt click is the smallest honest entry into `PLAYING`.
+
+**Consequences.**
+- `TestScene`/`TestSceneView` are replaced by `World` + `SignalBeacon` + `WorldView`. The beacon sits on the tower as the future signal objective's placeholder.
+- The default pixel-ratio cap is now 1.5 (High preset) rather than 2; `?quality=ultra` restores 2.
+- E2E and headless tests follow the same `FACILITY_ROUTE`, so any level edit that breaks traversal fails both.
 
 ---
 

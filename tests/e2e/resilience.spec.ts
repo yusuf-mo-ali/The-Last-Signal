@@ -86,12 +86,13 @@ test.describe('WebGL context loss', () => {
       await page.click('.lock-prompt');
       await frames(page, 4);
       const resumed = await page.evaluate(() => {
-        const { game, testScene, renderer } = window.tls!.inspect();
+        const { game, world, renderer } = window.tls!.inspect();
+        const beacon = world.beacon;
         return {
           state: game.state.current,
           programs: renderer.webgl.info.programs?.length ?? 0,
           invariant:
-            Math.abs(testScene.angle - testScene.steps * game.time.fixedDt * (Math.PI / 2)) < 1e-9,
+            Math.abs(beacon.angle - beacon.steps * game.time.fixedDt * (Math.PI / 2)) < 1e-9,
         };
       });
       expect(resumed.state).toBe('WAVE_START');

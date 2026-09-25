@@ -10,7 +10,9 @@
 
 ## Current Phase
 
-**Phase 0: Project Foundation. Complete** (steps 0.1–0.6). Every plan §7 acceptance criterion is met; see "Phase 0 acceptance review" below. Phase 1 (FPS controller) has not started and is awaiting approval.
+**Phase 1: First Person Foundation. Complete** (plan §8). The player can enter the blockout map and walk, strafe, sprint, crouch, jump and look around, colliding correctly with the level; see "Phase 1 acceptance review" below. Phase 2 (weapon framework) has not started and is awaiting approval.
+
+- Phase 0 (Project Foundation) is complete: see "Phase 0 acceptance review".
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -118,9 +120,26 @@
   - The reference is a performance floor, not a visual ceiling: quality presets (Low → Ultra) scale shadows, lighting, effects, post-processing, textures and resolution, with identical gameplay.
   - Documented in DECISIONS (D-037), ARCHITECTURE (§7.18, §8), TESTING (§6, §7 protocol and results log) and GAME_DESIGN (§17). No code changes.
 
+- [x] **Phase 1: First Person Foundation** (plan §8, D-038).
+  - **Blockout map** (`src/world/levels/`): level-as-data types; `geometry.ts` turns box / ramp / stairs brushes into outward-facing triangles (stairs render as steps, collide as a ramp); `facility.ts` is a compact 48 × 48 m facility: yard with the signal tower and obstacles of several heights, roofed control room with three entrances, a crouch-only crawl duct, service corridor, generator hall, west catwalk reached by stairs and a ramp (with a railing gap to drop through), loading dock with a ramp, parked trucks. `FACILITY_ROUTE` walks every area.
+  - **Collision** (`src/physics/CollisionWorld.ts`): one `Octree` of the level; per-triangle capsule contacts (floor, wall and ceiling told apart) and raycasts.
+  - **Player** (`src/player/`): `PlayerMotor` (acceleration/braking, limited air control, sprint, crouch with headroom check, jump with coyote time and buffer, exact gravity, sub-stepped collision, ground probe and snap, kill-plane respawn), `PlayerLook` (sensitivity, invert-Y, ±89° clamp), `PlayerController` (actions → intent), `Player` (fixed-step system, active only while playing), `HeadBob` and `CameraController` (presentation). Tuning in `src/config/player.ts`.
+  - **Engine:** `Game.addFrameSystem` (per-frame work before the fixed steps: mouse look). `ENGINE_CONFIG` restructured: `graphics` presets (D-037), `camera` look/bob tuning, `view` settings (FOV, sensitivity, invert-Y, head bob). `?quality=low|medium|high|ultra` at load.
+  - **World:** `World` (level + collision + `SignalBeacon`) and `WorldView` (6 merged meshes, fixed light rig, shadow size from the preset) replace `TestScene`/`TestSceneView`.
+  - **Flow:** "Click to play" captures the mouse and starts a run (`LOADING → PLAYING`); a new run respawns the player; lock loss pauses as before.
+  - **Debug (dev only):** `tls.player()`, `tls.teleportPlayer(x, y, z, yaw?)` (no longer a stub), `tls.look(yaw, pitch?)`, `tls.view({...})`; overlay shows position, speed, ground/air and walk/sprint/crouch.
+  - Verified:
+    - 105 new unit and integration tests (525 in the suite), including a headless walk of the whole map through the real loop and input stack, and identical movement at 30/60/75/144/240 Hz rendering.
+    - 9 of 9 planted movement bugs caught (TESTING.md §4).
+    - `npm run check` passes; `npm run build` has no warnings (game 44.4 kB, 15.1 kB gzipped); no debug code in `dist/`.
+    - `npm run test:e2e`: 49 passed, 15 skipped by design (dev-only checks in `prod`). New `player.spec` drives real keys and mouse: WASD, sprint, crouch, jump, mouse look and clamp, sensitivity, invert-Y, FOV, head bob, walls/desk/duct collision, and a walk of the whole map with real keys (dev); strafing and turning visibly move the view (dev and prod). No console errors, warnings or failed requests anywhere.
+    - Browser screenshots of spawn, control room, duct, catwalk, loading dock and generator hall inspected; blockout colours brightened after the first look (interiors were too dark to read).
+    - Performance baseline recorded (TESTING.md §7.4): player step 5–10 µs; 11 draw calls, ~1,100 triangles; our frame cost ~1 ms. Reference-machine FPS still needs the physical machine.
+  - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
+
 ## Active Task
 
-None. Phase 0 is complete; waiting for approval to start **Phase 1**.
+None. Phase 1 is complete; waiting for approval to start **Phase 2**.
 
 ## Known Bugs
 
@@ -128,37 +147,35 @@ None.
 
 ## Next Task
 
-**Phase 1: First Person Foundation (plan §8).** The first gameplay code. Suggested steps, each a small commit:
-1. **Prototype map (blockout)**: level-as-data (D-013), one compact facility layout (GAME_DESIGN §12.1) that generates render meshes, the collision octree and spawn points. Replaces the Phase 0 test scene.
-2. **Collision** (`physics/CollisionWorld`): `Octree` + `Capsule` (D-006). Ground detection, walls, steps and slopes, no falling through the map.
-3. **Player movement** (`player/`): walk, strafe, sprint, crouch (C) and jump on the fixed step, reading the step input reader and actions.
-4. **Camera** (`player/CameraController`): mouse look through the frame reader, with a pre-step hook in `Game` (D-034). Sensitivity, vertical clamp, FOV, subtle head bob.
-5. **Verify:** unit tests (movement and collision in headless Node), e2e walk-around, manual feel check. The acceptance bar is walking the whole prototype map comfortably, with responsive and predictable movement.
+**Phase 2: Weapon Framework (plan §9).** Suggested steps, each a small commit:
+1. **Weapon data and framework** (D-011): the `Weapon` interface and config for the Pistol (M1) from `src/config/weapons.ts`; fire modes, fire rate with fractional cooldown remainders (D-004), magazine and reload state machine, ammo. Start `BALANCING.md`.
+2. **Hitscan** against the level (`CollisionWorld.raycast`) with spread and a range; impact markers for debugging. Enemy hitbox rigs arrive with Phase 4 (D-007).
+3. **Recoil and view kick** applied through `PlayerLook` (so aim and camera stay one source of truth), plus sprint lowering the weapon and firing cancelling sprint (GAME_DESIGN §4.2).
+4. **Weapon view model** (blockout), fire/reload input via the step `ActionMap` (`fire`, `aim`, `reload`, `weapon1–3`, wheel).
+5. **Verify:** unit tests (fire timing at any frame rate, reload, ammo, spread determinism with `Rng`), headless integration, e2e firing with real mouse buttons; `giveAmmo` / `setInfiniteAmmo` debug commands.
 
-**Performance and graphics quality in Phase 1** (D-037, O-9 resolved):
-- **Target:** ~30 FPS average at 1080p, Low, on the weak reference machine (i5-4440 · 16 GB DDR3-1333 · GTX 750). ~60 FPS at High on capable hardware.
-- **Measure before optimising.** Phase 1 records the first baseline with the TESTING.md §7 protocol (prototype-map walk, 60 s).
-- **Minimal quality hooks only** (not the settings system):
-  - a `GraphicsQualityProfile` type and preset values for what Phase 1 renders (render scale, pixel-ratio cap, MSAA, shadow casters and size);
-  - a `?quality=low|medium|high|ultra` load-time override;
-  - rendering code reads these from the profile, never from constants.
-
-**Needed from you before or during Phase 1:**
-- Confirm whether the reference GTX 750 has 1 GB or 2 GB of VRAM. Budgets assume 1 GB until then.
-- Run the Phase 1 performance measurement on the reference machine; the container has no GPU.
-- A manual QA run of TESTING.md §6 in real browsers.
+**Needed from you:**
+- Approval to start Phase 2.
+- O-2 (in-run weapon acquisition) before the end of Phase 2; O-6 (melee binding) if melee is wanted in Phase 2.
+- Run the Phase 1 performance measurement on the reference machine (TESTING.md §7.2, Phase 1 scenario, `?quality=low`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
+- A manual QA pass of TESTING.md §6 in real browsers, especially the new "Movement and camera" section: feel can only be judged by hand.
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
 - **From 0.4:**
   - A `beforeunload` confirmation during a run (with the run lifecycle).
-  - Sensitivity and invert-Y *settings persistence* (settings phase).
+  - Settings persistence for sensitivity, invert-Y, FOV and head bob (settings phase; the runtime `applyView` path already exists).
   - Replacing `LockPrompt` with the pause menu (UI phase).
 - **From 0.5:**
   - Balance numbers in `src/config/` (each system's phase, logged in BALANCING.md).
   - Enemy counts and hitboxes in the overlay (Phases 4+).
   - The analytics interface (plan §30).
 - **From 0.6:** CI (a GitHub Actions workflow running check, build and e2e on each PR) is recommended but not yet added.
+- **From 1:**
+  - Gravity as a `Stat` (D-006) arrives with the modifier system (Phase 7: LOW GRAVITY).
+  - Level tags, spawn points, objective nodes, nav grid and light fixtures (D-013) arrive with the phases that use them.
+  - A graphics settings menu, persistence and auto-detection (D-037 §8).
+  - Small per-step allocations in the octree query and intent object (ARCHITECTURE §8): revisit only with profiling evidence.
 
 ## Blocked Tasks
 
@@ -169,7 +186,7 @@ Nothing is blocked now. These later tasks need decisions (full list in `DECISION
 | In-run weapon acquisition | O-2 | End of Phase 2 |
 | Melee action; Heavy Hands upgrade | O-6 (melee binding) | Phase 2 / Phase 9 |
 | Technician upgrade | O-6 (no utility/trap system defined) | Phase 9 |
-| Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU | Phase 1 baseline, then each phase |
+| Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU. The Phase 1 map and `?quality=low` are ready | Now (Phase 1 baseline), then each phase |
 | v1 zombie roster | O-3 | Phase 5 |
 | v1 mutation set; intro waves without mutations | O-4, O-7 | Phase 7 |
 | XP/Scrap sinks (meta-progression screen) | O-1 | Phase 9 |
@@ -211,7 +228,7 @@ Reviewed 2026-09-25 against the code on this branch.
 | Create folder architecture | Done, by design incrementally | Tree defined in ARCHITECTURE §6; 8 folders exist, the rest are created with their first file (D-036) |
 | Create Game bootstrap | Done | `core/Game.ts`, `main.ts` composition root |
 | Create rendering loop | Done | Fixed-step loop, `Game.test.ts`, `smoke.spec` |
-| Create scene / camera | Done | `world/TestSceneView.ts`, `render/camera.ts` |
+| Create scene / camera | Done | `world/TestSceneView.ts` (replaced by `WorldView` in Phase 1), `render/camera.ts` |
 | Create resize handling | Done | `render/Renderer.ts` + `viewport.ts`; `resize.spec` |
 | Create input manager | Done | `input/` (0.4); `input.spec` |
 | Create EventBus | Done (no consumers yet) | `core/EventBus.ts`, 25 tests; first consumers come with gameplay events |
@@ -230,11 +247,43 @@ Reviewed 2026-09-25 against the code on this branch.
 | Input system works | Yes, automated. Real-browser items pending manual QA | `input.spec`, `input/*.test.ts`; TESTING.md §5–6 |
 | Game state transitions are testable | Yes | `GameState.test.ts`, `Game.test.ts`, `stepInput.test.ts`, e2e via `tls` |
 
-**Open items that do not block Phase 1:**
+**Open items that did not block Phase 1:**
 - Manual QA in real browsers.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
-- O-9 is resolved (D-037). The first reference-machine measurement is due in Phase 1.
+- O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 1 acceptance review (plan §8)
+
+Reviewed 2026-09-25 against the code on this branch.
+
+| Plan §8 feature | Status | Evidence |
+|---|---|---|
+| Forward / backward / strafe | Done | `PlayerMotor.test.ts` (direction per key and yaw, acceleration, braking, diagonal); `player.spec` WASD with real keys |
+| Sprint | Done | 1.5×, forward only, not crouched; unit tests + `player.spec` |
+| Crouch | Done | 0.5× speed, lower capsule and eyes (eased), headroom check; duct is crouch-only; unit tests + `player.spec` |
+| Jump | Done | 1.15 m apex at any step size, coyote time, jump buffer, no repeat while held; unit tests + `player.spec` |
+| Mouse look | Done | Per render frame via `Game.addFrameSystem`; `PlayerLook.test.ts`; real mouse in `player.spec` |
+| Sensitivity | Done | `ENGINE_CONFIG.view.sensitivity`, runtime `tls.view`; tested 1× vs 2× |
+| Vertical clamp | Done | ±89°; unit + e2e |
+| FOV setting | Done | `ENGINE_CONFIG.view.fov` (60° vertical), runtime change tested |
+| Head movement / subtle bob | Done | `HeadBob`: 3 cm at walking speed, only while moving on the ground; unit + e2e |
+| Ground detection | Done | Downward probe with snap; ledges, ramps, stairs; unit tests |
+| Basic environment collision | Done | Per-contact capsule resolution; walls, obstacles, ceilings, slopes; unit + e2e |
+| No falling through the map | Done | Sub-steps (no tunnelling at 60 m/s or terminal fall), never below the floor in a 20 s random run, kill-plane respawn as a safety net; `respawns` stays 0 over the whole-map walks |
+
+| Acceptance criterion | Met | How it is verified |
+|---|---|---|
+| The player can walk around the complete prototype map comfortably | Yes, automated. Comfort needs a human | Headless walk of `FACILITY_ROUTE` through the real loop; the same route with real keys in the browser (`player.spec`); manual checklist TESTING.md §6 |
+| Movement is responsive and predictable | Yes, by measurement | Full speed in 0.1–0.15 s, stop in ~0.13 s, no drift, identical results at 30–240 Hz rendering |
+
+**Open items that do not block Phase 2:**
+- Manual feel check in real browsers and on real monitors (TESTING.md §6).
+- Reference-machine performance measurement (needs the physical machine).
+- The live Vercel preview is blocked by the container's network policy.
+- No CI yet.
 
 ---
 
@@ -242,7 +291,7 @@ Reviewed 2026-09-25 against the code on this branch.
 
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
-| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phase 0 complete |
+| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–1 complete |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | Not started |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
@@ -260,5 +309,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6) |
+| `TESTING.md` | Created (Phase 0.6), updated for Phase 1 |
 | `BALANCING.md` | Planned for Phase 2, when the first tunable values exist in `src/config/` |

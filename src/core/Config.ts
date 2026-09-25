@@ -17,25 +17,73 @@ export interface LoopConfig {
 }
 
 export interface RenderConfig {
-  /** Cap on the device pixel ratio (ARCHITECTURE.md §8). */
-  readonly maxPixelRatio: number;
-  /** Resolution multiplier (1 = native). */
-  readonly renderScale: number;
-  /** MSAA on the default framebuffer. */
-  readonly antialias: boolean;
-  /** Shadow map on (at most 2 shadow casters, D-022). */
-  readonly shadows: boolean;
   /** After a WebGL context loss, how long to wait for the browser to restore it before offering a reload. */
   readonly contextRestoreTimeoutMs: number;
 }
 
+/**
+ * GPU-heavy rendering parameters for one quality preset (D-037, ARCHITECTURE §7.18). Rendering code
+ * reads these from the active profile, never from constants. Phase 1 defines only the values it
+ * renders; later phases add lighting, particle, post-processing and texture fields.
+ */
+export interface GraphicsQualityProfile {
+  /** Resolution multiplier (1 = native). Applied live. */
+  readonly renderScale: number;
+  /** Cap on the device pixel ratio. Applied live. */
+  readonly maxPixelRatio: number;
+  /** MSAA on the default framebuffer. Needs a new WebGL context (applied at load). */
+  readonly antialias: boolean;
+  /** Real-time shadows. Applied at load (shader programs change). */
+  readonly shadows: {
+    readonly enabled: boolean;
+    /** Shadow map resolution per caster, in texels. */
+    readonly mapSize: number;
+    /** Most shadow-casting lights (D-022 budget, per preset). */
+    readonly maxCasters: number;
+  };
+}
+
+export const GRAPHICS_PRESET_IDS = ['low', 'medium', 'high', 'ultra'] as const;
+export type GraphicsPresetId = (typeof GRAPHICS_PRESET_IDS)[number];
+
+export interface GraphicsConfig {
+  /** Preset used when nothing else selects one (the settings system arrives later). */
+  readonly defaultPreset: GraphicsPresetId;
+  readonly presets: Readonly<Record<GraphicsPresetId, GraphicsQualityProfile>>;
+}
+
 export interface CameraConfig {
-  /** Vertical field of view in degrees (60° ≈ 90° horizontal at 16:9). */
-  readonly fov: number;
-  /** Near plane in metres. */
+  /** Near plane in metres; small so a weapon view model can sit close to the eye later. */
   readonly near: number;
   /** Far plane in metres. */
   readonly far: number;
+  /** Camera turn per CSS pixel of mouse motion at sensitivity 1, in radians. */
+  readonly radiansPerPixel: number;
+  /** Largest look angle above or below the horizon, in degrees (just short of vertical). */
+  readonly pitchLimitDeg: number;
+  /** Subtle view bob while moving on the ground (cosmetic, presentation only). */
+  readonly headBob: {
+    /** Vertical bob at walking speed, in metres (one bump per step). */
+    readonly verticalAmplitude: number;
+    /** Side-to-side sway at walking speed, in metres (one cycle per two steps). */
+    readonly lateralAmplitude: number;
+    /** Distance covered by one full cycle (two steps), in metres. */
+    readonly strideLength: number;
+    /** Largest amplitude multiplier (reached when sprinting). */
+    readonly maxIntensity: number;
+    /** How quickly the bob fades in and out, per second. */
+    readonly response: number;
+  };
+}
+
+/** Player-adjustable view settings and their defaults (persisted by the settings system later). */
+export interface ViewSettings {
+  /** Vertical field of view in degrees (60° ≈ 90° horizontal at 16:9). */
+  readonly fov: number;
+  /** Mouse sensitivity multiplier (1 = `camera.radiansPerPixel`). */
+  readonly sensitivity: number;
+  readonly invertY: boolean;
+  readonly headBob: boolean;
 }
 
 export interface InputConfig {
@@ -64,7 +112,9 @@ export interface ErrorConfig {
 export interface EngineConfig {
   readonly loop: LoopConfig;
   readonly render: RenderConfig;
+  readonly graphics: GraphicsConfig;
   readonly camera: CameraConfig;
+  readonly view: ViewSettings;
   readonly input: InputConfig;
   readonly debug: DebugConfig;
   readonly errors: ErrorConfig;
@@ -77,16 +127,56 @@ export const ENGINE_CONFIG: EngineConfig = deepFreeze({
     maxStepsPerFrame: 5,
   },
   render: {
-    maxPixelRatio: 2,
-    renderScale: 1,
-    antialias: true,
-    shadows: true,
     contextRestoreTimeoutMs: 10_000,
   },
+  graphics: {
+    // Starting points from D-037, to be set by measurement on the reference machines.
+    defaultPreset: 'high',
+    presets: {
+      low: {
+        renderScale: 1,
+        maxPixelRatio: 1,
+        antialias: false,
+        shadows: { enabled: true, mapSize: 1024, maxCasters: 1 },
+      },
+      medium: {
+        renderScale: 1,
+        maxPixelRatio: 1,
+        antialias: true,
+        shadows: { enabled: true, mapSize: 2048, maxCasters: 1 },
+      },
+      high: {
+        renderScale: 1,
+        maxPixelRatio: 1.5,
+        antialias: true,
+        shadows: { enabled: true, mapSize: 2048, maxCasters: 2 },
+      },
+      ultra: {
+        renderScale: 1,
+        maxPixelRatio: 2,
+        antialias: true,
+        shadows: { enabled: true, mapSize: 4096, maxCasters: 2 },
+      },
+    },
+  },
   camera: {
-    fov: 60,
     near: 0.05,
     far: 500,
+    radiansPerPixel: 0.0022,
+    pitchLimitDeg: 89,
+    headBob: {
+      verticalAmplitude: 0.03,
+      lateralAmplitude: 0.015,
+      strideLength: 4,
+      maxIntensity: 1.4,
+      response: 10,
+    },
+  },
+  view: {
+    fov: 60,
+    sensitivity: 1,
+    invertY: false,
+    headBob: true,
   },
   input: {
     maxMotionPerEvent: 1500,
@@ -112,4 +202,12 @@ export function deepFreeze<T>(value: T): T {
     }
   }
   return value;
+}
+
+/** Parses a preset id (e.g. from `?quality=`); anything unrecognised returns `null`. */
+export function parseGraphicsPreset(value: string | null | undefined): GraphicsPresetId | null {
+  const id = value?.trim().toLowerCase();
+  return (GRAPHICS_PRESET_IDS as readonly string[]).includes(id ?? '')
+    ? (id as GraphicsPresetId)
+    : null;
 }

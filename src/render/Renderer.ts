@@ -16,16 +16,21 @@
  */
 
 import { ACESFilmicToneMapping, WebGLRenderer, type PerspectiveCamera, type Scene } from 'three';
-import { ENGINE_CONFIG, type RenderConfig } from '../core/Config';
+import { ENGINE_CONFIG, type GraphicsQualityProfile, type RenderConfig } from '../core/Config';
 import { ContextLossMonitor } from './ContextLossMonitor';
 import { computeViewport, sameViewport, type Viewport } from './viewport';
 
-/** Overrides for `ENGINE_CONFIG.render` (defaults documented there). */
-export type RendererOptions = Partial<RenderConfig>;
+export interface RendererOptions extends Partial<RenderConfig> {
+  /** GPU quality profile (D-037). Default: the configured default preset. */
+  readonly quality?: GraphicsQualityProfile;
+}
 
 export class Renderer {
   readonly webgl: WebGLRenderer;
   readonly canvas: HTMLCanvasElement;
+
+  /** The quality profile this renderer was created with (D-037). */
+  readonly quality: GraphicsQualityProfile;
 
   private readonly container: HTMLElement;
   private readonly maxPixelRatio: number;
@@ -44,15 +49,17 @@ export class Renderer {
   constructor(container: HTMLElement, options: RendererOptions = {}) {
     this.container = container;
     const config = { ...ENGINE_CONFIG.render, ...options };
-    this.maxPixelRatio = config.maxPixelRatio;
-    this.renderScale = config.renderScale;
+    const graphics = ENGINE_CONFIG.graphics;
+    this.quality = options.quality ?? graphics.presets[graphics.defaultPreset];
+    this.maxPixelRatio = this.quality.maxPixelRatio;
+    this.renderScale = this.quality.renderScale;
 
     this.webgl = new WebGLRenderer({
-      antialias: config.antialias,
+      antialias: this.quality.antialias,
       powerPreference: 'high-performance',
     });
     this.webgl.toneMapping = ACESFilmicToneMapping;
-    this.webgl.shadowMap.enabled = config.shadows;
+    this.webgl.shadowMap.enabled = this.quality.shadows.enabled;
 
     this.canvas = this.webgl.domElement;
     this.canvas.classList.add('game-canvas');

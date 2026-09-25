@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BEACON_ANGULAR_SPEED, TestScene } from '../world/TestScene';
+import { BEACON_ANGULAR_SPEED, SignalBeacon } from '../world/SignalBeacon';
 import { FROZEN_STATES, Game, type FrameScheduler, type Presentation } from './Game';
 import { ALL_GAME_STATES, InvalidTransitionError } from './GameState';
 
@@ -46,7 +46,7 @@ const FRAME_60 = 1000 / 60;
 
 function startedGame() {
   const game = new Game({ strict: true });
-  const scene = new TestScene();
+  const scene = new SignalBeacon();
   game.addSystem(scene);
   const frames = new ManualFrames();
   game.start(frames);
@@ -116,7 +116,7 @@ describe('Game', () => {
       expect(slow.game.time.stepCount).toBe(60);
     });
 
-    it('advances the test scene exactly by its fixed steps', () => {
+    it('advances the beacon exactly by its fixed steps', () => {
       const { game, scene, frames } = startedGame();
       frames.run(31, FRAME_60);
       expect(scene.angle).toBeCloseTo(
@@ -138,7 +138,7 @@ describe('Game', () => {
   describe('presentation', () => {
     it('renders once per frame, after the fixed steps, with alpha in [0, 1) and the frame time', () => {
       const game = new Game();
-      const scene = new TestScene();
+      const scene = new SignalBeacon();
       game.addSystem(scene);
       const calls: { alpha: number; frameDt: number; stepsSoFar: number }[] = [];
       game.setPresentation({
@@ -162,7 +162,7 @@ describe('Game', () => {
 
     it('lets the view interpolate smoothly between fixed steps', () => {
       const game = new Game();
-      const scene = new TestScene();
+      const scene = new SignalBeacon();
       game.addSystem(scene);
       const drawn: number[] = [];
       game.setPresentation({ render: (alpha) => drawn.push(scene.interpolatedAngle(alpha)) });
@@ -255,6 +255,47 @@ describe('Game', () => {
         }
         expect(game.time.scale).toBe(1);
       }
+    });
+  });
+
+  describe('frame systems (per render frame, before the fixed steps)', () => {
+    it('run once per frame, before the fixed steps and the presentation', () => {
+      const game = new Game();
+      const order: string[] = [];
+      game.addFrameSystem({ frameUpdate: (dt) => order.push(`frame:${dt.toFixed(4)}`) });
+      game.addSystem({ fixedUpdate: () => order.push('step') });
+      game.setPresentation({ render: () => order.push('render') });
+
+      game.frame(2 / 60);
+
+      expect(order).toEqual([`frame:${(2 / 60).toFixed(4)}`, 'step', 'step', 'render']);
+    });
+
+    it('run on frames with no fixed step, and while time is frozen', () => {
+      const game = new Game({ strict: true });
+      const frameUpdate = vi.fn();
+      game.addFrameSystem({ frameUpdate });
+      game.frame(0.001); // less than a step owed
+      game.state.transition('MAIN_MENU');
+      enterRun(game);
+      game.state.pause();
+      game.frame(1 / 60);
+      expect(game.time.stepCount).toBe(0);
+      expect(frameUpdate).toHaveBeenCalledTimes(2);
+      expect(frameUpdate).toHaveBeenLastCalledWith(1 / 60);
+    });
+
+    it('run in registration order and can be removed', () => {
+      const game = new Game();
+      const order: string[] = [];
+      game.addFrameSystem({ frameUpdate: () => order.push('a') });
+      const removeB = game.addFrameSystem({ frameUpdate: () => order.push('b') });
+      game.frame(0);
+      removeB();
+      game.frame(0);
+      game.dispose();
+      game.frame(0);
+      expect(order).toEqual(['a', 'b', 'a']);
     });
   });
 

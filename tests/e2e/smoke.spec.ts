@@ -15,7 +15,7 @@ import {
   test,
 } from './helpers';
 
-test('boots to the test scene with WebGL 2 and no console problems', async ({ page, issues }) => {
+test('boots to the blockout map with WebGL 2 and no console problems', async ({ page, issues }) => {
   await openGame(page);
 
   const gl = await page.evaluate(() => {
@@ -51,7 +51,8 @@ test('fixed-step loop: steps + dropped time account for real time; pause freezes
   await openGame(page);
 
   const loop = await page.evaluate(async () => {
-    const { game, testScene } = window.tls!.inspect();
+    const { game, world } = window.tls!.inspect();
+    const beacon = world.beacon;
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const s0 = game.time.stepCount;
     const d0 = game.time.droppedTime;
@@ -64,8 +65,7 @@ test('fixed-step loop: steps + dropped time account for real time; pause freezes
       boot: game.state.current,
       error: Math.abs(steps * game.time.fixedDt + dropped - elapsed),
       interval: elapsed / Math.max(1, steps),
-      angleOk:
-        Math.abs(testScene.angle - testScene.steps * game.time.fixedDt * (Math.PI / 2)) < 1e-9,
+      angleOk: Math.abs(beacon.angle - beacon.steps * game.time.fixedDt * (Math.PI / 2)) < 1e-9,
     };
   });
   expect(loop.boot).toBe('MAIN_MENU');

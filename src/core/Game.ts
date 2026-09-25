@@ -23,6 +23,15 @@ export interface FixedUpdateSystem {
 }
 
 /**
+ * Anything updated once per render frame, *before* the fixed steps: e.g. mouse look, so the view
+ * turns every frame and the steps of this frame already move in the new direction.
+ * `frameDt` is real (unscaled) seconds since the previous frame; runs even while time is frozen.
+ */
+export interface FrameUpdateSystem {
+  frameUpdate(frameDt: number): void;
+}
+
+/**
  * Draws a frame. Called once per frame after the fixed steps have run.
  * `alpha` in [0, 1) is how far time has progressed toward the next fixed step, for interpolation.
  */
@@ -56,6 +65,7 @@ export class Game {
   readonly state: GameStateMachine;
 
   private systems: readonly FixedUpdateSystem[] = [];
+  private frameSystems: readonly FrameUpdateSystem[] = [];
   private presentation: Presentation | null = null;
   private probe: FrameProbe | null = null;
   private scheduler: FrameScheduler | null = null;
@@ -91,6 +101,14 @@ export class Game {
     this.systems = [system, ...this.systems];
     return () => {
       this.systems = this.systems.filter((s) => s !== system);
+    };
+  }
+
+  /** Registers a per-frame system (runs before the fixed steps), in registration order. */
+  addFrameSystem(system: FrameUpdateSystem): () => void {
+    this.frameSystems = [...this.frameSystems, system];
+    return () => {
+      this.frameSystems = this.frameSystems.filter((s) => s !== system);
     };
   }
 
@@ -131,12 +149,16 @@ export class Game {
   }
 
   /**
-   * Runs one frame: the fixed steps owed for `frameDt` seconds, then the presentation.
+   * Runs one frame: the per-frame systems, the fixed steps owed for `frameDt` seconds, then the
+   * presentation.
    * The loop calls this; headless tests may call it directly. Returns the fixed steps run.
    */
   frame(frameDt: number): number {
     const probe = this.probe;
     probe?.frameStart();
+    for (const system of this.frameSystems) {
+      system.frameUpdate(frameDt);
+    }
     const steps = this.time.advance(frameDt, this.fixedStep);
     this.presentation?.render(this.time.alpha, frameDt);
     probe?.frameEnd(steps, frameDt);
@@ -148,6 +170,7 @@ export class Game {
     this.stop();
     this.unsubscribeState();
     this.systems = [];
+    this.frameSystems = [];
     this.presentation = null;
     this.probe = null;
   }

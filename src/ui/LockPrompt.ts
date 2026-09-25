@@ -10,11 +10,14 @@ export type LockPromptMode = 'start' | 'paused' | 'refused' | 'hidden';
 const MESSAGES: Readonly<
   Record<Exclude<LockPromptMode, 'hidden'>, { title: string; hint: string }>
 > = {
-  start: { title: 'Click to play', hint: 'Mouse to look · Esc to release the mouse' },
+  start: {
+    title: 'Click to play',
+    hint: 'WASD move · Mouse look · Shift sprint · C crouch · Space jump · Esc pause',
+  },
   paused: { title: 'Paused', hint: 'Click to resume' },
   refused: {
     title: 'Mouse not captured',
-    hint: 'The browser refused to capture the mouse. Click again to resume.',
+    hint: 'The browser refused to capture the mouse. Click again to continue.',
   },
 };
 

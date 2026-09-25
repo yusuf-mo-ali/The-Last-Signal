@@ -152,18 +152,16 @@ test('losing the lock pauses; a refused re-lock says so; a later click resumes',
 }, testInfo) => {
   const dev = isDev(testInfo);
   await openGame(page);
-  if (dev) {
-    await enterRun(page);
-  }
-  await page.click('.lock-prompt');
+  await page.click('.lock-prompt'); // from the main menu: capture the mouse and start a run
   await frames(page, 4);
+  expect(await lockPrompt(page)).toEqual({ mode: 'hidden', hidden: true });
 
   // Headless Esc does not release the lock; exitPointerLock fires the same pointerlockchange.
   await page.evaluate(() => {
     document.exitPointerLock();
   });
   await frames(page, 4);
-  expect(await lockPrompt(page)).toEqual({ mode: dev ? 'paused' : 'start', hidden: false });
+  expect(await lockPrompt(page)).toEqual({ mode: 'paused', hidden: false });
   if (dev) {
     expect(
       await page.evaluate(() => {

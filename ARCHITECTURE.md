@@ -103,9 +103,11 @@ frame(now):
 ```text
 main.ts (composition root, browser)          core/Game.ts (simulation, no browser APIs)
   FrameScheduler = requestAnimationFrame ──►  start(scheduler) → tick(timestampMs)
-  Renderer (render/), TestSceneView           frame(frameDt):
-        ▲                                        time.advance(frameDt, systems.fixedUpdate)
-        └──────── Presentation.render ◄──────   presentation?.render(time.alpha, frameDt)
+  frame system: frameReader + mouse look ◄──   frame(frameDt):
+                                                 frameSystems.frameUpdate(frameDt)   (Phase 1)
+                                                 time.advance(frameDt, systems.fixedUpdate)
+  Renderer (render/), CameraController,  ◄──   presentation?.render(time.alpha, frameDt)
+  WorldView
 ```
 
 - **`Game` never calls browser APIs.** `main.ts` injects the frame source (`FrameScheduler`) and the drawing (`Presentation`). Tests inject a manual frame queue and no presentation, so the same loop runs headless in Node.
@@ -113,6 +115,7 @@ main.ts (composition root, browser)          core/Game.ts (simulation, no browse
 - **The time scale follows the state machine.** It is 0 in `PAUSED` and `UPGRADE_SELECTION` (`FROZEN_STATES`) and 1 everywhere else. Rendering continues while frozen.
 - **An exception inside a frame stops the loop and is rethrown,** rather than repeating every frame. The error screen arrives in Phase 0.5.
 - **The first start moves `BOOT → MAIN_MENU`** ("boot complete").
+- **Frame systems** (Phase 1, D-038). `Game.addFrameSystem()` registers work that runs once per render frame *before* the fixed steps, even while time is frozen. Mouse look uses it, so this frame's steps already move in the new direction.
 - **Optional instrumentation** (Phase 0.5, D-035). `Game.setFrameProbe()` wraps each whole frame for the debug overlay. With no probe, a frame pays one null check; production never sets one.
 
 ### 3.2 Input (Phase 0.4, D-034)
@@ -133,7 +136,29 @@ LockPrompt (ui/): click = user gesture ──► PointerLock.request() ──►
 - **Nothing clears shared input state.** Each consumer's reader answers "what happened between my last two samples". A press is therefore seen exactly once by the simulation and once by the frame, whatever the frame-to-step ratio.
 - **Mouse buttons, motion and wheel reach the game only while the pointer is locked.** Keys are read by physical `code`, and repeats are ignored.
 - **Resuming is always a click,** which re-acquires the lock inside a user gesture. Pausing is automatic.
-- **Mouse look is not implemented yet.** The player controller (Phase 1) will read `frameReader`'s mouse delta before the fixed steps, which needs a small pre-step hook in `Game`.
+- **Mouse look** (Phase 1). A frame system samples `frameReader` and turns `PlayerLook` by its mouse delta, only while the pointer is locked and a run is being played (not frozen).
+- **Movement** (Phase 1). `PlayerController` reads the step reader's `ActionMap` (`isDown` for movement, sprint and crouch; `wasPressed` for jump), so no gameplay code sees a key code.
+
+### 3.3 Player (Phase 1, D-038)
+
+```text
+             every render frame                     every fixed step (60 Hz), only while isIn('PLAYING')
+frameReader ──► PlayerLook (yaw, pitch) ──┐        stepReader ──► ActionMap ──► PlayerController ──► MoveIntent
+                                          │                                                          │
+                                          └──── yaw ────► PlayerMotor.step(intent, yaw, dt) ◄────────┘
+                                                            capsule vs CollisionWorld (octree of the level)
+                                                            position / previousPosition, eyeHeight, grounded …
+presentation, every frame:
+  CameraController.update(alpha, simDt): eye = lerp(previous, current, alpha) + eyeHeight + HeadBob
+                                         rotation = (pitch, yaw, 0) in 'YXZ' order, straight from PlayerLook
+```
+
+- **`Player`** (`player/Player.ts`) is the fixed-step system. It owns the motor and the look, and is told from outside where its intent comes from and when it is active. On entering `PLAYING` (a new run, not a resume) it respawns at the level's spawn.
+- **`PlayerMotor`** is the body: velocity, crouch, jump, gravity, collision, ground state. Pure simulation, testable in Node against any `CollisionWorld`.
+- **`PlayerLook`** holds yaw and pitch. Sensitivity × `camera.radiansPerPixel`, optional invert-Y, pitch clamped to ±89°, yaw wrapped to [−π, π).
+- **`CameraController`** (presentation, the named exception in `player/`) is the only code that moves the camera. Position is interpolated between steps; orientation is not, because look already updates per frame. The simulation never reads the camera.
+- **`HeadBob`** is cosmetic: an offset driven by distance walked, eased in and out, zero when still, airborne, paused or disabled. It never moves the capsule or the aim.
+- **View settings** (`ENGINE_CONFIG.view`: FOV, sensitivity, invert-Y, head bob) are applied through one function in `main.ts`; the settings menu (later phase) will call the same function. Development builds expose it as `tls.view({...})`.
 
 ---
 
@@ -241,6 +266,7 @@ src/
 │ + navigation/                 NavGrid, FlowField, climb links
 │ + modifiers/                  Stat, StatBlock, modifier stacks, TriggerRegistry
 ├── player/                     Player, PlayerController, CameraController, PlayerHealth, PlayerMovement
+│                               (Phase 1: PlayerMotor is the plan's PlayerMovement; + PlayerLook, HeadBob)
 ├── weapons/                    Weapon, WeaponManager, hitscan/, projectile/, recoil/, ammo/, + melee/
 ├── enemies/                    Enemy, EnemyManager, EnemySpawner, zombie/, ai/, damage/, + modifiers/
 ├── waves/                      WaveManager, WaveGenerator, WaveDifficulty, WaveMutation
@@ -248,7 +274,7 @@ src/
 ├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild
 ├── signal/                     SignalSystem, SignalMutationSystem, SignalProgression
 ├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager,
-│                               + TestScene / TestSceneView (Phase 0 test scene; replaced by the World in Phase 1)
+│                               + WorldView, SignalBeacon (Phase 1); levels/: types, geometry, facility (blockout)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
 ├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen, + LockPrompt (Phase 0.4, temporary),
 │                               + StatusScreen (WebGL2 missing, fatal error, context lost / not recovered),
@@ -335,6 +361,15 @@ One mechanism handles upgrades, mutations, difficulty scaling, enemy modifiers a
 
 - **No physics engine.** The player is a kinematic capsule colliding with the static level through the `three` addons `Octree` and `Capsule`. This is the approach of three.js's official `games_fps` example and adds no dependency.
 - **Movement physics:** ground detection, steps and slopes, and gravity. Gravity is a `Stat`, so LOW GRAVITY is just a modifier.
+- **Phase 1 implementation** (`physics/CollisionWorld.ts`, `player/PlayerMotor.ts`, D-038):
+  - `CollisionWorld` builds one `Octree` from the level's collision triangles and answers `capsuleContacts(capsule)` (every overlapping triangle with its own normal and depth, deepest first) and `raycast`. `Octree.capsuleIntersect` is not used for the player: it merges all contacts into one push, which cannot tell a floor from a wall when both are touched.
+  - Level faces are **one-sided** (the octree ignores a capsule behind a face), so the level generator orients every triangle outward.
+  - Each step moves in **sub-steps of at most half the capsule radius**, so nothing tunnels, then resolves the deepest overlap repeatedly (up to 6 passes).
+  - **Walkable** contacts (normal·up ≥ 0.65, about 49°) push the capsule straight up by `depth / n.y`: no sliding on ramps, and edges lower than ~12 cm are stepped over. Other contacts push along their normal and remove the velocity into the surface (wall sliding); a ceiling also stops upward velocity.
+  - **Ground** is a short downward probe after the move (3 cm), or a 35 cm "snap" while the player was already grounded and not jumping, so they stick to ramps and stairs instead of skipping down them.
+  - Gravity is integrated with the step's average vertical velocity (exact for constant gravity), so the jump apex matches `jumpHeight` at any step size.
+  - Crouching shortens the capsule from the top; standing up first checks a full-height capsule for headroom.
+  - Below the level's `killPlaneY` the player respawns (a safety net: the blockout is closed, so it should never trigger).
 - **World raycasts** (bullet impacts, line of sight) use the same octree.
 - **Upgrade path:** `three-mesh-bvh`, only if profiling shows octree queries are a bottleneck.
 
@@ -349,6 +384,12 @@ One mechanism handles upgrades, mutations, difficulty scaling, enemy modifiers a
   - the collision octree and the nav grid
   - spawn tables and the light rig
 - **Art can later replace the visual meshes** while collision and navigation keep using the authored primitives.
+- **Phase 1 implementation** (`world/levels/`, D-038):
+  - `types.ts`: `LevelDefinition` (name, spawn, kill plane, brushes). Brushes are `box`, `ramp` (a solid wedge rising toward ±x/±z) and `stairs`, each with a surface kind used only for colour.
+  - `geometry.ts`: brushes → outward-facing triangles. **Stairs render as steps but collide as their ramp**, so the capsule glides up them.
+  - `facility.ts`: the prototype map (the file header has an ASCII layout), its spawn, the beacon position, and `FACILITY_ROUTE`, a walk through every area that the headless and browser tests both follow.
+  - `World` (sim) builds the `CollisionWorld`; `WorldView` (presentation) merges the render triangles into one mesh per surface kind (6 meshes, ~1,100 triangles, flat shading).
+  - Tags, spawn points, objective nodes, lights and nav data arrive with the phases that use them.
 
 ### 7.8 Waves (D-024, D-026)
 
@@ -470,9 +511,10 @@ Renderer · lighting rig · VFX pools · post-processing · texture loader ─ r
   - **Live:** render scale, pixel ratio, particle density, LOD.
   - **On load:** anything that recompiles shaders (shadow casters, light budget, post chain), re-uploads textures, or needs a new WebGL context (MSAA). These apply from the settings menu or during `LOADING`, never mid-fight.
 - **Effects are tagged *gameplay-critical* (always rendered) or *cosmetic* (scaled).**
-- **Phase 1 implements only what it uses:**
-  - the profile type and preset values for render scale, pixel ratio, MSAA and shadows;
-  - a load-time override, so the reference machine can be measured at Low.
+- **Phase 1 implements only what it uses** (done):
+  - the profile type and preset values for render scale, pixel ratio, MSAA and shadows (`ENGINE_CONFIG.graphics`);
+  - `Renderer` takes its pixel-ratio cap, render scale, MSAA and shadow switch from the profile, and `WorldView` its shadow map size;
+  - a load-time override, `?quality=low|medium|high|ultra` (default High), so the reference machine can be measured at Low.
   The settings UI, persistence and auto-detection arrive with the settings phase.
 
 ---
@@ -497,6 +539,12 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 | Per-frame allocations | ~0 in hot paths (preallocated temporaries, pools) |
 | Device pixel ratio | capped per preset (Low 1 … Ultra 2); render-scale setting |
 | AI decisions | 5–10 Hz, staggered; animation LOD for distant/off-screen enemies |
+
+**Phase 1 baseline** (Claude Code container, not the reference machine; TESTING.md §7.4):
+- player step 5–10 µs (≈0.06 % of a 60 Hz frame);
+- blockout: 11 draw calls, ~1,100 triangles, 4 shader programs;
+- our CPU cost per frame ~1 ms (p95 ≤ 2.6 ms) while sprinting around the map.
+- Known small per-step garbage: the octree query and the movement intent allocate a few short-lived objects per step (`Octree.triangleCapsuleIntersect` returns new vectors). Negligible now; revisit only if profiling with enemies shows GC pauses.
 
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);
