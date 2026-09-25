@@ -113,6 +113,7 @@ main.ts (composition root, browser)          core/Game.ts (simulation, no browse
 - **The time scale follows the state machine.** It is 0 in `PAUSED` and `UPGRADE_SELECTION` (`FROZEN_STATES`) and 1 everywhere else. Rendering continues while frozen.
 - **An exception inside a frame stops the loop and is rethrown,** rather than repeating every frame. The error screen arrives in Phase 0.5.
 - **The first start moves `BOOT → MAIN_MENU`** ("boot complete").
+- **Optional instrumentation** (Phase 0.5, D-035). `Game.setFrameProbe()` wraps each whole frame for the debug overlay. With no probe, a frame pays one null check; production never sets one.
 
 ### 3.2 Input (Phase 0.4, D-034)
 
@@ -222,15 +223,18 @@ src/
 │   ├── GameState.ts            state ids, transition table, hierarchical FSM
 │   ├── EventBus.ts             typed pub/sub
 │   ├── Time.ts                 fixed-step clock, time scale, state-scoped timers
-│   ├── Config.ts               engine/app config (loop, render, debug) — NOT balance data
+│   ├── Config.ts               ENGINE_CONFIG: loop, render, camera, input, debug, errors — deep-frozen;
+│                               the only source of engine defaults (D-035). NOT balance data
 │ + ├── RunSession.ts           disposable per-run container
-│ + └── ErrorHandler.ts         global errors, WebGL context loss, fatal screen
-│ + config/                     ALL tunable gameplay data (plan §31)
+│ + └── ErrorHandler.ts         uncaught errors / rejections → fatal report (event target injected)
+│ + config/                     ALL tunable gameplay data (plan §31). Phase 0.5 skeletons: schemas, ids and
+│   │                           values the plan/design already fix; balance numbers arrive with each system
 │   ├── weapons.ts  enemies.ts  waves.ts  mutations.ts  upgrades.ts  bosses.ts
-│   └── + adaptation.ts  economy.ts  signal.ts  input.ts (default bindings)
+│   └── + adaptation.ts  economy.ts  signal.ts  effects.ts (D-009 vocabulary)  input.ts (bindings)
 │ + input/                      InputState + InputReader, ActionMap, BrowserInput (DOM adapter),
 │                               PointerLock, autoPause, stepInput
-│ + render/                     Renderer (WebGL2, resize + DPR cap), viewport math, camera defaults;
+│ + render/                     Renderer (WebGL2, resize + DPR cap), viewport math, camera, webglSupport
+│                               (WebGL2 probe), ContextLossMonitor (loss / restore / timeout);
 │                               post-processing later
 │ + assets/                     AssetManager, asset manifest, placeholder fallbacks
 │ + physics/                    CollisionWorld (Octree + Capsule), SpatialHash, ray queries
@@ -247,11 +251,13 @@ src/
 │                               + TestScene / TestSceneView (Phase 0 test scene; replaced by the World in Phase 1)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
 ├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen, + LockPrompt (Phase 0.4, temporary),
+│                               + StatusScreen (WebGL2 missing, fatal error, context lost / not recovered),
 │                               + UIManager, SettingsMenu, LoadingScreen, VictoryScreen, styles/
 ├── audio/                      AudioManager, MusicManager, SoundLibrary
 ├── effects/                    VFXManager, HitEffects, MuzzleFlash, ScreenEffects (visual only)
 ├── save/                       SaveManager, SettingsManager, + migrations/
-│ + debug/                      DEV-only: commands (§29), overlay, FPS counter, hitbox visualiser
+│ + debug/                      DEV-only, dynamically imported: installDebug (window.tls), DebugCommands,
+│                               FrameStats (probe), DebugOverlay, debug.css; hitbox visualiser later
 │ + analytics/                  Analytics interface, NullProvider, ConsoleProvider
 │ + utils/                      Pool, Rng (seeded), math helpers, assert
 tests/
@@ -407,14 +413,24 @@ Three sources change the world. They are layered rather than competing:
 
 ### 7.16 Debug and analytics (D-020)
 
-- **`debug/` is dynamically imported behind `import.meta.env.DEV`,** so it is excluded from production bundles.
-- **It exposes the plan §29 commands on `window.tls`** plus an overlay showing FPS, frame time, draw calls, alive enemies, current state and hitboxes.
+- **`debug/` is dynamically imported behind `import.meta.env.DEV`,** so it is excluded from production bundles (Phase 0.5, verified: no debug chunk, code or CSS in `dist/`).
+- **`window.tls` is a structured command interface.** `tls.help()` lists every command.
+  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`.
+  - The plan §29 commands are registered as stubs that name the phase implementing them.
+- **The overlay** shows FPS, frame interval, our per-frame cost (avg/p95/max), steps per frame, dropped time, draw calls, triangles, programs, viewport, context status, game state and pointer-lock state. It is toggled with Backquote or `tls.overlay()`. While it is hidden, the frame probe is detached. Enemy counts and hitboxes are added when those systems exist.
 - **`analytics/`** provides an `Analytics.track(event, props)` interface. Production uses the `NullProvider` until a provider is chosen; dev uses `ConsoleProvider`. Event names come from plan §30, and no personal data is collected.
 
 ### 7.17 Error handling and browser hardening (D-017)
 
-- **Global errors:** `window.onerror` and `unhandledrejection` go to `ErrorHandler`. Dev builds show an overlay; production pauses and shows a friendly screen with a restart button.
-- **WebGL:** if WebGL2 is unavailable, show a clear message instead of crashing (a plain message since Phase 0.3; the full error screen comes in 0.5). Handle `webglcontextlost` and `webglcontextrestored` (Phase 0.5).
+- **Global errors (Phase 0.5, D-035):** uncaught `error` and `unhandledrejection` events go to `core/ErrorHandler`. The first one is fatal:
+  - the loop stops and the pointer is released;
+  - `ui/StatusScreen` shows a player-safe message and a Reload button, plus the stack in dev builds only.
+  - The browser's default logging is left in place, so nothing is swallowed. Errors caught elsewhere but still fatal go through `report()`, which logs them.
+- **WebGL2:**
+  - `render/webglSupport` probes for WebGL2. If it is missing, or the real renderer cannot be created, a recovery screen lists concrete steps and a "Try again" button.
+  - `render/ContextLossMonitor` handles `webglcontextlost` (with `preventDefault`, so the browser may restore it) and `webglcontextrestored`.
+  - While the context is lost, nothing is drawn, the simulation keeps its state, a run is paused and the cursor released, and a "Graphics paused" notice is shown.
+  - On restore, the drawing buffer is re-applied, shaders are pre-warmed and the notice is hidden; the player resumes with a click. After 10 s without a restore, a reload is offered.
 - **Pointer lock:**
   - Pausing is driven by `pointerlockchange` (lock lost), not the Esc keydown. The browser consumes that Esc keypress to release the lock.
   - Re-locking needs a user gesture and can be rejected; Chromium refuses requests made shortly after the user presses Esc. The pause UI therefore shows "Click to resume" and handles rejection.

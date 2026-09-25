@@ -110,7 +110,14 @@ export class TestSceneView implements Presentation {
     this.scene.add(this.beacon);
     this.syncBeacon(0);
 
-    // Compile every shader now rather than on the first visible frame (D-022).
+    this.prewarm();
+  }
+
+  /**
+   * Compiles every shader now rather than on the first visible frame (D-022). Called again after
+   * a WebGL context restore, when all GPU programs have to be rebuilt.
+   */
+  prewarm(): void {
     this.renderer.webgl.compile(this.scene, this.camera);
   }
 

@@ -9,18 +9,16 @@
  * The clock is pure: it never reads the wall clock, so tests drive it with exact frame times.
  */
 
+import { ENGINE_CONFIG } from './Config';
+
 export interface TimeOptions {
-  /** Simulation step in seconds. Default 1/60. */
+  /** Simulation step in seconds. Default: `ENGINE_CONFIG.loop` (1/60). */
   readonly fixedDt?: number;
-  /** Largest frame time accepted, in seconds. Default 0.25. */
+  /** Largest frame time accepted, in seconds. Default: `ENGINE_CONFIG.loop` (0.25). */
   readonly maxFrameDt?: number;
-  /** Most fixed steps run in one frame. Default 5. */
+  /** Most fixed steps run in one frame. Default: `ENGINE_CONFIG.loop` (5). */
   readonly maxStepsPerFrame?: number;
 }
-
-export const DEFAULT_FIXED_DT = 1 / 60;
-export const DEFAULT_MAX_FRAME_DT = 0.25;
-export const DEFAULT_MAX_STEPS_PER_FRAME = 5;
 
 /** Absorbs floating-point error so e.g. two frames of 1/120 s owe exactly one step of 1/60 s. */
 const EPSILON = 1e-9;
@@ -40,9 +38,10 @@ export class Time {
   private dropped = 0;
 
   constructor(options: TimeOptions = {}) {
-    this.fixedDt = options.fixedDt ?? DEFAULT_FIXED_DT;
-    this.maxFrameDt = options.maxFrameDt ?? DEFAULT_MAX_FRAME_DT;
-    this.maxStepsPerFrame = options.maxStepsPerFrame ?? DEFAULT_MAX_STEPS_PER_FRAME;
+    const defaults = ENGINE_CONFIG.loop;
+    this.fixedDt = options.fixedDt ?? defaults.fixedDt;
+    this.maxFrameDt = options.maxFrameDt ?? defaults.maxFrameDt;
+    this.maxStepsPerFrame = options.maxStepsPerFrame ?? defaults.maxStepsPerFrame;
 
     if (!isPositiveFinite(this.fixedDt)) {
       throw new RangeError('fixedDt must be a positive finite number');

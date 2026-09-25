@@ -30,6 +30,15 @@ export interface Presentation {
   render(alpha: number, frameDt: number): void;
 }
 
+/**
+ * Optional instrumentation around each frame (debug tools only, D-035). When no probe is set, a
+ * frame pays a single null check.
+ */
+export interface FrameProbe {
+  frameStart(): void;
+  frameEnd(steps: number, frameDt: number): void;
+}
+
 export interface GameOptions {
   readonly time?: TimeOptions;
   /** Throw on illegal state transitions (dev builds and tests). */
@@ -48,6 +57,7 @@ export class Game {
 
   private systems: readonly FixedUpdateSystem[] = [];
   private presentation: Presentation | null = null;
+  private probe: FrameProbe | null = null;
   private scheduler: FrameScheduler | null = null;
   private frameHandle: number | null = null;
   private lastTimestampMs: number | null = null;
@@ -82,6 +92,11 @@ export class Game {
     return () => {
       this.systems = this.systems.filter((s) => s !== system);
     };
+  }
+
+  /** Sets (or, with `null`, removes) the frame instrumentation. */
+  setFrameProbe(probe: FrameProbe | null): void {
+    this.probe = probe;
   }
 
   /** Sets (or, with `null`, removes) the presentation drawn each frame. */
@@ -120,8 +135,11 @@ export class Game {
    * The loop calls this; headless tests may call it directly. Returns the fixed steps run.
    */
   frame(frameDt: number): number {
+    const probe = this.probe;
+    probe?.frameStart();
     const steps = this.time.advance(frameDt, this.fixedStep);
     this.presentation?.render(this.time.alpha, frameDt);
+    probe?.frameEnd(steps, frameDt);
     return steps;
   }
 
@@ -131,6 +149,7 @@ export class Game {
     this.unsubscribeState();
     this.systems = [];
     this.presentation = null;
+    this.probe = null;
   }
 
   // Arrow properties: stable callbacks for Time.advance and the scheduler, no per-frame binding.

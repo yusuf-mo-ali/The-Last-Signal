@@ -9,41 +9,19 @@
  * Changes only mark the renderer dirty; the new size is applied once, at the start of the next
  * `render`, so a burst of resize events never resizes the GPU buffers more than once per frame.
  * A collapsed or hidden container (0 × 0) skips rendering instead of producing WebGL errors.
+ *
+ * WebGL context loss (D-035): while the context is lost, `render` draws nothing and returns false;
+ * the simulation keeps its state. On restoration the drawing buffer is re-applied and listeners are
+ * told, so views can re-compile their shaders.
  */
 
 import { ACESFilmicToneMapping, WebGLRenderer, type PerspectiveCamera, type Scene } from 'three';
+import { ENGINE_CONFIG, type RenderConfig } from '../core/Config';
+import { ContextLossMonitor } from './ContextLossMonitor';
 import { computeViewport, sameViewport, type Viewport } from './viewport';
 
-export interface RendererOptions {
-  /** Cap on the device pixel ratio (ARCHITECTURE.md §8). Default 2. */
-  readonly maxPixelRatio?: number;
-  /** Resolution multiplier (1 = native). Default 1. A settings option later. */
-  readonly renderScale?: number;
-  /** MSAA on the default framebuffer. Default true. */
-  readonly antialias?: boolean;
-  /** Enable the shadow map (at most 2 shadow casters, D-022). Default true. */
-  readonly shadows?: boolean;
-}
-
-export const RENDERER_DEFAULTS = {
-  maxPixelRatio: 2,
-  renderScale: 1,
-  antialias: true,
-  shadows: true,
-} as const satisfies Required<RendererOptions>;
-
-/** True if the browser can create a WebGL2 context (three.js requires WebGL2). */
-export function isWebGL2Available(): boolean {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2');
-    // Release the probe context immediately; browsers limit live contexts per page.
-    gl?.getExtension('WEBGL_lose_context')?.loseContext();
-    return gl !== null;
-  } catch {
-    return false;
-  }
-}
+/** Overrides for `ENGINE_CONFIG.render` (defaults documented there). */
+export type RendererOptions = Partial<RenderConfig>;
 
 export class Renderer {
   readonly webgl: WebGLRenderer;
@@ -54,26 +32,42 @@ export class Renderer {
   private renderScale: number;
   private current: Viewport;
   private dirty = true;
+  private forceResize = false;
   private resizeCount = 0;
+
+  /** WebGL context loss and restoration on the canvas. */
+  readonly context: ContextLossMonitor;
 
   private readonly resizeObserver: ResizeObserver;
   private pixelRatioQuery: MediaQueryList | null = null;
 
   constructor(container: HTMLElement, options: RendererOptions = {}) {
     this.container = container;
-    this.maxPixelRatio = options.maxPixelRatio ?? RENDERER_DEFAULTS.maxPixelRatio;
-    this.renderScale = options.renderScale ?? RENDERER_DEFAULTS.renderScale;
+    const config = { ...ENGINE_CONFIG.render, ...options };
+    this.maxPixelRatio = config.maxPixelRatio;
+    this.renderScale = config.renderScale;
 
     this.webgl = new WebGLRenderer({
-      antialias: options.antialias ?? RENDERER_DEFAULTS.antialias,
+      antialias: config.antialias,
       powerPreference: 'high-performance',
     });
     this.webgl.toneMapping = ACESFilmicToneMapping;
-    this.webgl.shadowMap.enabled = options.shadows ?? RENDERER_DEFAULTS.shadows;
+    this.webgl.shadowMap.enabled = config.shadows;
 
     this.canvas = this.webgl.domElement;
     this.canvas.classList.add('game-canvas');
     container.appendChild(this.canvas);
+
+    this.context = new ContextLossMonitor(this.canvas, {
+      restoreTimeoutMs: config.contextRestoreTimeoutMs,
+    });
+    this.context.onChange((event) => {
+      if (event.type === 'restored') {
+        // The new context has default state: re-apply the drawing buffer size and pixel ratio.
+        this.forceResize = true;
+        this.dirty = true;
+      }
+    });
 
     this.current = this.measure();
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -98,9 +92,13 @@ export class Renderer {
 
   /**
    * Draws `scene` from `camera`, first applying any pending resize and syncing the camera's
-   * aspect ratio. Returns false (and draws nothing) while the container has no area.
+   * aspect ratio. Returns false (and draws nothing) while the container has no area or the WebGL
+   * context is lost.
    */
   render(scene: Scene, camera: PerspectiveCamera): boolean {
+    if (this.context.lost) {
+      return false;
+    }
     if (this.dirty) {
       this.applySize();
     }
@@ -116,6 +114,7 @@ export class Renderer {
   }
 
   dispose(): void {
+    this.context.dispose();
     this.resizeObserver.disconnect();
     this.pixelRatioQuery?.removeEventListener('change', this.onPixelRatioChange);
     this.pixelRatioQuery = null;
@@ -152,7 +151,9 @@ export class Renderer {
   private applySize(): void {
     this.dirty = false;
     const next = this.measure();
-    if (this.resizeCount > 0 && sameViewport(next, this.current)) {
+    const force = this.forceResize;
+    this.forceResize = false;
+    if (!force && this.resizeCount > 0 && sameViewport(next, this.current)) {
       return;
     }
     this.current = next;

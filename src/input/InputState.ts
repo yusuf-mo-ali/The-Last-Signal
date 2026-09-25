@@ -14,10 +14,12 @@
  * fixed step; a hitch may run five).
  */
 
+import { ENGINE_CONFIG } from '../core/Config';
+
 export interface InputStateOptions {
   /**
    * A single mouse-move event larger than this (in either axis, CSS pixels) is discarded as a
-   * browser glitch rather than turning the camera (D-017). Default 1500.
+   * browser glitch rather than turning the camera (D-017). Default: `ENGINE_CONFIG.input`.
    */
   readonly maxMotionPerEvent?: number;
 }
@@ -32,7 +34,6 @@ const WHEEL_UNITS_PER_STEP: Readonly<Record<number, number>> = {
   [WheelDeltaMode.PAGE]: 1,
 };
 
-const DEFAULT_MAX_MOTION_PER_EVENT = 1500;
 const WHEEL_EPSILON = 1e-9;
 
 /** Continuous quantities, as running totals. */
@@ -86,7 +87,7 @@ export class InputState {
   private readonly maxMotionPerEvent: number;
 
   constructor(options: InputStateOptions = {}) {
-    this.maxMotionPerEvent = options.maxMotionPerEvent ?? DEFAULT_MAX_MOTION_PER_EVENT;
+    this.maxMotionPerEvent = options.maxMotionPerEvent ?? ENGINE_CONFIG.input.maxMotionPerEvent;
   }
 
   // ---- raw events --------------------------------------------------------------------------

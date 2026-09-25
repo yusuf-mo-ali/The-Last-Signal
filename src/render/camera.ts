@@ -4,27 +4,16 @@
  */
 
 import { PerspectiveCamera } from 'three';
+import { ENGINE_CONFIG, type CameraConfig } from '../core/Config';
 
-export interface CameraOptions {
-  /** Vertical field of view in degrees. 60° is about 90° horizontal at 16:9. */
-  readonly fov?: number;
-  /** Near plane in metres; small so a weapon view model can sit close to the eye later. */
-  readonly near?: number;
-  /** Far plane in metres; the facility is about 60 × 60 m (GAME_DESIGN §12.1). */
-  readonly far?: number;
-}
-
-export const CAMERA_DEFAULTS = {
-  fov: 60,
-  near: 0.05,
-  far: 500,
-} as const satisfies Required<CameraOptions>;
+/** Overrides for `ENGINE_CONFIG.camera` (defaults documented there). */
+export type CameraOptions = Partial<CameraConfig>;
 
 export function createCamera(options: CameraOptions = {}): PerspectiveCamera {
   return new PerspectiveCamera(
-    options.fov ?? CAMERA_DEFAULTS.fov,
+    options.fov ?? ENGINE_CONFIG.camera.fov,
     1, // aspect: set by the Renderer from the real viewport before the first frame
-    options.near ?? CAMERA_DEFAULTS.near,
-    options.far ?? CAMERA_DEFAULTS.far,
+    options.near ?? ENGINE_CONFIG.camera.near,
+    options.far ?? ENGINE_CONFIG.camera.far,
   );
 }

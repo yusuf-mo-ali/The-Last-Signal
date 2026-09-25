@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '../utils/Rng';
-import { DEFAULT_FIXED_DT, Time } from './Time';
+import { ENGINE_CONFIG } from './Config';
+import { Time } from './Time';
 
 const noop = (): void => undefined;
 
@@ -16,7 +17,7 @@ function run(time: Time, dt: number, frames: number): number {
 describe('Time', () => {
   it('defaults to a 1/60 s step, a 0.25 s frame clamp and 5 steps per frame', () => {
     const time = new Time();
-    expect(time.fixedDt).toBe(DEFAULT_FIXED_DT);
+    expect(time.fixedDt).toBe(ENGINE_CONFIG.loop.fixedDt);
     expect(time.fixedDt).toBeCloseTo(1 / 60);
     expect(time.maxFrameDt).toBe(0.25);
     expect(time.maxStepsPerFrame).toBe(5);

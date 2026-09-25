@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 0 (project foundation) in progress.** The toolchain, core primitives, render foundation and input layer are in place (Phases 0.1–0.4); there is **no playable build yet**.
+> **Status: Phase 0 (project foundation) in progress.** The toolchain, core primitives, render foundation, input layer, configuration, debug tools and error handling are in place (Phases 0.1–0.5); there is **no playable build yet**.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -63,6 +63,18 @@ npm run check        # typecheck + lint + format check + tests; run before every
 The dev server currently shows the Phase 0 test scene: a spinning signal beacon driven by the fixed-step simulation. Click to capture the mouse; Esc releases it. Keys and mouse are read, but nothing moves yet: the player controller and gameplay come in Phase 1.
 
 **Target browsers:** desktop Chrome, Edge and Firefox. Keyboard and mouse required.
+
+### Development tools
+
+Development builds (`npm run dev`) include a debug overlay and console commands. Production builds contain none of it.
+
+- **Backquote** (`` ` ``) toggles the stats overlay: FPS, frame cost, draw calls, game state.
+- **`tls.help()`** in the browser console lists every command. Examples:
+  - `tls.state()` and `tls.stats()` report the current state and frame statistics.
+  - `tls.transition('LOADING')` requests a game state change.
+  - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
+  - `tls.throwError()` shows the error screen.
+- The plan's gameplay commands (`giveAmmo`, `spawnEnemy`, `startWave`, …) are listed already. They report which phase will implement them.
 
 ## Controls (planned)
 

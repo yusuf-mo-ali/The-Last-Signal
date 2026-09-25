@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-**Phase 0: Project Foundation.** Steps 0.1 (toolchain), 0.2 (core primitives), 0.3 (render foundation) and 0.4 (input) are complete; step 0.5 has not started.
+**Phase 0: Project Foundation.** Steps 0.1–0.5 are complete (toolchain, core primitives, render foundation, input, config/debug/errors); step 0.6 has not started.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -79,10 +79,32 @@
     - Chromium's re-lock cooldown doesn't occur in headless; the canvas's real `requestPointerLock` was made to reject with Chromium's `SecurityError`.
     - Headless emits no real blur/visibility events when switching pages; the same handlers were driven by dispatched events, and are unit-tested.
     - Raw input is unsupported in headless, so the fallback path ran for real.
+- [x] **Phase 0.5: Config, debug, errors** (D-035).
+  - `src/core/Config.ts`: `ENGINE_CONFIG` (loop, render, camera, input, debug, errors), deep-frozen. `Time`, `Renderer`, `createCamera`, `InputState` and `PointerLock` now read their defaults from it, and the old duplicated constants are deleted.
+  - Gameplay config skeletons in `src/config/`: `effects`, `weapons`, `enemies`, `waves`, `mutations`, `upgrades`, `bosses`, `adaptation`, `economy`, `signal`. They hold schemas plus only the values the plan or design already fix. No balance numbers.
+  - `src/core/ErrorHandler.ts`: uncaught errors and rejections are fatal; the browser's own logging is kept; `report()` logs itself.
+  - `src/render/webglSupport.ts` (WebGL2 probe) and `src/render/ContextLossMonitor.ts` (loss / restore / 10 s timeout). `Renderer` skips drawing while the context is lost and re-applies its size on restore.
+  - `src/ui/StatusScreen.ts`: WebGL2-missing recovery steps, a fatal error screen (stack in dev only), and "Graphics paused" / "did not recover" notices.
+  - `src/debug/` (development only, dynamic import):
+    - `installDebug` puts `window.tls` in place of `__TLS_DEV__`, with working commands plus the plan §29 stubs.
+    - `DebugCommands` registry, `FrameStats` probe, `DebugOverlay`, `debug.css`.
+  - `Game.setFrameProbe`; `TestSceneView.prewarm`. `main.ts` rewired: error handling first, then the WebGL2/renderer fallbacks, context-loss handling, and the dev-only debug import.
+  - Verified:
+    - 52 new tests (420 in the suite). `npm run check` passes; `npm run build` has no warnings (game 29.2 kB).
+    - The production `dist/` contains no debug code, chunk or CSS.
+    - Browser, development build, 33/33 checks:
+      - `tls` interface and plan stubs; overlay content and Backquote toggle;
+      - context loss in a run (paused, cursor released, nothing drawn) and restore (redrawn at the right size, shaders recompiled, click to resume, simulation invariant intact);
+      - context loss outside a run (the simulation keeps stepping); the 10 s restore timeout and a late restore;
+      - forced frame, async and rejection errors (error screen, game stopped, error still in the console);
+      - missing WebGL2, and a renderer-creation failure.
+    - Browser, production build, 16/16 checks: no `tls`, overlay or debug chunk; the same fallbacks, with no stack shown.
+    - Phase 0.3 and 0.4 browser checks were rerun and still pass (dev 22 + 19, prod 17 + 8).
+    - Frame-probe overhead: 15.3 ns per frame when detached vs 15.4 ns with none; about 130 ns when the overlay is on.
 
 ## Active Task
 
-None. Waiting for approval to start **Phase 0.5**.
+None. Waiting for approval to start **Phase 0.6**.
 
 ## Known Bugs
 
@@ -90,22 +112,24 @@ None.
 
 ## Next Task
 
-**Phase 0.5: Config, debug, errors**:
-- `core/Config.ts`, with the render/camera/loop defaults moved into it.
-- `src/config/` type skeletons.
-- `debug/`: a dev-only dynamic import, `window.tls` command stubs, and an FPS/frame-time overlay replacing the `__TLS_DEV__` handle.
-- `core/ErrorHandler`: global errors, WebGL missing, and context lost/restored.
+**Phase 0.6: Verify and document.** This closes Phase 0.
+- `TESTING.md`: test strategy, how to run each level, and the manual QA checklist. Include the headless-browser limits found in 0.4 (Esc, the re-lock cooldown, real tab blur) as manual checks.
+- An optional Playwright smoke test committed to the repo (`tests/e2e/`), turning the scratchpad browser scripts from 0.3–0.5 into a repeatable `npm run test:e2e`.
+- A final pass over the Phase 0 acceptance criteria (plan §7).
 
 Details are in the Phase 0 plan below.
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them.
-- **From 0.3, planned for 0.5:** moving the render and camera defaults into `core/Config.ts`, handling WebGL context loss and restore, and the full error screen that replaces the plain "WebGL 2 unavailable" message.
 - **From 0.4:**
   - Mouse look and a pre-step hook in `Game` (Phase 1).
   - A `beforeunload` confirmation during a run (with the run lifecycle).
   - Sensitivity and invert-Y settings (settings phase).
   - Replacing `LockPrompt` with the pause menu (UI phase).
+- **From 0.5:**
+  - Balance numbers in `src/config/` (each system's phase, logged in BALANCING.md).
+  - Enemy counts and hitboxes in the overlay (Phases 4+).
+  - An analytics interface (plan §30), not part of Phase 0.
 
 ## Blocked Tasks
 
@@ -136,7 +160,7 @@ Each step is one small commit (plan §37). Every step must end with typecheck, l
 | **0.2 Core primitives** ✅ | `EventBus` (typed), `Time` (fixed-step clock, time scale), `GameState` (12 states, hierarchy, pause stack, transition table), `utils/Rng` (seeded), `utils/Pool` | Unit tests cover every legal and illegal transition, pause/resume restoring the child state, and event ordering and re-entrancy |
 | **0.3 Render foundation** ✅ | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
 | **0.4 Input** ✅ | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |
-| **0.5 Config, debug, errors** | `core/Config.ts`, `src/config/` type skeletons, `debug/` (dev-only dynamic import, `window.tls` stub, FPS counter overlay), `core/ErrorHandler` (global errors, WebGL missing, context lost) | Production build contains no debug code (bundle checked); a forced error shows the error screen |
+| **0.5 Config, debug, errors** ✅ | `core/Config.ts`, `src/config/` type skeletons, `debug/` (dev-only dynamic import, `window.tls` stub, FPS counter overlay), `core/ErrorHandler` (global errors, WebGL missing, context lost) | Production build contains no debug code (bundle checked); a forced error shows the error screen |
 | **0.6 Verify and document** | `TESTING.md` (strategy plus manual QA checklist). Optional Playwright smoke test (loads, renders, no console errors). Update `PROGRESS.md` and `ARCHITECTURE.md` | Every Phase 0 acceptance criterion in plan §7 is met and recorded |
 
 Plan §7 acceptance criteria: launches; no TypeScript errors; no console errors; stable rendering loop; resize works; input works; state transitions are testable.

@@ -48,6 +48,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-032 | Phase 0.2 core primitive semantics | Accepted |
 | D-033 | Render foundation and loop wiring | Accepted |
 | D-034 | Input architecture: readers, injection, pointer-lock flow | Accepted |
+| D-035 | Engine config, debug tooling, error and context-loss handling | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open |
 
 ---
@@ -545,6 +546,39 @@ Implements D-017 for Phase 0.4.
 **Consequences.**
 - Mouse look (Phase 1) must read the frame reader before the fixed steps, so `Game` will need a small pre-step hook then.
 - `beforeunload` confirmation during a run (D-017 item 6) arrives with the run lifecycle, not in 0.4.
+
+
+## D-035 — Engine config, debug tooling, error and context-loss handling
+**Status:** Accepted · **Date:** 2026-09-25
+
+Implements D-010, D-020 and ARCHITECTURE §7.17 for Phase 0.5.
+
+**Engine configuration.**
+- `core/Config.ts` exports one typed, deep-frozen `ENGINE_CONFIG` (loop, render, camera, input, debug, errors).
+- `Time`, `Renderer`, `createCamera`, `InputState` and `PointerLock` take their defaults from it. The old per-module constants (`DEFAULT_FIXED_DT`, `RENDERER_DEFAULTS`, `CAMERA_DEFAULTS`, the input limits) are deleted, so every default exists exactly once. Constructor options still override for tests.
+
+**Gameplay configuration skeletons.**
+- The `src/config/` files hold only what the plan and design already decide: ids, schemas (`WeaponConfig`, `EnemyArchetypeConfig`, `WaveDefinition`, `MutationConfig`, `UpgradeConfig`, `BossConfig`, `AdaptationRule`, `RewardTable`, `SignalPhaseConfig`), and fixed values.
+- The fixed values are: the plan's zone multipliers, difficulty tiers and signal phases; the mutation and upgrade catalogues with v1 flags; the Siren's phase thresholds; the design's adaptation guardrails.
+- Balance numbers are left undefined until their phase and are logged in BALANCING.md. Inventing them now would create false precision.
+
+**Debug tools.**
+- `debug/` is loaded only through `import('./debug/installDebug')` inside `if (import.meta.env.DEV)`. Vite replaces the condition with `false` in production, and the chunk, code and CSS disappear. This is verified on `dist/` and in the browser.
+- `window.tls` replaces the `__TLS_DEV__` handle. It is built by a pure, tested `DebugCommands` registry.
+- The FPS / frame-time overlay uses `FrameStats`, a `FrameProbe` backed by typed-array ring buffers, so it allocates nothing per frame. The overlay text refreshes at 4 Hz.
+- Hiding the overlay detaches the probe. Measured cost per frame: 15.3 ns detached vs 15.4 ns with no probe; about 130 ns attached.
+
+**Errors.**
+- Every uncaught error or rejection is fatal: stop, release the pointer, show a safe screen.
+- The first error drives the screen; later ones are kept (at most 20) for `tls.errors()`.
+- Events are never `preventDefault`ed, so the browser still logs them. `report()` logs caught-but-fatal errors itself.
+- The error logic (`core/ErrorHandler`) receives its event target by injection and is unit-tested in Node.
+
+**WebGL2 and context loss.**
+- The WebGL2 probe has an injected canvas factory. The fallback screen covers a missing WebGL2 and a failed renderer creation after a successful probe.
+- `ContextLossMonitor` owns loss, restore and a 10 s restore timeout.
+- Simulation state is never touched by a loss. Outside a run the simulation keeps stepping; a run pauses, as it would for any interruption.
+- On restore, shaders are pre-warmed again and the drawing buffer is re-applied.
 
 ---
 

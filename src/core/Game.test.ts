@@ -258,6 +258,35 @@ describe('Game', () => {
     });
   });
 
+  describe('frame probe (debug instrumentation)', () => {
+    it('wraps each whole frame: start, then fixed steps and presentation, then end', () => {
+      const game = new Game();
+      const order: string[] = [];
+      game.addSystem({ fixedUpdate: () => order.push('step') });
+      game.setPresentation({ render: () => order.push('render') });
+      game.setFrameProbe({
+        frameStart: () => order.push('start'),
+        frameEnd: (steps, frameDt) => order.push(`end:${steps}:${frameDt.toFixed(4)}`),
+      });
+
+      game.frame(2 / 60);
+
+      expect(order).toEqual(['start', 'step', 'step', 'render', `end:2:${(2 / 60).toFixed(4)}`]);
+    });
+
+    it('runs frames normally with no probe, and stops probing once removed', () => {
+      const game = new Game();
+      const probe = { frameStart: vi.fn(), frameEnd: vi.fn() };
+      expect(game.frame(1 / 60)).toBe(1);
+      game.setFrameProbe(probe);
+      game.frame(1 / 60);
+      game.setFrameProbe(null);
+      game.frame(1 / 60);
+      expect(probe.frameStart).toHaveBeenCalledOnce();
+      expect(probe.frameEnd).toHaveBeenCalledOnce();
+    });
+  });
+
   describe('stop, errors and disposal', () => {
     it('stop() cancels the pending frame, and a restart does not catch up on stopped time', () => {
       const { game, frames } = startedGame();

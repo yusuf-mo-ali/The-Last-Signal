@@ -9,6 +9,8 @@
  * - Works with both the modern Promise-returning API and the older event-only API.
  */
 
+import { ENGINE_CONFIG } from '../core/Config';
+
 /** The element that captures the pointer (the game canvas). */
 export interface PointerLockElement {
   requestPointerLock(options?: { unadjustedMovement?: boolean }): Promise<void> | undefined;
@@ -29,7 +31,7 @@ export type PointerLockResult =
   | { readonly locked: false; readonly reason: PointerLockFailure; readonly error?: unknown };
 
 export interface PointerLockOptions {
-  /** How long to wait for the event-only API to answer, in ms. Default 1000. */
+  /** How long to wait for the event-only API to answer, in ms. Default: `ENGINE_CONFIG.input`. */
   readonly timeoutMs?: number;
 }
 
@@ -48,7 +50,7 @@ export class PointerLock {
   ) {
     this.element = element;
     this.doc = doc;
-    this.timeoutMs = options.timeoutMs ?? 1000;
+    this.timeoutMs = options.timeoutMs ?? ENGINE_CONFIG.input.pointerLockTimeoutMs;
     doc.addEventListener('pointerlockchange', this.onChange);
   }
 

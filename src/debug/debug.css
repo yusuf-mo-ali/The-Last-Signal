@@ -1,0 +1,20 @@
+/* Development-only styles: bundled with the debug chunk, absent from production (D-020). */
+
+.debug-overlay {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  background: rgb(0 0 0 / 60%);
+  color: #9fe29f;
+  font:
+    11px/1.35 ui-monospace,
+    monospace;
+  pointer-events: none;
+}
+
+.debug-overlay[hidden] {
+  display: none;
+}
