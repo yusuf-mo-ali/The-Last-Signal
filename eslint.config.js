@@ -94,6 +94,34 @@ export default tseslint.config(
     },
   },
 
+  // Platform layer: input/ receives window, document and the canvas by injection from main.ts,
+  // so it stays testable in Node and never reaches for browser globals itself (D-034).
+  {
+    files: ['src/input/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/render/**', '**/ui/**', '**/audio/**', '**/effects/**', '**/*View'],
+              message: 'Input code must not import presentation code (ARCHITECTURE.md §2).',
+            },
+          ],
+        },
+      ],
+      'no-restricted-globals': [
+        'error',
+        ...['window', 'document', 'navigator', 'localStorage', 'requestAnimationFrame'].map(
+          (name) => ({
+            name,
+            message: 'Input code receives browser objects by injection from main.ts (D-034).',
+          }),
+        ),
+      ],
+    },
+  },
+
   // Config files run in Node and are not part of the typed project.
   {
     files: ['eslint.config.js'],

@@ -47,6 +47,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-031 | Phase 0.1 tooling configuration details | Accepted |
 | D-032 | Phase 0.2 core primitive semantics | Accepted |
 | D-033 | Render foundation and loop wiring | Accepted |
+| D-034 | Input architecture: readers, injection, pointer-lock flow | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open |
 
 ---
@@ -505,6 +506,45 @@ Refines D-001, D-003, D-004 and D-022 for Phase 0.3.
 - Keeps the simulation testable and profile-able in Node.
 - Handles every real-world cause of canvas-size change without resize thrash.
 - Avoids first-frame shader hitches.
+
+
+## D-034 — Input architecture: readers, injection, pointer-lock flow
+**Status:** Accepted · **Date:** 2026-09-25
+
+Implements D-017 for Phase 0.4.
+
+**Context.**
+- The simulation runs at a fixed 60 Hz; render frames run at the display rate.
+- If "pressed this frame" were cleared every render frame, a key tapped during a frame that runs no fixed step would never reach the simulation. On a 240 Hz display that is about 3 of every 4 taps.
+- If the edges were instead cleared per step, the UI would see stale presses while the game is frozen.
+
+**Decision.**
+- **`InputState` keeps held state plus running totals** (presses, releases, mouse motion, wheel notches) that only ever grow.
+- **Consumers read through their own `InputReader`.** `sample()` opens a new window; the queries describe what happened between the last two samples.
+  - The **step reader** is sampled first in every fixed step (`attachStepInput`, via the new `Game.prependSystem`). A tap reaches exactly one step: never lost, never repeated across several steps.
+  - The **frame reader** is sampled at the start of each render frame. Its mouse delta is the per-frame accumulation, and it resets predictably at the next sample.
+  - `discard()` drops everything so far. The step reader discards when the game leaves `PAUSED` or `UPGRADE_SELECTION`, so the click that resumes can never become a shot.
+  - Readers reuse their buffers, so sampling allocates nothing once warm.
+- **`ActionMap`** answers per action (`isDown`, `wasPressed`, `wasReleased`) from the `config/input.ts` bindings. Wheel bindings count as presses only.
+- **`BrowserInput` is the only code that touches DOM events,** and receives `window`, `document` and the canvas by injection from `main.ts`. Lint bans browser globals in all of `input/`.
+  - Mouse buttons, motion and wheel reach the game only while the pointer is locked.
+  - Motion events over 1500 px are dropped as browser glitches.
+  - Default actions are suppressed only for bound keys without Ctrl/Meta/Alt, the canvas context menu, the wheel while locked, and the side buttons.
+  - Text fields keep their keys.
+  - Blur and a hidden tab release everything held.
+- **`PointerLock`:**
+  - Issues the browser request synchronously inside the click.
+  - Asks for `unadjustedMovement`, falling back on `NotSupportedError`.
+  - Supports both the Promise and the older event-only API.
+  - Returns a result object instead of throwing when refused.
+- **Pause and resume:**
+  - `installAutoPause` pauses on pointer-lock loss, window blur and tab hidden. Pause is idempotent, so the usual burst of all three signals pauses once.
+  - Resuming is never automatic: the player clicks the prompt, which re-acquires the lock.
+- **`ui/LockPrompt`** is a deliberately minimal "click to play / paused / refused, click again" button. The pause menu replaces it with the UI systems (plan §22).
+
+**Consequences.**
+- Mouse look (Phase 1) must read the frame reader before the fixed steps, so `Game` will need a small pre-step hook then.
+- `beforeunload` confirmation during a run (D-017 item 6) arrives with the run lifecycle, not in 0.4.
 
 ---
 

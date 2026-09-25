@@ -66,6 +66,7 @@ flowchart TB
 | Platform | `core/`, `utils/` | simulation internals |
 
 - `eslint.config.js` enforces the simulation rules. In simulation folders, `no-restricted-imports` blocks presentation imports and `no-restricted-globals` blocks `window`, `document`, `navigator`, `localStorage` and `requestAnimationFrame`. Presentation files matched by the naming rule below are exempt.
+- The same two rules apply to the platform folder `input/` (Phase 0.4). It receives `window`, `document` and the canvas by injection from `main.ts`, so it is tested in Node on real `EventTarget`s (D-034).
 - The rule against importing three.js renderers or materials in simulation code is enforced by code review, not lint.
 - The plan's domain folders mix sim and presentation files. Presentation files in those folders are marked by name: `*View.ts`, `player/CameraController.ts` and `world/LightingController.ts`.
 - `three`'s math classes are plain JavaScript and run in Node, so the simulation needs no separate math library.
@@ -77,18 +78,18 @@ flowchart TB
 ```text
 frame(now):
   dt = min(now - last, 0.25 s)             # clamp: tab switch, breakpoint, hitch
-  input.beginFrame()                        # events collected since the last frame
-  player.applyLook(input.mouseDelta)        # every render frame -> no added aim latency
+  frameInput.sample()                       # this frame's input window (D-034)
+  player.applyLook(frameInput.mouseDelta)   # every render frame -> no added aim latency
   accumulator += dt * time.scale            # scale = 0 in PAUSED and UPGRADE_SELECTION
   steps = 0
   while accumulator >= FIXED_DT and steps < 5:      # FIXED_DT = 1/60 s
+      stepInput.sample()                    # input since the previous step (first system)
       sim.fixedUpdate(FIXED_DT)             # movement, collision, weapons, steering, waves, timers
       accumulator -= FIXED_DT; steps += 1
   if steps == 5: accumulator = 0            # never spiral after a long hitch
   presentation.update(alpha = accumulator / FIXED_DT, dt)   # interpolation, animation, VFX, listener
   renderer.render()
   ui.update()                               # event-driven; polled values only written on change
-  input.endFrame()
 ```
 
 - **Fixed 60 Hz simulation.** Logic is deterministic, testable and independent of frame rate.
@@ -112,6 +113,26 @@ main.ts (composition root, browser)          core/Game.ts (simulation, no browse
 - **The time scale follows the state machine.** It is 0 in `PAUSED` and `UPGRADE_SELECTION` (`FROZEN_STATES`) and 1 everywhere else. Rendering continues while frozen.
 - **An exception inside a frame stops the loop and is rethrown,** rather than repeating every frame. The error screen arrives in Phase 0.5.
 - **The first start moves `BOOT → MAIN_MENU`** ("boot complete").
+
+### 3.2 Input (Phase 0.4, D-034)
+
+```text
+main.ts: window/document/canvas ──► BrowserInput ──► InputState (held state + running totals)
+                                     PointerLock          │
+                                                          ├── stepReader  sampled first in every fixed step
+                                                          │     (attachStepInput; discarded on leaving PAUSED /
+                                                          │      UPGRADE_SELECTION)
+                                                          └── frameReader sampled at the start of each render
+                                                                (per-frame mouse delta, UI edges)
+ActionMap(reader, config/input.ts bindings): isDown / wasPressed / wasReleased per action
+installAutoPause: pointer-lock lost, window blur, tab hidden ──► GameStateMachine.pause()
+LockPrompt (ui/): click = user gesture ──► PointerLock.request() ──► resume, or "refused" message
+```
+
+- **Nothing clears shared input state.** Each consumer's reader answers "what happened between my last two samples". A press is therefore seen exactly once by the simulation and once by the frame, whatever the frame-to-step ratio.
+- **Mouse buttons, motion and wheel reach the game only while the pointer is locked.** Keys are read by physical `code`, and repeats are ignored.
+- **Resuming is always a click,** which re-acquires the lock inside a user gesture. Pausing is automatic.
+- **Mouse look is not implemented yet.** The player controller (Phase 1) will read `frameReader`'s mouse delta before the fixed steps, which needs a small pre-step hook in `Game`.
 
 ---
 
@@ -207,7 +228,8 @@ src/
 │ + config/                     ALL tunable gameplay data (plan §31)
 │   ├── weapons.ts  enemies.ts  waves.ts  mutations.ts  upgrades.ts  bosses.ts
 │   └── + adaptation.ts  economy.ts  signal.ts  input.ts (default bindings)
-│ + input/                      InputManager, bindings, PointerLock wrapper
+│ + input/                      InputState + InputReader, ActionMap, BrowserInput (DOM adapter),
+│                               PointerLock, autoPause, stepInput
 │ + render/                     Renderer (WebGL2, resize + DPR cap), viewport math, camera defaults;
 │                               post-processing later
 │ + assets/                     AssetManager, asset manifest, placeholder fallbacks
@@ -224,7 +246,7 @@ src/
 ├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager,
 │                               + TestScene / TestSceneView (Phase 0 test scene; replaced by the World in Phase 1)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
-├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen,
+├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen, + LockPrompt (Phase 0.4, temporary),
 │                               + UIManager, SettingsMenu, LoadingScreen, VictoryScreen, styles/
 ├── audio/                      AudioManager, MusicManager, SoundLibrary
 ├── effects/                    VFXManager, HitEffects, MuzzleFlash, ScreenEffects (visual only)

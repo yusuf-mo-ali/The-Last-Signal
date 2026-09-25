@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-**Phase 0: Project Foundation.** Steps 0.1 (toolchain), 0.2 (core primitives) and 0.3 (render foundation) are complete; step 0.4 has not started.
+**Phase 0: Project Foundation.** Steps 0.1 (toolchain), 0.2 (core primitives), 0.3 (render foundation) and 0.4 (input) are complete; step 0.5 has not started.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -53,10 +53,36 @@
     - A browser script in headless Chromium checked both `npm run dev` and the production preview: canvas and WebGL2, rendered and animating pixels, and resizing to 1920×1080, 1600×900, 1366×768, 800×600 and 320×180.
     - It also checked live pixel-ratio changes (2, 1.25, 3 → capped at 2), recovery from a 0-height container, fixed steps accounting for real time, pause freezing steps while rendering continues, and resume without a burst.
     - No console errors, warnings, page errors or failed requests.
+- [x] **Phase 0.4: Input** (D-034).
+  - `src/config/input.ts`: default bindings by physical `KeyboardEvent.code` (WASD, Shift, C, Space, R, 1–3, wheel, E, V, Esc; mouse left and right), plus a conflict checker. Crouch is on C, with `ControlLeft` as the documented opt-in.
+  - `src/input/InputState.ts`: held state plus running totals, and `InputReader` windows (press/release edges, per-window mouse delta, wheel notches). Glitch-sized motion is dropped; trackpad wheel deltas accumulate into notches.
+  - `src/input/ActionMap.ts`: action queries over bindings.
+  - `src/input/BrowserInput.ts`: DOM adapter, injected with `window`/`document`/canvas.
+  - `src/input/PointerLock.ts`: raw-input request with fallback, refusals returned rather than thrown, and older event-only browsers supported.
+  - `src/input/autoPause.ts`: pause on lock loss, window blur or hidden tab. `src/input/stepInput.ts`: step reader sampled first in each fixed step, and discarded on leaving frozen states.
+  - `Game.prependSystem` added. `src/ui/LockPrompt.ts` is a minimal click-to-play / paused / refused prompt. `main.ts` does the wiring.
+  - ESLint now bans browser globals and presentation imports in `src/input/`.
+  - Verified:
+    - 73 new tests (368 in the suite). Eight planted input bugs were each caught.
+    - `npm run check` and `npm run build` pass with no warnings. The dev handle is absent from production.
+    - A headless-Chromium script checked both dev and production:
+      - start prompt, Space suppressed but KeyQ not, context menu suppressed;
+      - keys by physical code (including an AZERTY "z" key sending `KeyW`), press/held/release edges;
+      - click-to-lock, and the locking click not registering as fire;
+      - per-frame mouse delta that resets, button press while locked, one wheel notch = one step;
+      - lock loss pausing with time frozen, a refused re-lock showing "click again" while staying paused, and a later click resuming the same phase;
+      - blur and hidden-tab pause releasing held keys;
+      - no console errors or failed requests.
+    - The Phase 0.3 render checks were rerun and still pass.
+  - Headless limits, each covered another way:
+    - Esc doesn't release the lock in headless; `exitPointerLock()` triggers the same event path.
+    - Chromium's re-lock cooldown doesn't occur in headless; the canvas's real `requestPointerLock` was made to reject with Chromium's `SecurityError`.
+    - Headless emits no real blur/visibility events when switching pages; the same handlers were driven by dispatched events, and are unit-tested.
+    - Raw input is unsupported in headless, so the fallback path ran for real.
 
 ## Active Task
 
-None. Waiting for approval to start **Phase 0.4**.
+None. Waiting for approval to start **Phase 0.5**.
 
 ## Known Bugs
 
@@ -64,17 +90,22 @@ None.
 
 ## Next Task
 
-**Phase 0.4: Input**:
-- `input/InputManager`: keys by `code`, mouse buttons, wheel, per-frame mouse delta.
-- A pointer-lock wrapper (D-017).
-- `config/input.ts` default bindings.
-- Blur and visibility changes wired to `GameStateMachine.pause()`.
+**Phase 0.5: Config, debug, errors**:
+- `core/Config.ts`, with the render/camera/loop defaults moved into it.
+- `src/config/` type skeletons.
+- `debug/`: a dev-only dynamic import, `window.tls` command stubs, and an FPS/frame-time overlay replacing the `__TLS_DEV__` handle.
+- `core/ErrorHandler`: global errors, WebGL missing, and context lost/restored.
 
 Details are in the Phase 0 plan below.
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them.
 - **From 0.3, planned for 0.5:** moving the render and camera defaults into `core/Config.ts`, handling WebGL context loss and restore, and the full error screen that replaces the plain "WebGL 2 unavailable" message.
+- **From 0.4:**
+  - Mouse look and a pre-step hook in `Game` (Phase 1).
+  - A `beforeunload` confirmation during a run (with the run lifecycle).
+  - Sensitivity and invert-Y settings (settings phase).
+  - Replacing `LockPrompt` with the pause menu (UI phase).
 
 ## Blocked Tasks
 
@@ -104,7 +135,7 @@ Each step is one small commit (plan §37). Every step must end with typecheck, l
 | **0.1 Toolchain scaffold** ✅ | `package.json` (npm; Node ≥22.12 engines). Dependencies: `three@0.186.1`; dev dependencies from D-002. `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `erasableSyntaxOnly`). ESLint flat config (typescript-eslint type-checked plus the layer import rules from ARCHITECTURE §2). Prettier, Vitest, `.gitignore`, `.nvmrc`, `.editorconfig`. `index.html` and a minimal `src/main.ts`. Scripts: `dev`, `build`, `preview`, `typecheck`, `lint`, `format`, `test`. | `npm ci`, `typecheck`, `lint`, `test` and `build` all pass. `npm run dev` serves a page with no console errors |
 | **0.2 Core primitives** ✅ | `EventBus` (typed), `Time` (fixed-step clock, time scale), `GameState` (12 states, hierarchy, pause stack, transition table), `utils/Rng` (seeded), `utils/Pool` | Unit tests cover every legal and illegal transition, pause/resume restoring the child state, and event ordering and re-entrancy |
 | **0.3 Render foundation** ✅ | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
-| **0.4 Input** | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |
+| **0.4 Input** ✅ | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |
 | **0.5 Config, debug, errors** | `core/Config.ts`, `src/config/` type skeletons, `debug/` (dev-only dynamic import, `window.tls` stub, FPS counter overlay), `core/ErrorHandler` (global errors, WebGL missing, context lost) | Production build contains no debug code (bundle checked); a forced error shows the error screen |
 | **0.6 Verify and document** | `TESTING.md` (strategy plus manual QA checklist). Optional Playwright smoke test (loads, renders, no console errors). Update `PROGRESS.md` and `ARCHITECTURE.md` | Every Phase 0 acceptance criterion in plan §7 is met and recorded |
 

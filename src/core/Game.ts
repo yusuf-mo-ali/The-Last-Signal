@@ -73,6 +73,17 @@ export class Game {
     };
   }
 
+  /**
+   * Registers a system that runs *before* every other system in each fixed step, e.g. sampling
+   * input so all systems in a step see the same input window.
+   */
+  prependSystem(system: FixedUpdateSystem): () => void {
+    this.systems = [system, ...this.systems];
+    return () => {
+      this.systems = this.systems.filter((s) => s !== system);
+    };
+  }
+
   /** Sets (or, with `null`, removes) the presentation drawn each frame. */
   setPresentation(presentation: Presentation | null): void {
     this.presentation = presentation;

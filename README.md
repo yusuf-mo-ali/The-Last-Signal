@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 0 (project foundation) in progress.** The toolchain, core primitives and render foundation are in place (Phases 0.1–0.3); there is **no playable build yet**.
+> **Status: Phase 0 (project foundation) in progress.** The toolchain, core primitives, render foundation and input layer are in place (Phases 0.1–0.4); there is **no playable build yet**.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -60,7 +60,7 @@ npm run format       # Prettier (code and config; Markdown is hand-maintained)
 npm run check        # typecheck + lint + format check + tests; run before every commit
 ```
 
-The dev server currently shows the Phase 0 test scene: a spinning signal beacon driven by the fixed-step simulation. Input and gameplay are not implemented yet.
+The dev server currently shows the Phase 0 test scene: a spinning signal beacon driven by the fixed-step simulation. Click to capture the mouse; Esc releases it. Keys and mouse are read, but nothing moves yet: the player controller and gameplay come in Phase 1.
 
 **Target browsers:** desktop Chrome, Edge and Firefox. Keyboard and mouse required.
 

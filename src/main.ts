@@ -5,8 +5,16 @@
  */
 
 import './style.css';
+import { boundKeyCodes, DEFAULT_BINDINGS } from './config/input';
 import { Game, type FrameScheduler } from './core/Game';
+import { ActionMap } from './input/ActionMap';
+import { installAutoPause } from './input/autoPause';
+import { BrowserInput } from './input/BrowserInput';
+import { InputState } from './input/InputState';
+import { PointerLock } from './input/PointerLock';
+import { attachStepInput } from './input/stepInput';
 import { isWebGL2Available, Renderer } from './render/Renderer';
+import { LockPrompt } from './ui/LockPrompt';
 import { TestScene } from './world/TestScene';
 import { TestSceneView } from './world/TestSceneView';
 
@@ -42,18 +50,80 @@ function boot(app: HTMLElement): void {
 
   const renderer = new Renderer(app);
   const view = new TestSceneView(renderer, testScene);
-  game.setPresentation(view);
+
+  // ---- Input (D-017, D-034) ----------------------------------------------------------------
+  const input = new InputState();
+  const pointerLock = new PointerLock(renderer.canvas, document);
+  const browserInput = new BrowserInput({ window, document, element: renderer.canvas }, input, {
+    isPointerLocked: () => pointerLock.isLocked,
+    preventDefaultCodes: boundKeyCodes(DEFAULT_BINDINGS),
+  });
+
+  // The simulation reads input per fixed step; presentation and UI read it per render frame.
+  const stepReader = input.createReader();
+  const frameReader = input.createReader();
+  const detachStepInput = attachStepInput(game, stepReader);
+  const stepActions = new ActionMap(stepReader, DEFAULT_BINDINGS);
+  const frameActions = new ActionMap(frameReader, DEFAULT_BINDINGS);
+
+  const removeAutoPause = installAutoPause(game.state, {
+    onPointerLockLost: (listener) =>
+      pointerLock.onLockChange((locked) => {
+        if (!locked) {
+          listener();
+        }
+      }),
+    onFocusLost: (listener) => browserInput.onFocusLost(listener),
+    onHidden: (listener) => browserInput.onHidden(listener),
+  });
+
+  // Clicking the prompt is the user gesture that (re)acquires the lock, and resumes if paused.
+  const prompt = new LockPrompt(app, () => {
+    void pointerLock.request().then((result) => {
+      if (result.locked) {
+        game.state.resume();
+      } else {
+        prompt.show('refused');
+      }
+    });
+  });
+  const removePromptListener = pointerLock.onLockChange((locked) => {
+    prompt.show(locked ? 'hidden' : game.state.isRunActive ? 'paused' : 'start');
+  });
+
+  game.setPresentation({
+    render: (alpha) => {
+      frameReader.sample(); // this frame's input window: edges and mouse delta since last frame
+      view.render(alpha);
+    },
+  });
   game.start(browserFrames);
 
   if (import.meta.env.DEV) {
     // Dev-only inspection handle for manual and automated browser checks. Stripped from
     // production builds; superseded by the debug tools in Phase 0.5 (D-020).
-    (window as unknown as Record<string, unknown>).__TLS_DEV__ = { game, renderer, testScene };
+    (window as unknown as Record<string, unknown>).__TLS_DEV__ = {
+      game,
+      renderer,
+      testScene,
+      input,
+      pointerLock,
+      stepActions,
+      frameActions,
+      prompt,
+    };
   }
 
-  // Vite hot reload: tear down this instance so reloads never stack loops or WebGL contexts.
+  // Vite hot reload: tear down this instance so reloads never stack loops, listeners or contexts.
   import.meta.hot?.dispose(() => {
     game.dispose();
+    detachStepInput();
+    removeAutoPause();
+    removePromptListener();
+    prompt.dispose();
+    browserInput.dispose();
+    pointerLock.exit();
+    pointerLock.dispose();
     view.dispose();
     renderer.dispose();
   });
