@@ -428,7 +428,22 @@ Audio should warn the player of danger before they see it (§23).
 
 ---
 
-## 17. Out of scope for v1
+## 17. Graphics quality and fairness (D-037)
+
+- **Scaled visuals.** The game runs on a wide range of hardware. The minimum is an Intel i5-4440 with a GTX 750 at ~30 FPS, 1080p, Low. Capable GPUs such as an RTX 4050 class card get much richer visuals at High and Ultra.
+- **The art direction targets High.** Low is a faithful, readable reduction of it, never the other way round.
+- **Every tier plays the same game.** Enemies, rules and hitboxes are identical, and so is **gameplay-relevant visibility**:
+  - fog distance;
+  - BLACKOUT darkness;
+  - sight-blocking smoke;
+  - muzzle-flash light;
+  - attack and boss telegraphs.
+- **No advantage from settings.** Lower settings may never make it easier to see; higher settings may never hide information.
+- **Tells are never scaled away.** Effects that carry a gameplay tell (Screamer charge-up, Siren scream wind-up, elite markers) render on every preset. Only cosmetic density scales.
+
+---
+
+## 18. Out of scope for v1
 
 Per plan §39 and §42:
 - multiplayer

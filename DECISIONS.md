@@ -35,7 +35,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-019 | Versioned save format without a schema library | Accepted |
 | D-020 | Debug tooling excluded from production | Accepted |
 | D-021 | Test tooling: Vitest now, Playwright when needed | Accepted |
-| D-022 | Lighting: fixed light count, shader pre-warm | Accepted |
+| D-022 | Lighting: fixed light count, shader pre-warm | Accepted (shadow budget refined by D-037) |
 | D-023 | Additions to the plan's folder tree | Accepted |
 | D-024 | Mutation selection vs mutation application | Accepted |
 | D-025 | IMPLEMENTATION_PLAN.md committed verbatim | Accepted |
@@ -50,7 +50,8 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-034 | Input architecture: readers, injection, pointer-lock flow | Accepted |
 | D-035 | Engine config, debug tooling, error and context-loss handling | Accepted |
 | D-036 | End-to-end harness and Phase 0 verification conventions | Accepted |
-| O-1 … O-12 | Open questions (see the end of this file) | Open |
+| D-037 | Performance targets, reference hardware and graphics quality scaling (resolves O-9) | Accepted |
+| O-1 … O-12 | Open questions (see the end of this file) | Open (O-9 resolved by D-037) |
 
 ---
 
@@ -602,6 +603,78 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 
 **Why.** Browser behaviour verified once by hand drifts; committed specs make the Phase 0 guarantees repeatable. Running dev and production side by side catches build-only regressions and proves that debug code is stripped.
 
+
+## D-037 — Performance targets, reference hardware and graphics quality scaling
+**Status:** Accepted · **Date:** 2026-09-25 · **Resolves:** O-9 · **Refines:** D-022 (shadow budget), ARCHITECTURE §8
+
+**Context.** Plan §3 and §25 ask for about 60 FPS, with 30 FPS "minimum acceptable on weaker supported hardware", but never named that hardware (O-9). The project owner has now defined it, and clarified that it is a performance floor, not a visual ceiling.
+
+**Decision.**
+
+1. **Weak reference machine (minimum validation target):**
+
+   | Part | Model | Notes |
+   |---|---|---|
+   | CPU | Intel Core i5-4440 | 4 cores / 4 threads, 3.1–3.3 GHz, Haswell (2013) |
+   | RAM | 16 GB DDR3-1333 | |
+   | GPU | NVIDIA GTX 750 | Maxwell GM107, about 1.1 TFLOPS. Sold with 1 GB or 2 GB GDDR5: **VRAM budgets assume 1 GB until the actual card is confirmed** |
+
+2. **Targets.** 1920×1080 is the primary baseline unless a phase says otherwise.
+
+   | Tier | Hardware | Preset | Target |
+   |---|---|---|---|
+   | Minimum | Weak reference (above) | Low | **~30 FPS average in normal gameplay** (≤ 33.3 ms per frame) |
+   | Target | Capable hardware, e.g. an RTX 4050 class GPU | High | **~60 FPS** (≤ 16.7 ms per frame) |
+
+   - The average FPS over a representative scenario is the gate.
+   - 95th-percentile and 1% low frame times are recorded alongside it [Proposed guidance]. A 95th percentile above ~50 ms on the reference is visible stutter and is investigated even if the average passes.
+
+3. **Measure first, optimise second.**
+   - Performance work starts from a recorded measurement that shows a budget miss (TESTING.md §7), never from assumption.
+   - Measurements are recorded per phase once there is gameplay to measure, starting with the Phase 1 prototype map.
+   - This follows plan §39 rules 6–7: fix measured regressions before adding content, and don't replace working architecture without a measurable reason.
+
+4. **The weak reference is a floor, not a ceiling.** Rendering scales across quality presets **Low / Medium / High / Ultra** (plus Custom). The GTX 750 must reach the minimum target at Low; stronger GPUs use much better visuals at High and Ultra. The visual design targets High. Low is a readable, faithful reduction of it, and the art direction is never lowered to GTX 750 level.
+
+5. **Quality dimensions.** Every GPU-heavy feature takes its parameters from a quality profile, never from constants in rendering code. The values below are starting points, set by measurement:
+
+   | Dimension | Low | Medium | High | Ultra | Applied |
+   |---|---|---|---|---|---|
+   | Render scale | 0.75–1.0 | 1.0 | 1.0 | 1.0 | live |
+   | Pixel-ratio cap | 1 | 1 | 1.5 | 2 | live |
+   | Anti-aliasing (MSAA) | off | on | on | on | on reload (context attribute) |
+   | Shadow casters | 1 | 1 | 2 | 2+ | on load (shader programs) |
+   | Shadow map size | 1024 | 2048 | 2048 | 4096 | on load |
+   | Dynamic lights | minimum (decor via emissive) | reduced | full | full | on load (D-022: fixed count per preset) |
+   | Particle / decal density | 0.5× | 0.75× | 1× | 1.25× | live |
+   | Post-processing | tone mapping only | + FXAA, light bloom | + bloom, SSAO (low) | + full SSAO, higher-quality bloom and grading | on load |
+   | Texture resolution / anisotropy | ½ res, 2× | full, 4× | full, 8× | full (+ high-res set), 16× | on load (re-upload) |
+   | Mesh LOD distances | near | medium | far | farthest | live |
+
+6. **Gameplay parity. Quality never changes gameplay.** The simulation, hitboxes, spawns, enemy counts, AI and rules are identical on every tier. Gameplay-relevant visibility is also fixed across tiers:
+   - fog distance;
+   - darkness during BLACKOUT;
+   - smoke that blocks sight;
+   - muzzle-flash light;
+   - attack and boss telegraphs.
+
+   Effects are tagged *gameplay-critical* (always rendered) or *cosmetic* (scaled). Reducing density must never remove a tell. Low settings must not give a visibility advantage either: Low may not render thinner smoke or brighter darkness.
+
+7. **Architecture** (ARCHITECTURE §7.18):
+   - One typed `GraphicsQualityProfile` per preset, stored as data in `core/Config.ts`.
+   - The active profile is passed to presentation systems (`Renderer`, lighting, VFX, post-processing), never read as a global.
+   - Changing it applies *live* values immediately. *On load* values are applied at a safe point (settings menu or loading), because they recompile shaders, re-upload textures, or, for MSAA, recreate the context. D-022's fixed light count still holds within a preset.
+   - Persisted later by `SettingsManager` (plan §26, "Graphics settings").
+
+8. **Scope.**
+   - The full settings system (UI, persistence, auto-detection) is **not** part of Phase 1.
+   - Phase 1 adds only what it needs: the profile type and preset table for the values Phase 1 renders (render scale, pixel-ratio cap, MSAA, shadow size and casters), plus a way to choose a preset at load (e.g. `?quality=low`). The reference machine can then be measured at Low.
+
+**Consequences.**
+- ARCHITECTURE §8's budgets are now stated for the weak reference at Low, 1080p.
+- D-022's "at most 2 shadow casters" becomes a per-preset value.
+- TESTING.md §7 holds the measurement protocol and the results log.
+
 ---
 
 ## Open questions
@@ -618,7 +691,7 @@ None of these block Phase 0. Each lists the phase that needs the answer and the 
 | **O-6** | The controls lack **melee** and **interact**, and no **utility/trap** system exists, yet Heavy Hands, Technician, `meleeUsage` and signal objectives depend on them. | Phase 2 (melee), Phase 12 (interact) | Add Melee = V and Interact = E. Keep Technician out of the pool until a utility item is designed |
 | **O-7** | "Every normal wave receives one mutation" (§14) vs "mutations become noticeable at 10–15 min" (§33). | Phase 7 | Waves 1–3 mutation-free; waves 4–19 one each; wave 20 boss rules |
 | **O-8** | Where do the 3D models, animations, sounds and music come from, and under what licences? | Milestone 2 (first real assets) | CC0 sources (e.g. Kenney, Quaternius, CC0 sound libraries), with a CREDITS file; blockout until then (D-030) |
-| **O-9** | What is the reference "weaker supported hardware" for the 30 FPS floor? | Phase 1 (first perf baseline) | A mid-range laptop with integrated graphics (Intel Iris Xe class) at 1366×768 as the floor |
+| ~~**O-9**~~ | ~~What is the reference "weaker supported hardware" for the 30 FPS floor?~~ **Resolved 2026-09-25 → D-037:** i5-4440, 16 GB DDR3-1333, GTX 750; ~30 FPS at 1080p Low; ~60 FPS on capable hardware at High | — | — |
 | **O-10** | Does BLACKOUT need a player flashlight? | Phase 7 | Yes, as a simple toggle (F) using one of the ≤2 shadow-casting light slots, if playtests show BLACKOUT is frustrating |
 | **O-11** | Project licence (code) and asset licence policy. | Before any public release | Decide before the first public deployment |
 | **O-12** | Are signal objectives mandatory to progress, or optional but rewarded? | Phase 12 | Optional but rewarded: the phase advances with wave number; objectives add signal strength and rewards (no soft-locks) |

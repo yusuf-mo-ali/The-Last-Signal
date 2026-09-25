@@ -440,24 +440,68 @@ Three sources change the world. They are layered rather than competing:
 - **Reserved shortcuts:** pages cannot intercept Ctrl+W, Ctrl+T or Ctrl+N. Crouch therefore defaults to **C**, because crouch-walking with Ctrl+W would close the tab.
 - **`beforeunload` asks for confirmation** while a run is active.
 
+
+### 7.18 Graphics quality scaling (D-037)
+
+The GTX 750 reference defines the minimum performance, not the look.
+- **Presets:** rendering scales across Low, Medium, High and Ultra (plus Custom), so stronger GPUs get much better visuals.
+- **Identical gameplay on every tier:** simulation, hitboxes, spawns and AI never vary, and neither does gameplay-relevant visibility (fog, BLACKOUT darkness, sight-blocking smoke, telegraphs).
+
+```text
+core/Config.ts  ── GRAPHICS_PRESETS: Record<'low'|'medium'|'high'|'ultra', GraphicsQualityProfile>  (data only)
+        │
+main.ts ── picks the active profile (later: SettingsManager + detection; Phase 1: ?quality=… override)
+        │ passes it in (no global)
+        ▼
+Renderer · lighting rig · VFX pools · post-processing · texture loader ─ read their quality values
+        from the profile; apply "live" values immediately and "on-load" values at a safe point
+```
+
+- **Every GPU-heavy knob lives in the profile, never as a constant in rendering code:**
+  - render scale and pixel-ratio cap;
+  - MSAA;
+  - shadow casters, map size and filter;
+  - dynamic light budget;
+  - particle and decal density;
+  - post-processing chain;
+  - texture resolution and anisotropy;
+  - LOD distances.
+- **Live vs on-load:**
+  - **Live:** render scale, pixel ratio, particle density, LOD.
+  - **On load:** anything that recompiles shaders (shadow casters, light budget, post chain), re-uploads textures, or needs a new WebGL context (MSAA). These apply from the settings menu or during `LOADING`, never mid-fight.
+- **Effects are tagged *gameplay-critical* (always rendered) or *cosmetic* (scaled).**
+- **Phase 1 implements only what it uses:**
+  - the profile type and preset values for render scale, pixel ratio, MSAA and shadows;
+  - a load-time override, so the reference machine can be measured at Low.
+  The settings UI, persistence and auto-detection arrive with the settings phase.
+
 ---
 
-## 8. Performance budget
+## 8. Performance budget (D-037)
 
-These are starting values, to be validated on reference hardware (open question O-9) and revised in `BALANCING.md` / `TESTING.md`.
+**Targets.** 1920×1080 is the primary baseline.
+- **Minimum:** ~30 FPS average (≤ 33.3 ms per frame) in normal gameplay on the **weak reference machine** at the **Low** preset. The machine is an Intel Core i5-4440, 16 GB DDR3-1333 and an NVIDIA GTX 750, assumed to be the 1 GB variant for VRAM until confirmed.
+- **Target:** ~60 FPS (≤ 16.7 ms) on capable hardware (e.g. RTX 4050 class) at **High**.
+- **Visual quality scales above the floor** (§7.18); the reference machine is a floor, not a ceiling.
+
+Budgets below are for the weak reference at Low, 1080p, unless noted. They are starting values: they are validated and revised by measurement (TESTING.md §7), never tightened by assumption.
 
 | Item | Budget |
 |---|---|
-| Frame time | 16.6 ms target (60 FPS); 33 ms floor (30 FPS) |
-| Simulation step | ≤ 4 ms with maximum alive enemies |
+| Frame time | ≤ 33.3 ms average on the reference (Low); ≤ 16.7 ms on capable hardware (High). Track p95 and 1% lows |
+| Simulation step | ≤ 4 ms with maximum alive enemies (CPU: i5-4440) |
 | Alive enemies | default cap 24 (config); stress-tested at 60 |
-| Draw calls | ≤ 250 per frame |
-| Real-time lights | fixed count; ≤ 8 point/spot lights; ≤ 2 shadow casters |
+| Draw calls | ≤ 250 per frame at Low (higher presets may use more if measured within target) |
+| Real-time lights | fixed count per preset (D-022); ≤ 8 point/spot lights; shadow casters per preset (Low 1, High 2) |
+| VRAM | ≤ ~700 MB at Low (fits a 1 GB GTX 750 with headroom for the browser) |
 | Per-frame allocations | ~0 in hot paths (preallocated temporaries, pools) |
-| Device pixel ratio | capped at 2; render-scale setting |
+| Device pixel ratio | capped per preset (Low 1 … Ultra 2); render-scale setting |
 | AI decisions | 5–10 Hz, staggered; animation LOD for distant/off-screen enemies |
 
-**Measurement tools:** the debug overlay counters, `renderer.info`, the Chrome Performance panel, and a stress-test debug command that spawns N enemies.
+**Measurement tools:**
+- the debug overlay and `tls.stats()` (our CPU cost, draw calls);
+- Chrome's Rendering → *Frame Rendering Stats* and the Performance panel, which also work on production builds;
+- a stress-test debug command that spawns N enemies (arrives with enemies).
 
 ---
 

@@ -112,6 +112,11 @@
     - `npm run test:e2e`: 33 passed, 7 skipped by design (dev-only checks in `prod`), identical on two consecutive runs (about 1.7 min each).
     - A planted bug (refusal feedback removed) failed the input spec in both projects, and was reverted.
   - Live Vercel preview: **not reachable from the container.** The environment's network policy returns 403 for `*.vercel.app`. The suite is ready to run against it once the host is allowed (see Blocked Tasks).
+- [x] **O-9 resolved** (D-037, 2026-09-25).
+  - Weak reference machine: Intel Core i5-4440, 16 GB DDR3-1333, NVIDIA GTX 750.
+  - Targets: ~30 FPS average at 1080p Low on it; ~60 FPS at High on capable hardware.
+  - The reference is a performance floor, not a visual ceiling: quality presets (Low → Ultra) scale shadows, lighting, effects, post-processing, textures and resolution, with identical gameplay.
+  - Documented in DECISIONS (D-037), ARCHITECTURE (§7.18, §8), TESTING (§6, §7 protocol and results log) and GAME_DESIGN (§17). No code changes.
 
 ## Active Task
 
@@ -130,8 +135,17 @@ None.
 4. **Camera** (`player/CameraController`): mouse look through the frame reader, with a pre-step hook in `Game` (D-034). Sensitivity, vertical clamp, FOV, subtle head bob.
 5. **Verify:** unit tests (movement and collision in headless Node), e2e walk-around, manual feel check. The acceptance bar is walking the whole prototype map comfortably, with responsive and predictable movement.
 
+**Performance and graphics quality in Phase 1** (D-037, O-9 resolved):
+- **Target:** ~30 FPS average at 1080p, Low, on the weak reference machine (i5-4440 · 16 GB DDR3-1333 · GTX 750). ~60 FPS at High on capable hardware.
+- **Measure before optimising.** Phase 1 records the first baseline with the TESTING.md §7 protocol (prototype-map walk, 60 s).
+- **Minimal quality hooks only** (not the settings system):
+  - a `GraphicsQualityProfile` type and preset values for what Phase 1 renders (render scale, pixel-ratio cap, MSAA, shadow casters and size);
+  - a `?quality=low|medium|high|ultra` load-time override;
+  - rendering code reads these from the profile, never from constants.
+
 **Needed from you before or during Phase 1:**
-- O-9, the reference hardware for the performance baseline.
+- Confirm whether the reference GTX 750 has 1 GB or 2 GB of VRAM. Budgets assume 1 GB until then.
+- Run the Phase 1 performance measurement on the reference machine; the container has no GPU.
 - A manual QA run of TESTING.md §6 in real browsers.
 
 **Deferred on purpose:**
@@ -155,7 +169,7 @@ Nothing is blocked now. These later tasks need decisions (full list in `DECISION
 | In-run weapon acquisition | O-2 | End of Phase 2 |
 | Melee action; Heavy Hands upgrade | O-6 (melee binding) | Phase 2 / Phase 9 |
 | Technician upgrade | O-6 (no utility/trap system defined) | Phase 9 |
-| Performance acceptance (30 FPS floor) | O-9 (reference hardware) | Phase 1 baseline |
+| Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU | Phase 1 baseline, then each phase |
 | v1 zombie roster | O-3 | Phase 5 |
 | v1 mutation set; intro waves without mutations | O-4, O-7 | Phase 7 |
 | XP/Scrap sinks (meta-progression screen) | O-1 | Phase 9 |
@@ -220,7 +234,7 @@ Reviewed 2026-09-25 against the code on this branch.
 - Manual QA in real browsers.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
-- O-9 (reference hardware) is needed for Phase 1's performance baseline.
+- O-9 is resolved (D-037). The first reference-machine measurement is due in Phase 1.
 
 ---
 

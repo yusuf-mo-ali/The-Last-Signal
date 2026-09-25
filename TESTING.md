@@ -137,19 +137,60 @@ Record the date, browser version and results in PROGRESS.md.
 
 ### Debug tools and performance
 - [ ] **Overlay:** the Backquote key toggles the stats overlay in dev, and the overlay is absent in production builds.
-- [ ] **Performance:** on the reference hardware (O-9), the overlay shows a steady 60 FPS at 1366×768 and 1920×1080 with our frame cost well under 4 ms.
+- [ ] **Performance:** follow §7. The weak reference machine reaches ~30 FPS average at 1080p, Low preset; capable hardware reaches ~60 FPS at High. Record the results in the §7 log.
 
 ---
 
-## 7. Performance testing
+## 7. Performance testing (D-037)
 
-- **Budgets:** ARCHITECTURE.md §8.
-- **Measurement:** the dev overlay (`FPS`, `cost avg/p95/max`, draw calls) and `tls.stats()`.
-- **Phase 0 figures,** from software rendering in the container, so not representative of GPUs:
-  - our frame cost is about 0.5–1.3 ms;
-  - 14 draw calls, 146 triangles, 3 shader programs;
-  - frame-probe overhead is about 130 ns per frame when on and 0 when off.
-- **Real baselines need the reference hardware** (open question O-9) and start in Phase 1, when the prototype map exists.
+### 7.1 Reference hardware and targets
+
+| Tier | Machine | Preset | Resolution | Target |
+|---|---|---|---|---|
+| **Minimum** | **Weak reference:** Intel Core i5-4440 · 16 GB DDR3-1333 · NVIDIA GTX 750 (confirm 1 GB or 2 GB) | Low | 1920×1080 | **~30 FPS average** (≤ 33.3 ms per frame) in normal gameplay |
+| **Target** | Capable hardware, e.g. an RTX 4050 class GPU | High | 1920×1080 | **~60 FPS** (≤ 16.7 ms per frame) |
+
+- **1080p is the primary baseline** unless a phase states otherwise.
+- **The reference is a performance floor, not a visual ceiling.** Higher presets must look significantly better on stronger GPUs, with identical gameplay (ARCHITECTURE §7.18).
+- **Budgets:** ARCHITECTURE §8.
+- **Measure first, optimise second.** Optimisation work starts from a logged measurement that misses a budget.
+
+### 7.2 How to measure
+
+1. **Build:** measure the **production** build (`npm run build && npm run preview`, or the Vercel preview). The development build adds HMR and debug overhead.
+2. **Browser:**
+   - Latest Chrome, and Edge or Firefox as a second browser. No other tabs or apps running.
+   - Laptops plugged in; OS power plan set to High performance.
+   - Browser window fullscreen (F11) at 1920×1080, browser zoom 100%.
+3. **Preset:** Low on the weak reference, High on capable hardware. From Phase 1: `?quality=low` or `?quality=high`.
+4. **Scenario:** use the phase's scenario (table below). Let the scene settle for 10 s, then record for **60 s**.
+5. **Frame rate** (works in production): Chrome DevTools → More tools → Rendering → **Frame Rendering Stats**, plus a Performance-panel recording of the 60 s.
+6. **Our CPU cost** (development build, same scenario): the overlay and `tls.stats()`, which report cost avg/p95/max per frame, draw calls and steps per frame.
+7. **Record:** average FPS, p95 and 1% low frame times, our CPU cost p95, draw calls, and anything unusual (stutter, hitches) in the log below.
+
+| Phase | Scenario |
+|---|---|
+| 1 | Walk the full prototype-map loop continuously for 60 s (sprinting, jumping, looking around) |
+| 3–6 | A wave at the default `maxAlive` (24) under fire; plus the stress test at 60 enemies |
+| 7, 11 | The same with BLACKOUT, and a lighting-heavy environment state |
+| 13 | The boss fight, including its screen effects |
+
+**Pass rule:** the average FPS meets the tier target.
+- A p95 above ~50 ms on the reference is investigated even when the average passes.
+- A phase that misses its target on the reference fixes it before adding major content (plan §39, rule 6).
+
+### 7.3 Results log
+
+| Date | Commit | Build | Machine | Browser | Preset | Resolution | Scenario | Avg FPS | p95 / 1% low (ms) | CPU cost p95 (ms) | Draw calls | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| — | — | — | — | — | — | — | — | *No reference measurements yet. The first is due in Phase 1, once the prototype map exists.* | | | | |
+
+### 7.4 Figures from the Claude Code container
+
+Software rendering (SwiftShader) with no GPU, so these are not representative:
+- our frame cost is about 0.5–1.3 ms;
+- 14 draw calls, 146 triangles, 3 shader programs;
+- frame-probe overhead is about 130 ns per frame when on and 0 when off.
 
 ---
 
