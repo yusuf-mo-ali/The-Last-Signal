@@ -44,6 +44,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-028 | Layering of world changes | Accepted |
 | D-029 | Player can only be damaged during WAVE_ACTIVE / BOSS | Proposed |
 | D-030 | Blockout-first visuals, swappable art | Accepted |
+| D-031 | Phase 0.1 tooling configuration details | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open |
 
 ---
@@ -423,6 +424,20 @@ A flat machine would bring back hidden flags (such as "state before pause"), whi
 **Why.**
 - Gameplay feel and systems come before visual polish (plan §41).
 - The asset source is still open (O-8).
+
+## D-031 — Phase 0.1 tooling configuration details
+**Status:** Accepted · **Date:** 2026-09-25
+
+**Decision.**
+- **Versions:** `three` and `@types/three` are pinned exactly, because the type package must match the runtime. `typescript` is pinned to `6.0.3` (D-002). Other dev tools use caret ranges, and `package-lock.json` locks everything; installs use `npm ci`.
+- **ESLint:** `typescript-eslint` `strictTypeChecked` + `stylisticTypeChecked` with the project service, and `eslint-config-prettier` last. The simulation layer rule (D-003) is two ESLint rules scoped to simulation folders: `no-restricted-imports` and `no-restricted-globals`.
+- **Prettier** formats code and config only. `*.md` is excluded:
+  - the documentation is hand-maintained;
+  - `IMPLEMENTATION_PLAN.md` must stay byte-identical (D-025).
+  `.editorconfig` also leaves the plan's CRLF line endings alone.
+- **No `@types/node`.** Nothing in `src/`, `tests/` or `vite.config.ts` uses Node APIs yet, and `skipLibCheck` covers the Node types referenced inside Vite's own declarations. Add it only when code actually needs Node APIs.
+- **The first test verifies the headless assumption.** It checks that `three` math and the `Octree`/`Capsule` add-ons work in Node against an octree built from raw triangles. This backs D-003 and D-006 before any system depends on them.
+- **`npm run check`** runs typecheck, lint, format check and tests. It is the gate before every commit.
 
 ---
 

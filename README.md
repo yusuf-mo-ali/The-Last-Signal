@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: pre-production.** Planning and architecture are complete. There is **no playable build yet**; Phase 0 (project foundation) comes next.
+> **Status: Phase 0 (project foundation) in progress.** The toolchain is in place (Phase 0.1); there is **no playable build yet**.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -46,20 +46,21 @@ Exact versions and reasoning are in [`DECISIONS.md`](DECISIONS.md) (D-001, D-002
 
 ## Getting started
 
-> The commands below become available when Phase 0 is complete. They do not work yet.
-
 **Prerequisites:** Node.js 22 LTS (≥ 22.12) and npm 10+.
 
 ```bash
-npm install          # install dependencies
+npm ci               # install the exact locked dependencies
 npm run dev          # start the dev server with hot reload
 npm run build        # typecheck + production build to dist/
 npm run preview      # serve the production build locally
-npm test             # unit + integration tests
-npm run lint         # ESLint
+npm test             # unit + integration tests (Vitest)
+npm run lint         # ESLint (type-aware, plus layer-boundary rules)
 npm run typecheck    # TypeScript, no emit
-npm run format       # Prettier
+npm run format       # Prettier (code and config; Markdown is hand-maintained)
+npm run check        # typecheck + lint + format check + tests; run before every commit
 ```
+
+The dev server currently shows a placeholder screen; the renderer arrives in Phase 0.3.
 
 **Target browsers:** desktop Chrome, Edge and Firefox. Keyboard and mouse required.
 

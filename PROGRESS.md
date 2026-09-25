@@ -4,15 +4,14 @@
 > work can be resumed safely (plan §36).
 >
 > **Last updated:** 2026-09-25 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
-> (merged into `main` through a pull request)
+> (open PR into `main`: yusuf-mo-ali/The-Last-Signal#1)
 
 ---
 
 ## Current Phase
 
-**Pre-Phase 0: Planning and architecture.** Complete, **awaiting approval** before Phase 0 starts.
+**Phase 0: Project Foundation.** Step 0.1 (toolchain scaffold) is complete; step 0.2 has not started.
 
-- No source code, dependencies or build configuration exist yet. This is intentional.
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
 ## Completed Tasks
@@ -30,19 +29,22 @@
 - [x] Repository setup. The feature branch was the only branch, so it had become GitHub's default and a pull request had nothing to target.
   - Created `main` from an empty root commit (`bccdaf6`).
   - Merged `main` into the feature branch with a normal merge commit: no rebase, no force-push, no file changes.
-  - Opened a PR from the feature branch into `main`.
+  - Opened a PR from the feature branch into `main`. The GitHub default branch was then switched to `main` (by the repo owner).
+- [x] **Phase 0.1: Toolchain scaffold** (D-031).
+  - Added `package.json` + `package-lock.json`, `tsconfig.json` (strict), `vite.config.ts` (with Vitest config), `eslint.config.js` (type-aware + layer rules), Prettier config, `.gitignore`, `.nvmrc`, `.editorconfig`, `index.html`, `src/main.ts` + `src/style.css` (placeholder screen), and `tests/toolchain.test.ts`.
+  - Verified: `npm run typecheck`, `lint`, `format:check`, `test` (2 tests) and `build` all pass. The layer rule fires on a probe file that breaks it, and is removed after. `npm run dev` loads in headless Chromium with no console errors or failed requests.
 
 ## Active Task
 
-None. Waiting for approval to start **Phase 0.1**.
+None. Waiting for approval to start **Phase 0.2**.
 
 ## Known Bugs
 
-None; no code exists yet.
+None.
 
 ## Next Task
 
-**Phase 0.1: Toolchain scaffold.** Details are in the Phase 0 plan below.
+**Phase 0.2: Core primitives**: `EventBus`, `Time`, the `GameState` FSM, `utils/Rng`, `utils/Pool`, all with unit tests. Details are in the Phase 0 plan below.
 
 ## Blocked Tasks
 
@@ -69,7 +71,7 @@ Each step is one small commit (plan §37). Every step must end with typecheck, l
 
 | Step | Scope | Acceptance |
 |---|---|---|
-| **0.1 Toolchain scaffold** | `package.json` (npm; Node ≥22.12 engines). Dependencies: `three@0.186.1`; dev dependencies from D-002. `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `erasableSyntaxOnly`). ESLint flat config (typescript-eslint type-checked plus the layer import rules from ARCHITECTURE §2). Prettier, Vitest, `.gitignore`, `.nvmrc`, `.editorconfig`. `index.html` and a minimal `src/main.ts`. Scripts: `dev`, `build`, `preview`, `typecheck`, `lint`, `format`, `test`. | `npm ci`, `typecheck`, `lint`, `test` and `build` all pass. `npm run dev` serves a page with no console errors |
+| **0.1 Toolchain scaffold** ✅ | `package.json` (npm; Node ≥22.12 engines). Dependencies: `three@0.186.1`; dev dependencies from D-002. `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `erasableSyntaxOnly`). ESLint flat config (typescript-eslint type-checked plus the layer import rules from ARCHITECTURE §2). Prettier, Vitest, `.gitignore`, `.nvmrc`, `.editorconfig`. `index.html` and a minimal `src/main.ts`. Scripts: `dev`, `build`, `preview`, `typecheck`, `lint`, `format`, `test`. | `npm ci`, `typecheck`, `lint`, `test` and `build` all pass. `npm run dev` serves a page with no console errors |
 | **0.2 Core primitives** | `EventBus` (typed), `Time` (fixed-step clock, time scale), `GameState` (12 states, hierarchy, pause stack, transition table), `utils/Rng` (seeded), `utils/Pool` | Unit tests cover every legal and illegal transition, pause/resume restoring the child state, and event ordering and re-entrancy |
 | **0.3 Render foundation** | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
 | **0.4 Input** | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |

@@ -65,7 +65,8 @@ flowchart TB
 | Presentation | anything (sim state is read-only) | mutating simulation state directly: use system methods (commands) |
 | Platform | `core/`, `utils/` | simulation internals |
 
-- In Phase 0, ESLint `no-restricted-imports` overrides will enforce these rules per folder.
+- `eslint.config.js` enforces the simulation rules. In simulation folders, `no-restricted-imports` blocks presentation imports and `no-restricted-globals` blocks `window`, `document`, `navigator`, `localStorage` and `requestAnimationFrame`. Presentation files matched by the naming rule below are exempt.
+- The rule against importing three.js renderers or materials in simulation code is enforced by code review, not lint.
 - The plan's domain folders mix sim and presentation files. Presentation files in those folders are marked by name: `*View.ts`, `player/CameraController.ts` and `world/LightingController.ts`.
 - `three`'s math classes are plain JavaScript and run in Node, so the simulation needs no separate math library.
 
