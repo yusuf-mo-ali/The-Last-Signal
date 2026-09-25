@@ -461,22 +461,22 @@ These are starting values, to be validated on reference hardware (open question 
 
 ---
 
-## 9. Testing strategy (D-021)
+## 9. Testing strategy (D-021, D-036)
 
 | Level | Tool | Scope |
 |---|---|---|
 | Unit | Vitest (Node) | damage calculation, wave generation, difficulty curve, upgrade offers, mutation selection, economy, FSM transitions, save/migrations, modifiers |
 | Integration | Vitest + headless `Game` | scripted scenarios with a seeded RNG and fixed dt: shoot → kill → wave complete → upgrade → next wave → boss → game over → restart |
-| Smoke / E2E | Playwright (Chromium is in the container) | page loads, no console errors, canvas renders, state transitions via debug hooks |
+| End-to-end | Playwright (`tests/e2e/`, `npm run test:e2e`) | the same specs against the dev server and a production build (and optionally a deployed URL via `E2E_BASE_URL`): rendering, resize/DPR, DOM input and pointer lock, error screens, context loss, debug tools present in dev and absent in production. Every test also asserts a clean console |
 | Manual QA | checklist in `TESTING.md` | mouse capture, feel, audio, browser matrix (Chrome, Edge, Firefox) |
 
-`TESTING.md` will be created in Phase 0 together with the test harness.
+`TESTING.md` (Phase 0.6) documents how to run each level, the coverage map, conventions, the headless-browser limits, and the manual QA checklist.
 
 ---
 
 ## 10. Build and deployment
 
-- **npm scripts:** `dev`, `build` (typecheck + Vite build), `preview`, `typecheck`, `lint`, `format`, `test`.
+- **npm scripts:** `dev`, `build` (typecheck + Vite build), `preview`, `typecheck` (app + e2e), `lint`, `format`, `test`, `test:e2e`, `check` (typecheck + lint + format + unit tests).
 - **Output is static,** deployed to Vercel with no server functions. Server functions come in only if an online leaderboard enters scope.
 - **Asset filenames are content-hashed** and served with long cache lifetimes.
 - **Node 22 LTS,** pinned via `.nvmrc` and `engines`.

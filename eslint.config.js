@@ -122,6 +122,15 @@ export default tseslint.config(
     },
   },
 
+  // End-to-end specs: browser-side page scripts look up elements and window.tls that the test has
+  // just established, so non-null assertions are the clearest way to say so there (D-036).
+  {
+    files: ['tests/e2e/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+
   // Config files run in Node and are not part of the typed project.
   {
     files: ['eslint.config.js'],

@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-**Phase 0: Project Foundation.** Steps 0.1–0.5 are complete (toolchain, core primitives, render foundation, input, config/debug/errors); step 0.6 has not started.
+**Phase 0: Project Foundation. Complete** (steps 0.1–0.6). Every plan §7 acceptance criterion is met; see "Phase 0 acceptance review" below. Phase 1 (FPS controller) has not started and is awaiting approval.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -101,10 +101,21 @@
     - Browser, production build, 16/16 checks: no `tls`, overlay or debug chunk; the same fallbacks, with no stack shown.
     - Phase 0.3 and 0.4 browser checks were rerun and still pass (dev 22 + 19, prod 17 + 8).
     - Frame-probe overhead: 15.3 ns per frame when detached vs 15.4 ns with none; about 130 ns when the overlay is on.
+- [x] **Phase 0.6: Verify and document** (D-036).
+  - `TESTING.md`: test levels, commands, coverage map, conventions, the headless-browser limits, the manual QA checklist, performance notes and known gaps.
+  - Committed end-to-end suite in `tests/e2e/` (`npm run test:e2e`, Playwright 1.63.0 pinned): `smoke`, `resize`, `input`, `resilience` and `debug` specs, each run against the dev server and a production build. It replaces the ad-hoc browser scripts from 0.3–0.5.
+    - `E2E_BASE_URL` and `VERCEL_AUTOMATION_BYPASS_SECRET` let it test a deployed preview.
+    - `PLAYWRIGHT_CHROMIUM_EXECUTABLE` lets it use a pre-installed browser.
+  - `tests/e2e/tsconfig.json` (Node types via `@types/node`, e2e only). `npm run typecheck` now covers app + e2e. Lint allows non-null assertions in `tests/e2e/` only.
+  - Verified:
+    - Clean `npm ci` (0 vulnerabilities); `npm run check` passes (420 unit tests); `npm run build` has no warnings.
+    - `npm run test:e2e`: 33 passed, 7 skipped by design (dev-only checks in `prod`), identical on two consecutive runs (about 1.7 min each).
+    - A planted bug (refusal feedback removed) failed the input spec in both projects, and was reverted.
+  - Live Vercel preview: **not reachable from the container.** The environment's network policy returns 403 for `*.vercel.app`. The suite is ready to run against it once the host is allowed (see Blocked Tasks).
 
 ## Active Task
 
-None. Waiting for approval to start **Phase 0.6**.
+None. Phase 0 is complete; waiting for approval to start **Phase 1**.
 
 ## Known Bugs
 
@@ -112,24 +123,28 @@ None.
 
 ## Next Task
 
-**Phase 0.6: Verify and document.** This closes Phase 0.
-- `TESTING.md`: test strategy, how to run each level, and the manual QA checklist. Include the headless-browser limits found in 0.4 (Esc, the re-lock cooldown, real tab blur) as manual checks.
-- An optional Playwright smoke test committed to the repo (`tests/e2e/`), turning the scratchpad browser scripts from 0.3–0.5 into a repeatable `npm run test:e2e`.
-- A final pass over the Phase 0 acceptance criteria (plan §7).
+**Phase 1: First Person Foundation (plan §8).** The first gameplay code. Suggested steps, each a small commit:
+1. **Prototype map (blockout)**: level-as-data (D-013), one compact facility layout (GAME_DESIGN §12.1) that generates render meshes, the collision octree and spawn points. Replaces the Phase 0 test scene.
+2. **Collision** (`physics/CollisionWorld`): `Octree` + `Capsule` (D-006). Ground detection, walls, steps and slopes, no falling through the map.
+3. **Player movement** (`player/`): walk, strafe, sprint, crouch (C) and jump on the fixed step, reading the step input reader and actions.
+4. **Camera** (`player/CameraController`): mouse look through the frame reader, with a pre-step hook in `Game` (D-034). Sensitivity, vertical clamp, FOV, subtle head bob.
+5. **Verify:** unit tests (movement and collision in headless Node), e2e walk-around, manual feel check. The acceptance bar is walking the whole prototype map comfortably, with responsive and predictable movement.
 
-Details are in the Phase 0 plan below.
+**Needed from you before or during Phase 1:**
+- O-9, the reference hardware for the performance baseline.
+- A manual QA run of TESTING.md §6 in real browsers.
 
 **Deferred on purpose:**
-- **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them.
+- **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
 - **From 0.4:**
-  - Mouse look and a pre-step hook in `Game` (Phase 1).
   - A `beforeunload` confirmation during a run (with the run lifecycle).
-  - Sensitivity and invert-Y settings (settings phase).
+  - Sensitivity and invert-Y *settings persistence* (settings phase).
   - Replacing `LockPrompt` with the pause menu (UI phase).
 - **From 0.5:**
   - Balance numbers in `src/config/` (each system's phase, logged in BALANCING.md).
   - Enemy counts and hitboxes in the overlay (Phases 4+).
-  - An analytics interface (plan §30), not part of Phase 0.
+  - The analytics interface (plan §30).
+- **From 0.6:** CI (a GitHub Actions workflow running check, build and e2e on each PR) is recommended but not yet added.
 
 ## Blocked Tasks
 
@@ -147,6 +162,8 @@ Nothing is blocked now. These later tasks need decisions (full list in `DECISION
 | Signal objective rules; interact binding | O-12, O-6 | Phase 12 |
 | Real art and audio | O-8 | Milestone 2+ |
 | Public release | O-11 (licence) | Before first public deployment |
+| E2E against the live Vercel preview from the cloud container | The environment's network policy denies `*.vercel.app` (403). Allow the host in the environment's network settings, and provide `VERCEL_AUTOMATION_BYPASS_SECRET` if the preview is protected | Any time |
+| Manual QA in real Chrome / Edge / Firefox (TESTING.md §6) | A person with real browsers and hardware | Before Milestone 1 sign-off |
 
 ---
 
@@ -161,9 +178,49 @@ Each step is one small commit (plan §37). Every step must end with typecheck, l
 | **0.3 Render foundation** ✅ | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
 | **0.4 Input** ✅ | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |
 | **0.5 Config, debug, errors** ✅ | `core/Config.ts`, `src/config/` type skeletons, `debug/` (dev-only dynamic import, `window.tls` stub, FPS counter overlay), `core/ErrorHandler` (global errors, WebGL missing, context lost) | Production build contains no debug code (bundle checked); a forced error shows the error screen |
-| **0.6 Verify and document** | `TESTING.md` (strategy plus manual QA checklist). Optional Playwright smoke test (loads, renders, no console errors). Update `PROGRESS.md` and `ARCHITECTURE.md` | Every Phase 0 acceptance criterion in plan §7 is met and recorded |
+| **0.6 Verify and document** ✅ | `TESTING.md` (strategy plus manual QA checklist). Optional Playwright smoke test (loads, renders, no console errors). Update `PROGRESS.md` and `ARCHITECTURE.md` | Every Phase 0 acceptance criterion in plan §7 is met and recorded |
 
 Plan §7 acceptance criteria: launches; no TypeScript errors; no console errors; stable rendering loop; resize works; input works; state transitions are testable.
+
+---
+
+## Phase 0 acceptance review (plan §7)
+
+Reviewed 2026-09-25 against the code on this branch.
+
+| Plan §7 task | Status | Evidence |
+|---|---|---|
+| Initialize Vite + TypeScript | Done | 0.1; a clean `npm ci` + `npm run build` |
+| Configure strict TypeScript | Done | `tsconfig.json`: `strict`, `noUncheckedIndexedAccess`, `erasableSyntaxOnly`, … |
+| Configure ESLint | Done | Type-aware strict rules plus layer-boundary rules for simulation and `input/` |
+| Configure formatting | Done | Prettier; `format:check` in `npm run check` |
+| Create folder architecture | Done, by design incrementally | Tree defined in ARCHITECTURE §6; 8 folders exist, the rest are created with their first file (D-036) |
+| Create Game bootstrap | Done | `core/Game.ts`, `main.ts` composition root |
+| Create rendering loop | Done | Fixed-step loop, `Game.test.ts`, `smoke.spec` |
+| Create scene / camera | Done | `world/TestSceneView.ts`, `render/camera.ts` |
+| Create resize handling | Done | `render/Renderer.ts` + `viewport.ts`; `resize.spec` |
+| Create input manager | Done | `input/` (0.4); `input.spec` |
+| Create EventBus | Done (no consumers yet) | `core/EventBus.ts`, 25 tests; first consumers come with gameplay events |
+| Create configuration system | Done | `core/Config.ts` + `src/config/` skeletons |
+| Create game state machine | Done | `core/GameState.ts`, all 12 plan states, 132-pair transition test |
+| Add debug mode / FPS counter | Done | `debug/` (dev only), `tls`, overlay; `debug.spec` |
+| Add basic error handling | Done | `core/ErrorHandler.ts`, `ui/StatusScreen.ts`; `resilience.spec` |
+
+| Acceptance criterion | Met | How it is verified |
+|---|---|---|
+| Project launches successfully | Yes | `smoke.spec` in dev and prod; clean `npm ci` |
+| No TypeScript errors | Yes | `npm run typecheck` (app + e2e) |
+| No console errors | Yes | Every e2e test asserts a clean console, in dev and prod |
+| Rendering loop stable | Yes | `smoke.spec` (steps + dropped time = real time), `Game.test.ts`; our frame cost about 1 ms |
+| Resize works correctly | Yes | `resize.spec`: 5 resolutions, live DPR changes, cap, collapsed container |
+| Input system works | Yes, automated. Real-browser items pending manual QA | `input.spec`, `input/*.test.ts`; TESTING.md §5–6 |
+| Game state transitions are testable | Yes | `GameState.test.ts`, `Game.test.ts`, `stepInput.test.ts`, e2e via `tls` |
+
+**Open items that do not block Phase 1:**
+- Manual QA in real browsers.
+- The live Vercel preview is blocked by the container's network policy.
+- No CI yet.
+- O-9 (reference hardware) is needed for Phase 1's performance baseline.
 
 ---
 
@@ -171,7 +228,7 @@ Plan §7 acceptance criteria: launches; no TypeScript errors; no console errors;
 
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
-| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | Not started |
+| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phase 0 complete |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | Not started |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
@@ -189,5 +246,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Planned for Phase 0.6, alongside the test harness |
+| `TESTING.md` | Created (Phase 0.6) |
 | `BALANCING.md` | Planned for Phase 2, when the first tunable values exist in `src/config/` |

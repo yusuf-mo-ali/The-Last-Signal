@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 0 (project foundation) in progress.** The toolchain, core primitives, render foundation, input layer, configuration, debug tools and error handling are in place (Phases 0.1–0.5); there is **no playable build yet**.
+> **Status: Phase 0 (project foundation) complete.** The toolchain, core primitives, render foundation, input, configuration, debug tools, error handling and the test harness are in place. There is **no playable build yet**: Phase 1 (FPS controller) is next.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -25,7 +25,7 @@ You are trapped in a failing communications facility. Survive escalating zombie 
 | [`GAME_DESIGN.md`](GAME_DESIGN.md) | Game rules, content and design intents |
 | [`DECISIONS.md`](DECISIONS.md) | Decision log and open questions |
 | [`PROGRESS.md`](PROGRESS.md) | Current phase, completed and next tasks, blockers |
-| `TESTING.md` | Test strategy and QA checklist (created in Phase 0) |
+| [`TESTING.md`](TESTING.md) | Test levels, how to run them, coverage, manual QA checklist |
 | `BALANCING.md` | Tuning log (created in Phase 2) |
 
 ## Tech stack (planned)
@@ -58,6 +58,7 @@ npm run lint         # ESLint (type-aware, plus layer-boundary rules)
 npm run typecheck    # TypeScript, no emit
 npm run format       # Prettier (code and config; Markdown is hand-maintained)
 npm run check        # typecheck + lint + format check + tests; run before every commit
+npm run test:e2e     # browser tests against the dev server and a production build (see TESTING.md)
 ```
 
 The dev server currently shows the Phase 0 test scene: a spinning signal beacon driven by the fixed-step simulation. Click to capture the mouse; Esc releases it. Keys and mouse are read, but nothing moves yet: the player controller and gameplay come in Phase 1.

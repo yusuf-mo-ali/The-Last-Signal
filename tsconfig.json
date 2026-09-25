@@ -23,5 +23,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": ["src", "tests", "vite.config.ts"],
+  "exclude": ["tests/e2e"]
 }

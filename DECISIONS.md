@@ -49,6 +49,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-033 | Render foundation and loop wiring | Accepted |
 | D-034 | Input architecture: readers, injection, pointer-lock flow | Accepted |
 | D-035 | Engine config, debug tooling, error and context-loss handling | Accepted |
+| D-036 | End-to-end harness and Phase 0 verification conventions | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open |
 
 ---
@@ -579,6 +580,27 @@ Implements D-010, D-020 and ARCHITECTURE §7.17 for Phase 0.5.
 - `ContextLossMonitor` owns loss, restore and a 10 s restore timeout.
 - Simulation state is never touched by a loss. Outside a run the simulation keeps stepping; a run pauses, as it would for any interruption.
 - On restore, shaders are pre-warmed again and the drawing buffer is re-applied.
+
+
+## D-036 — End-to-end harness and Phase 0 verification conventions
+**Status:** Accepted · **Date:** 2026-09-25
+
+Implements D-021's "Playwright when the first rendering smoke test is written" (Phase 0.6).
+
+**Decision.**
+- **The browser checks now live in the repository.** `@playwright/test` (pinned exactly, 1.63.0) runs `tests/e2e/*.spec.ts` via `npm run test:e2e`. The ad-hoc scripts used for Phases 0.3–0.5 are replaced by these specs.
+- **Two projects.** Every spec runs against the dev server (`dev`) and a production build served by `vite preview` (`prod`). Development-only checks are skipped in `prod`, which instead asserts that debug tooling is absent.
+- **`E2E_BASE_URL`** runs the suite against a deployed build (`remote` project, production expectations), e.g. a Vercel preview. `VERCEL_AUTOMATION_BYPASS_SECRET` adds Vercel's bypass header for protected previews. The repository remains the source of truth.
+- **Software WebGL** (SwiftShader) in e2e runs, for identical results with or without a GPU. E2E frame rates are therefore never performance data.
+- **One worker**, because software rendering is CPU-bound and several checks are timing-based.
+- **`PLAYWRIGHT_CHROMIUM_EXECUTABLE`** lets machines with a pre-installed Chromium (the cloud container) skip `npx playwright install`.
+- **Isolated typing.** `tests/e2e/` has its own `tsconfig.json` (Node types), is excluded from the app project, and is typechecked by `npm run typecheck`. `@types/node` is added for this only. `src/` still has no Node types (D-031).
+- **Not in `npm run check`.** E2E needs a browser and two servers (about 2 minutes). It is required before committing changes to rendering, input, UI, error handling or the build, and before merging.
+- **Every e2e test asserts a clean page:** no console errors or warnings, page errors, failed requests or HTTP errors, except errors a test deliberately provokes.
+- **Lint relaxation:** non-null assertions are allowed in `tests/e2e/` only, for browser-side page scripts where the element or `window.tls` is guaranteed by the test.
+- **Folders are created with their first file.** The full tree is defined in ARCHITECTURE §6. No empty placeholder directories are committed; git does not track them.
+
+**Why.** Browser behaviour verified once by hand drifts; committed specs make the Phase 0 guarantees repeatable. Running dev and production side by side catches build-only regressions and proves that debug code is stripped.
 
 ---
 
