@@ -3,7 +3,8 @@
 > The working state of the project. Every session reads this file first and updates it last, so
 > work can be resumed safely (plan §36).
 >
-> **Last updated:** 2026-09-25 · **Branch:** `claude/bold-mayer-n66vhb`
+> **Last updated:** 2026-09-25 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
+> (merged into `main` through a pull request)
 
 ---
 
@@ -26,6 +27,10 @@
 - [x] Wrote `DECISIONS.md`: 30 decisions, 12 open questions.
 - [x] Wrote `README.md`.
 - [x] Wrote `PROGRESS.md` (this file).
+- [x] Repository setup. The feature branch was the only branch, so it had become GitHub's default and a pull request had nothing to target.
+  - Created `main` from an empty root commit (`bccdaf6`).
+  - Merged `main` into the feature branch with a normal merge commit: no rebase, no force-push, no file changes.
+  - Opened a PR from the feature branch into `main`.
 
 ## Active Task
 
