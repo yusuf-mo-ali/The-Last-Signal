@@ -97,6 +97,22 @@ frame(now):
 - **Expensive AI** runs below the fixed rate on the `AIScheduler` (see §7.4).
 - **`visibilitychange` and `blur` pause the game** (plan §28, tab switching).
 
+### 3.1 How the loop is wired (Phase 0.3, D-033)
+
+```text
+main.ts (composition root, browser)          core/Game.ts (simulation, no browser APIs)
+  FrameScheduler = requestAnimationFrame ──►  start(scheduler) → tick(timestampMs)
+  Renderer (render/), TestSceneView           frame(frameDt):
+        ▲                                        time.advance(frameDt, systems.fixedUpdate)
+        └──────── Presentation.render ◄──────   presentation?.render(time.alpha, frameDt)
+```
+
+- **`Game` never calls browser APIs.** `main.ts` injects the frame source (`FrameScheduler`) and the drawing (`Presentation`). Tests inject a manual frame queue and no presentation, so the same loop runs headless in Node.
+- **The first frame after a start only sets the time base.** Stopped time is never caught up.
+- **The time scale follows the state machine.** It is 0 in `PAUSED` and `UPGRADE_SELECTION` (`FROZEN_STATES`) and 1 everywhere else. Rendering continues while frozen.
+- **An exception inside a frame stops the loop and is rethrown,** rather than repeating every frame. The error screen arrives in Phase 0.5.
+- **The first start moves `BOOT → MAIN_MENU`** ("boot complete").
+
 ---
 
 ## 4. Game state machine (D-005)
@@ -167,7 +183,7 @@ Game  (lives for the whole page)
 
 - **Restart means dispose the `RunSession` and build a new one.** There are no scattered `reset()` methods, which are a common source of restart bugs.
 - **`Game` owns GPU resources and pools,** so restarts are fast and never re-upload assets.
-- **`new Game({ headless: true })`** skips the renderer, views, audio and DOM UI. Integration tests use this mode.
+- **A headless `Game`** is simply one with no `Presentation` and a test frame source: no renderer, views, audio or DOM UI. Integration tests use this mode (implemented in Phase 0.3; `src/core/Game.test.ts`).
 
 ---
 
@@ -179,7 +195,7 @@ The plan's tree (§5) is adopted unchanged. Additions are marked `+`; D-023 give
 index.html
 public/                         static files copied verbatim
 src/
-├── main.ts                     entry: global error guards, WebGL2 check, boot Game
+├── main.ts                     composition root: WebGL2 check, wires rAF + Renderer + views into Game
 ├── core/
 │   ├── Game.ts                 owns persistent services and the loop
 │   ├── GameState.ts            state ids, transition table, hierarchical FSM
@@ -192,7 +208,8 @@ src/
 │   ├── weapons.ts  enemies.ts  waves.ts  mutations.ts  upgrades.ts  bosses.ts
 │   └── + adaptation.ts  economy.ts  signal.ts  input.ts (default bindings)
 │ + input/                      InputManager, bindings, PointerLock wrapper
-│ + render/                     Renderer (WebGL2), resize + DPR cap, post-processing, shader pre-warm
+│ + render/                     Renderer (WebGL2, resize + DPR cap), viewport math, camera defaults;
+│                               post-processing later
 │ + assets/                     AssetManager, asset manifest, placeholder fallbacks
 │ + physics/                    CollisionWorld (Octree + Capsule), SpatialHash, ray queries
 │ + navigation/                 NavGrid, FlowField, climb links
@@ -204,7 +221,8 @@ src/
 │ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
 ├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild
 ├── signal/                     SignalSystem, SignalMutationSystem, SignalProgression
-├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager
+├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager,
+│                               + TestScene / TestSceneView (Phase 0 test scene; replaced by the World in Phase 1)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
 ├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen,
 │                               + UIManager, SettingsMenu, LoadingScreen, VictoryScreen, styles/
@@ -374,7 +392,7 @@ Three sources change the world. They are layered rather than competing:
 ### 7.17 Error handling and browser hardening (D-017)
 
 - **Global errors:** `window.onerror` and `unhandledrejection` go to `ErrorHandler`. Dev builds show an overlay; production pauses and shows a friendly screen with a restart button.
-- **WebGL:** if WebGL2 is unavailable, show a clear message instead of crashing. Handle `webglcontextlost` and `webglcontextrestored`.
+- **WebGL:** if WebGL2 is unavailable, show a clear message instead of crashing (a plain message since Phase 0.3; the full error screen comes in 0.5). Handle `webglcontextlost` and `webglcontextrestored` (Phase 0.5).
 - **Pointer lock:**
   - Pausing is driven by `pointerlockchange` (lock lost), not the Esc keydown. The browser consumes that Esc keypress to release the lock.
   - Re-locking needs a user gesture and can be rejected; Chromium refuses requests made shortly after the user presses Esc. The pause UI therefore shows "Click to resume" and handles rejection.

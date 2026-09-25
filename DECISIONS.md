@@ -46,6 +46,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-030 | Blockout-first visuals, swappable art | Accepted |
 | D-031 | Phase 0.1 tooling configuration details | Accepted |
 | D-032 | Phase 0.2 core primitive semantics | Accepted |
+| D-033 | Render foundation and loop wiring | Accepted |
 | O-1 … O-12 | Open questions (see the end of this file) | Open |
 
 ---
@@ -469,6 +470,41 @@ Refines D-004, D-005, D-014 and D-015 with the behaviour the code and tests now 
 - Objects are reset on *release*, so idle objects are always clean.
 - Double release and foreign release throw.
 - Idle objects over `maxFree` and objects removed by `clear()` go to `dispose`.
+
+
+## D-033 — Render foundation and loop wiring
+**Status:** Accepted · **Date:** 2026-09-25
+
+Refines D-001, D-003, D-004 and D-022 for Phase 0.3.
+
+**Decision.**
+- **Injected loop dependencies.** `core/Game` stays browser-free:
+  - The frame source is an injected `FrameScheduler`: `requestAnimationFrame` in `main.ts`, a manual queue in tests.
+  - Drawing is an optional injected `Presentation`.
+  - This implements D-003's headless mode *without* a `headless` flag: a game with no presentation is headless.
+- **`main.ts` is the only composition root.** It is the one file that wires browser APIs (rAF, DOM, WebGL) into the game.
+- **Resizing** (`render/Renderer`):
+  - A `ResizeObserver` on the container catches layout and window changes.
+  - A `matchMedia('(resolution: …dppx)')` listener, re-armed after each change, catches zoom and monitor moves.
+  - Both only mark the renderer dirty. The new size is applied at most once per frame, at the start of `render`.
+  - The drawing buffer is `floor(css × min(dpr, 2) × renderScale)`, computed by the pure, unit-tested `render/viewport.ts`.
+  - A 0 × 0 container skips drawing instead of erroring.
+  - The canvas is sized by CSS; `setSize(..., false)` only changes the buffer.
+- **Camera defaults** (`render/camera.ts`): 60° vertical FOV (about 90° horizontal at 16:9, wider on ultrawide), near 0.05 m, far 500 m. The renderer keeps the aspect ratio in sync.
+- **Look:**
+  - ACES filmic tone mapping.
+  - Shadow map on, with three's default filter; setting a deprecated shadow type would log a warning.
+  - Shaders compiled with `renderer.compile` before the first frame (D-022).
+- **Test scene** (`world/TestScene` + `world/TestSceneView`): a fixed-step beacon drawn with interpolation. It shows the sim/`*View` split the real world will use, and is removed when the Phase 1 map arrives.
+- **Build chunks:**
+  - three.js is split into its own chunk via Rolldown `codeSplitting` groups, for long-term caching.
+  - `chunkSizeWarningLimit` is 600 kB, because three's core (~531 kB minified, ~132 kB gzip) can't shrink below the 500 kB default. The warning stays meaningful for every other chunk.
+- **Dev inspection handle.** `window.__TLS_DEV__ = { game, renderer, testScene }`, only when `import.meta.env.DEV`. The production bundle is checked to be free of it. The debug tools replace it in Phase 0.5.
+
+**Why.**
+- Keeps the simulation testable and profile-able in Node.
+- Handles every real-world cause of canvas-size change without resize thrash.
+- Avoids first-frame shader hitches.
 
 ---
 

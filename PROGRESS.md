@@ -10,7 +10,7 @@
 
 ## Current Phase
 
-**Phase 0: Project Foundation.** Steps 0.1 (toolchain scaffold) and 0.2 (core primitives) are complete; step 0.3 has not started.
+**Phase 0: Project Foundation.** Steps 0.1 (toolchain), 0.2 (core primitives) and 0.3 (render foundation) are complete; step 0.4 has not started.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -40,10 +40,23 @@
   - `src/utils/Rng.ts`: seeded sfc32 with `int`, `range`, `chance`, `pick`, `weighted`, `shuffle`, `fork` and save/restore of state.
   - `src/utils/Pool.ts`: acquire/release with reset on release, misuse detection, prewarm, `maxFree`, `releaseAll` and `clear`.
   - Verified: 247 new unit tests pass (249 in the suite), including all 132 source/target transition combinations checked against an independently written expected table. Eight deliberately planted bugs were each caught by the tests. `npm run check` and `npm run build` pass.
+- [x] **Phase 0.3: Render foundation** (D-033).
+  - `src/core/Game.ts`: the game root. It owns `Time` and `GameStateMachine` and runs the fixed-step loop through an injected `FrameScheduler`. The optional `Presentation` makes a game without one headless. It freezes time in `PAUSED`/`UPGRADE_SELECTION`, fails fast on errors, and moves `BOOT → MAIN_MENU` on start.
+  - `src/render/Renderer.ts`: WebGL2 check and `WebGLRenderer` (ACES tone mapping, shadow map), plus resize via `ResizeObserver` and a device-pixel-ratio media query, applied at most once per frame. A 0 × 0 container skips drawing.
+  - `src/render/viewport.ts`: pure size / pixel-ratio math (capped at 2, with render scale). `src/render/camera.ts`: camera defaults.
+  - `src/world/TestScene.ts` + `TestSceneView.ts`: a fixed-step beacon drawn with interpolation, crates, floor, grid, a fixed light rig with one shadow caster, and a shader pre-warm.
+  - `src/main.ts`: composition root, a plain "WebGL 2 unavailable" message, a Vite hot-reload teardown, and the dev-only `__TLS_DEV__` handle.
+  - `vite.config.ts`: three.js split into its own cached chunk; chunk warning limit 600 kB, with the reason recorded.
+  - Verified:
+    - 46 new tests (295 in the suite): the headless loop with a manual frame queue, and the viewport math at every target resolution and in edge cases.
+    - `npm run check` and `npm run build` pass, with no build warnings.
+    - A browser script in headless Chromium checked both `npm run dev` and the production preview: canvas and WebGL2, rendered and animating pixels, and resizing to 1920×1080, 1600×900, 1366×768, 800×600 and 320×180.
+    - It also checked live pixel-ratio changes (2, 1.25, 3 → capped at 2), recovery from a 0-height container, fixed steps accounting for real time, pause freezing steps while rendering continues, and resume without a burst.
+    - No console errors, warnings, page errors or failed requests.
 
 ## Active Task
 
-None. Waiting for approval to start **Phase 0.3**.
+None. Waiting for approval to start **Phase 0.4**.
 
 ## Known Bugs
 
@@ -51,9 +64,17 @@ None.
 
 ## Next Task
 
-**Phase 0.3: Render foundation**: `render/Renderer` (WebGL2 check, DPR cap, resize), the `core/Game` bootstrap and fixed-step loop wiring `Time` + `GameStateMachine`, a test scene and camera. Details are in the Phase 0 plan below.
+**Phase 0.4: Input**:
+- `input/InputManager`: keys by `code`, mouse buttons, wheel, per-frame mouse delta.
+- A pointer-lock wrapper (D-017).
+- `config/input.ts` default bindings.
+- Blur and visibility changes wired to `GameStateMachine.pause()`.
 
-**Deferred from 0.2 on purpose.** State-scoped timers (ARCHITECTURE §4) and the `GameEvents` map of event payloads are added with the first system that needs them. The hooks and scopes they build on already exist.
+Details are in the Phase 0 plan below.
+
+**Deferred on purpose:**
+- **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them.
+- **From 0.3, planned for 0.5:** moving the render and camera defaults into `core/Config.ts`, handling WebGL context loss and restore, and the full error screen that replaces the plain "WebGL 2 unavailable" message.
 
 ## Blocked Tasks
 
@@ -82,7 +103,7 @@ Each step is one small commit (plan §37). Every step must end with typecheck, l
 |---|---|---|
 | **0.1 Toolchain scaffold** ✅ | `package.json` (npm; Node ≥22.12 engines). Dependencies: `three@0.186.1`; dev dependencies from D-002. `tsconfig.json` (strict, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `erasableSyntaxOnly`). ESLint flat config (typescript-eslint type-checked plus the layer import rules from ARCHITECTURE §2). Prettier, Vitest, `.gitignore`, `.nvmrc`, `.editorconfig`. `index.html` and a minimal `src/main.ts`. Scripts: `dev`, `build`, `preview`, `typecheck`, `lint`, `format`, `test`. | `npm ci`, `typecheck`, `lint`, `test` and `build` all pass. `npm run dev` serves a page with no console errors |
 | **0.2 Core primitives** ✅ | `EventBus` (typed), `Time` (fixed-step clock, time scale), `GameState` (12 states, hierarchy, pause stack, transition table), `utils/Rng` (seeded), `utils/Pool` | Unit tests cover every legal and illegal transition, pause/resume restoring the child state, and event ordering and re-entrancy |
-| **0.3 Render foundation** | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
+| **0.3 Render foundation** ✅ | `render/Renderer` (WebGL2 check, DPR cap, resize), `core/Game` bootstrap and fixed-step loop (ARCHITECTURE §3), test scene (floor, boxes, light), camera | Stable loop; resize correct at 1366×768–1920×1080 and smaller; no console errors |
 | **0.4 Input** | `input/InputManager` (key `code`s, mouse buttons, wheel), pointer lock wrapper (D-017), `config/input.ts` default bindings, blur/visibility → pause hook | Input verified with the debug overlay; pointer lock acquire, lose and re-acquire works |
 | **0.5 Config, debug, errors** | `core/Config.ts`, `src/config/` type skeletons, `debug/` (dev-only dynamic import, `window.tls` stub, FPS counter overlay), `core/ErrorHandler` (global errors, WebGL missing, context lost) | Production build contains no debug code (bundle checked); a forced error shows the error screen |
 | **0.6 Verify and document** | `TESTING.md` (strategy plus manual QA checklist). Optional Playwright smoke test (loads, renders, no console errors). Update `PROGRESS.md` and `ARCHITECTURE.md` | Every Phase 0 acceptance criterion in plan §7 is met and recorded |
