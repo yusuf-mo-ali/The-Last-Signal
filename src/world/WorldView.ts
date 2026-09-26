@@ -22,6 +22,7 @@ import {
   Mesh,
   MeshStandardMaterial,
   Scene,
+  type Object3D,
   type PerspectiveCamera,
   type Triangle,
 } from 'three';
@@ -124,9 +125,25 @@ export class WorldView {
   /**
    * Compiles every shader now rather than on the first visible frame (D-022). Called once the
    * camera exists, and again after a WebGL context restore, when all programs are rebuilt.
+   *
+   * `compile` only visits visible objects, so pooled effects that start hidden (muzzle flash,
+   * impact markers, hit sparks, pickups) would still pay their first-draw setup in the middle of
+   * play: measured at ~200 ms on the first shot (TESTING §7.4). They are shown for one render
+   * here, behind the start prompt, and hidden again.
    */
   prewarm(camera: PerspectiveCamera): void {
+    const hidden: Object3D[] = [];
+    this.scene.traverse((object) => {
+      if (!object.visible) {
+        hidden.push(object);
+        object.visible = true;
+      }
+    });
     this.renderer.webgl.compile(this.scene, camera);
+    this.renderer.render(this.scene, camera);
+    for (const object of hidden) {
+      object.visible = false;
+    }
   }
 
   render(alpha: number, camera: PerspectiveCamera): void {

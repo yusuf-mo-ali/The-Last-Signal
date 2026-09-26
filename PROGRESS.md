@@ -10,9 +10,9 @@
 
 ## Current Phase
 
-**Phase 2: Weapon Framework. Complete** (plan §9, D-040). The player starts with Bare Hands, the Pistol and a locked Secondary; fires, reloads, switches (1 / 3; 2 refused while locked; wheel), quick-melees (V), and shots hit the level with recoil through the look. See "Phase 2 acceptance review" below. Phase 3 (combat) has not started and is awaiting approval.
+**Phase 3: Combat System. Complete** (plan §10, D-041). Shots and swings resolve against hitbox rigs (six zones), damage is calculated by one pure function, a reusable `Health` handles damage and a one-time death, and combat events drive placeholder feedback (hit markers, damage numbers, sparks, dummy reactions) and ammo drops. Everything is validated against **training dummies**, temporary targets that use the exact format zombies will. See "Phase 3 acceptance review" below. Phase 4 (zombie foundation) has not started and is awaiting approval.
 
-- Phase 1 (First Person Foundation) and Phase 0 (Project Foundation) are complete: see their acceptance reviews.
+- Phases 0 (Project Foundation), 1 (First Person Foundation) and 2 (Weapon Framework) are complete: see their acceptance reviews.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -163,9 +163,28 @@
     - Performance baseline (TESTING.md §7.4): weapon step ≤ 2.7 µs even firing every step; a hitscan ray ≈ 1 µs; frame cost +0.1 ms while firing; ≤ 46 draw calls with all impact markers.
   - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
 
+- [x] **Phase 3: Combat System** (plan §10, D-041).
+  - **Pipeline** (`src/combat/`, new simulation folder): weapon hit → hitbox resolution → `computeDamage` → `Health` → death → events. Nothing zombie-specific: anything with a hitbox rig and a `Health` can be registered with the `CombatSystem`.
+  - **Hitbox rigs** (`combat/hitbox.ts`, `config/combat.ts`): analytic spheres and capsules per zone (HEAD, TORSO, ARM_LEFT/RIGHT, LEG_LEFT/RIGHT) as config data, placed by position and yaw, independent of meshes (D-007); `HUMANOID_RIG`; bounding-sphere broad phase; nearest zone wins; pose swapping for later AI poses. `CombatSystem` is the rigs' `HitscanTarget`, so walls block targets and the nearest target wins through the Phase 2 hitscan.
+  - **Damage** (`combat/damage.ts`): pure and deterministic: base × falloff (from the pellet's hit result) × zone multiplier (plan table; HEAD = the weapon's headshot multiplier, scaled by the target's HEAD entry) × attacker multiplier, then armor with a floor, then resistance. Crit = headshot. Hooks for upgrades, armor and archetype overrides, all neutral now.
+  - **Health and death** (`combat/Health.ts`): current / max, configurable start, damage, heal, revive, `setMax`; death once; damage and healing ignored after death. `CombatSystem` emits `damaged`, `staggered`, `killed` (after the owner's `onKilled` deactivation hook) and `revived`; dead targets are no longer hittable.
+  - **Hit reactions:** a stagger threshold per target over a 1 s window (`staggered` event).
+  - **Feedback (placeholder):** `ui/CombatFeedback` (hit marker: hit / headshot / kill; pooled damage numbers, optional), body-hit sparks in `WeaponView`, dummy flash / rock / fall / stand-up.
+  - **Ammo drops (foundation):** `config/drops.ts`, `world/drops.ts` (`rollDrops`, seeded), `world/PickupManager.ts` + `PickupView`; ammo goes to `WeaponManager.addAmmo` (limited reserves only, so the unlimited Pistol takes nothing).
+  - **Training dummies (temporary):** `config/training.ts`, `combat/training/TrainingRange.ts` + `TrainingDummyView.ts`: a standard dummy (100 health, drops ammo) straight ahead of the spawn, another standard dummy and a zone-painted dummy (400 health); respawn after 3 s; reset every run.
+  - **Debug (dev only):** `tls.combat()`, `dummies()`, `spawnDummy()`, `resetDummies()`, `clearDummies()`, `reviveDummies()`, `aimAt()`, `aimAtTarget()`, `showHitboxes()` (hitbox visualiser), `damageNumbers()`, `pickups()`, `spawnPickup()`; overlay combat line. `healPlayer` / `setGodMode` stubs now point to Phase 4.
+  - Verified:
+    - 126 new unit and integration tests (749 in the suite), including a headless run of the whole pipeline through the real loop, input stack and level, and identical combat events for the same seed.
+    - 21 of 21 planted combat bugs caught (TESTING.md §4); the first pass caught 17 and the survivors led to new tests.
+    - `npm run check` passes; `npm run build` has no warnings (game 86.6 kB, 28.7 kB gzipped); no debug code in `dist/`.
+    - `npm run test:e2e`: 70 passed, 32 skipped by design. New `combat.spec` (10 tests): the range, headshot / body / arm / leg damage with hit markers and damage numbers, kill → fall → shots ignored → stand-up, reload in combat, V quick melee, ammo pickup, hitbox visualiser and numbers off; the DOM-only test also runs on the production build. All Phase 0–2 specs still pass.
+    - Browser screenshots inspected (headshot, zoned torso hit, kill, hitbox wireframes).
+    - Performance (TESTING.md §7.4): microseconds per shot; two findings fixed with measurements: 24 dummies drew ~285 draw calls (over the Low budget of 250), now ~59 with one merged mesh per dummy; and the first shot of a session hitched ~210 ms (present since Phase 2), now ~4 ms because hidden pooled objects are prewarmed.
+  - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
+
 ## Active Task
 
-None. Phase 2 is complete; waiting for approval to start **Phase 3**.
+None. Phase 3 is complete; waiting for approval to start **Phase 4**.
 
 ## Known Bugs
 
@@ -173,20 +192,19 @@ None.
 
 ## Next Task
 
-**Phase 3: Combat System (plan §10).** There are no enemies until Phase 4, so combat is built and tested against **training targets** that use the same hitbox-rig format zombies will (D-007). Suggested steps, each a small commit:
-1. **Hitbox rigs** (`combat/` or `enemies/`): analytic spheres/capsules per damage zone (HEAD, TORSO, ARM_LEFT/RIGHT, LEG_LEFT/RIGHT), registered as `HitscanTarget`s; zone multipliers from `config/enemies.ts` (plan §10: head 2.5×, torso 1.0×, arms 0.65×, legs 0.5×).
-2. **`computeDamage()`** (pure): base damage, falloff (already per pellet), zone multiplier (the weapon's headshot multiplier for HEAD), player modifiers (hook), armor and resistances (hooks); critical damage.
-3. **Health and death** for damageable things; events `enemy:damaged` / `enemy:killed`; melee damage for Bare Hands through the same path.
-4. **Feedback:** hit markers, damage numbers (presentation), a hit reaction hook, impact variants (level vs body).
-5. **Ammo drops** as a pickup placeholder, and the debug target dummy command.
-6. **Verify:** unit tests for damage (zones, falloff, headshots, melee), integration against dummies, e2e shooting a dummy.
+**Phase 4: Zombie Foundation (plan §11).** A reusable enemy framework on top of the Phase 3 combat model. Suggested steps, each a small commit:
+1. **Enemy data** (`config/enemies.ts`): fill `EnemyArchetypeConfig` for the Walker (health 100 as the Pass-1 value, speed, attack damage, range, detection range, cooldown, stagger threshold, drop table).
+2. **Enemy framework** (`enemies/`): an `Enemy` with a `HitboxRig` + `Health` registered with the `CombatSystem` (exactly like a training dummy), an `EnemyManager` with pooling and a `maxAlive` cap, and removal through the `onKilled` hook.
+3. **AI state machine** (plan §11: IDLE, PATROL, DETECT, CHASE, ATTACK, STAGGER, DEAD): cheap steering every step, decisions on a scheduler at 5–10 Hz (D-008, ARCHITECTURE §7.4); `staggered` → STAGGER; deaths drop ammo through the drop tables.
+4. **Movement and navigation** for the Walker in the blockout (nav grid / flow field per D-008, or direct steering first, whichever the plan step needs), and collision with the player.
+5. **Player health and damage to the player** with the Phase 3 `Health` (D-029: only during active waves), making `healPlayer` / `setGodMode` real; the training range is kept for testing until waves replace it.
+6. **Verify:** unit tests for the AI transitions and scheduling, headless integration (a Walker chases, attacks and dies), e2e, the 24-enemy performance scenario (TESTING.md §7.2).
 
 **Needed from you:**
-- Approval to start Phase 3.
-- Confirm training dummies as the Phase 3 test target (the plan puts zombies in Phase 4).
-- A manual QA pass of TESTING.md §6 in real browsers, including the new "Weapons" section: feel can only be judged by hand.
+- Approval to start Phase 4.
+- A manual QA pass of TESTING.md §6 in real browsers, including the new "Combat" section: hit feel and feedback readability can only be judged by hand.
 - Run the performance measurement on the reference machine (TESTING.md §7.2), and confirm the GTX 750's VRAM (1 GB or 2 GB).
-- Optionally, O-13 (Supply Terminal presentation, Secondary unlock condition); the defaults apply otherwise.
+- Optionally, O-3 (the v1 zombie roster) before Phase 5, and O-13; the defaults apply otherwise.
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -196,7 +214,7 @@ None.
   - Replacing `LockPrompt` with the pause menu (UI phase).
 - **From 0.5:**
   - Balance numbers in `src/config/` (each system's phase, logged in BALANCING.md).
-  - Enemy counts and hitboxes in the overlay (Phases 4+).
+  - Enemy counts in the overlay (Phases 4+; the hitbox visualiser exists since Phase 3).
   - The analytics interface (plan §30).
 - **From 0.6:** CI (a GitHub Actions workflow running check, build and e2e on each PR) is recommended but not yet added.
 - **From 1:**
@@ -210,6 +228,13 @@ None.
   - The loadout strip in the HUD, aim down sights (right mouse), weapon lowering while sprinting, weapon audio.
   - Bare Hands hit arcs and animation-timed impacts (combat).
   - Impact markers as one `InstancedMesh` if draw calls ever matter (they do not now).
+- **From 3:**
+  - Enemy use of the combat model (Phase 4): archetype zone overrides, pose presets per AI state, STAGGER behaviour, enemy drop tables.
+  - Player health and damage to the player (Phase 4, D-029); `healPlayer` / `setGodMode`.
+  - Helmets (per-zone armor that breaks), boss weak points (a crit flag on shapes), armored modifiers (D-012).
+  - A settings toggle for damage numbers (settings phase); blood, gore, hit and kill sounds (VFX and audio phases); a kill feed.
+  - Other pickup kinds (health, components) and the ammo economy (progression / economy phases).
+  - Training dummies removed from normal play when waves arrive (`TRAINING_RANGE.enabled`); they do not collide with the player.
 
 ## Blocked Tasks
 
@@ -288,6 +313,29 @@ Reviewed 2026-09-25 against the code on this branch.
 
 ---
 
+## Phase 3 acceptance review (plan §10)
+
+Reviewed 2026-09-26 against the code on this branch, with the scope the project owner set for Phase 3 (combat foundation; training dummies as temporary targets; no zombies).
+
+| Plan §10 / Phase 3 requirement | Status | Evidence |
+|---|---|---|
+| Hitscan shooting, raycasting, hit detection | Done | Phase 2 `Hitscan` + Phase 3 rigs as a `HitscanTarget`; walls block, nearest wins, dead targets not hittable; unit, integration and e2e tests |
+| Body-part system: HEAD, TORSO, ARM_LEFT, ARM_RIGHT, LEG_LEFT, LEG_RIGHT | Done | `HitboxShape` zones; `HUMANOID_RIG`; zone resolution tested for every zone, both sides, any facing |
+| Configurable multipliers (head 2.5, torso 1.0, arms 0.65, legs 0.5) | Done | `DEFAULT_ZONE_MULTIPLIERS` + target overrides; HEAD via the weapon's headshot multiplier (D-041) |
+| Damage system | Done | `computeDamage` (pure): falloff, zone, attacker, armor floor, resistance; 18 unit tests |
+| Headshots, critical damage | Done | Crit = headshot, no random crits; distinct feedback |
+| Hit reactions | Done (event); behaviour with the AI | `staggered` event over a 1 s window; dummies rock on hits, more on a stagger |
+| Death | Done | `Health` (death once, ignored after death, revive); `killed` once + `onKilled` deactivation hook |
+| Damage numbers / visual feedback | Done (placeholder) | `CombatFeedback` hit markers and pooled damage numbers; body sparks; dummy flash and fall |
+| Weapon recoil, reloading | Done in Phase 2; still working | Regression: all Phase 2 tests; reload in combat (integration, e2e) |
+| Ammo drops | Done (foundation) | Data-driven drop tables and pickups, seeded rolls, collection through `WeaponManager.addAmmo`; triggered by dummy deaths, ready for enemy deaths |
+| Training dummies (owner's scope) | Done | Standard and zoned dummies; configurable health; same rig format as zombies; respawn; E2E in dev and prod |
+| Performance measured | Done | TESTING.md §7.4: damage 0.05 µs, rig ray 0.22 µs, cast vs 24 dummies 3.5 µs; frame cost ~2–2.6 ms firing at 24 dummies; draw calls ~59 for 24 dummies after a measured fix |
+
+**Open items that do not block Phase 4:** manual feel check in real browsers; reference-machine measurement; Vercel preview blocked by the container's network policy; no CI yet.
+
+---
+
 ## Phase 2 acceptance review (plan §9)
 
 Reviewed 2026-09-26 against the code on this branch, with the scope the project owner set for Phase 2 (Pistol only; loadout per D-039).
@@ -346,7 +394,7 @@ Reviewed 2026-09-25 against the code on this branch.
 
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
-| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–2 complete |
+| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–3 complete |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | Not started |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
@@ -364,5 +412,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6), updated for Phase 1 |
-| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log |
+| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 3: combat coverage, mutations, manual QA, performance) |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies |

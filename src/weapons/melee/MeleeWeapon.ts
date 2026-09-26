@@ -2,9 +2,10 @@
  * Every melee weapon (D-039, D-040): one class configured by a `MeleeDefinition`. Bare Hands is the
  * only definition in Phase 2; a Knife is data, not code.
  *
- * Phase 2 placeholder behaviour: a swing is an instant ray of `reach` metres along the aim, which
- * reports what it touched (the level now, enemy hitboxes from Phase 4). Swing animation timing,
- * hit arcs and damage to enemies arrive with the combat phase.
+ * Placeholder behaviour: a swing is an instant ray of `reach` metres along the aim, which reports
+ * what it touched (the level or a hitbox rig); the combat system turns a rig hit into damage
+ * through the same path as a bullet, with no falloff (D-041). Swing animation timing and hit arcs
+ * arrive with real melee weapons.
  */
 
 import { Vector3 } from 'three';

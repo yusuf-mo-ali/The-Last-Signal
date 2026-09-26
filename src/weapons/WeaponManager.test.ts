@@ -383,6 +383,22 @@ describe('WeaponManager', () => {
       manager.acquire('pistol', 'secondary'); // new weapons inherit the setting
       expect((manager.weaponIn('secondary') as Firearm).infiniteAmmo).toBe(true);
     });
+
+    it('addAmmo gives whole magazines to limited reserves only (ammo pickups)', () => {
+      const { manager } = rig();
+      expect(manager.addAmmo(1)).toBe(0); // the Pistol's reserve is unlimited: nothing needed
+      const limited = rig({ definitions: { ...WEAPONS, pistol: { ...PISTOL, reserveAmmo: 24 } } });
+      expect(limited.manager.addAmmo(1)).toBe(PISTOL.magazineSize);
+      expect((limited.manager.weaponIn('primary') as Firearm).reserve).toBe(
+        24 + PISTOL.magazineSize,
+      );
+      limited.manager.unlockSecondary();
+      limited.manager.acquire('pistol', 'secondary');
+      expect(limited.manager.addAmmo(2)).toBe(PISTOL.magazineSize * 4);
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(limited.manager.addAmmo(bad)).toBe(0);
+      }
+    });
   });
 
   describe('melee', () => {

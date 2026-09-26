@@ -2,7 +2,7 @@
 
 The tuning log (plan §32, §36): every gameplay number that affects feel or difficulty, where it lives, why it has its value, and how it changed. Values live in `src/config/` only (plan §31); logic never hard-codes them.
 
-> **Status (Phase 2):** Pass 1 (functional). Player movement and the first weapons (Pistol, Bare Hands) have starting values. Nothing has been play-tested by hand yet; there are no enemies to tune against.
+> **Status (Phase 3):** Pass 1 (functional). Player movement, the first weapons (Pistol, Bare Hands) and the combat rules have starting values. Nothing has been play-tested by hand yet; the only targets are temporary training dummies, so enemy numbers are placeholders.
 
 ---
 
@@ -75,7 +75,52 @@ Balance is never tuned from assumptions alone. Three passes:
 | Sprint lockout after an attack | 0.35 s | "Firing cancels sprint" (GAME_DESIGN §4.2) |
 | Secondary unlock | After wave 5 | D-039 / O-13 default; applied by the wave system (Phase 6) |
 
-**Assumptions to confirm in Pass 2.** Walker health (100) is not defined yet (Phase 4); the time-to-kill checks use it as a placeholder. Enemy damage, Supply Terminal prices and ammunition amounts do not exist yet.
+**Assumptions to confirm in Pass 2.** Walker health (100) is not defined yet (Phase 4); the time-to-kill checks and the standard training dummy use it as a placeholder. Enemy damage, Supply Terminal prices and ammunition amounts do not exist yet.
+
+### 2.3 Combat (`src/config/enemies.ts`, `src/config/combat.ts`, Phase 3, D-041)
+
+**Zone multipliers** (plan §10, unchanged from the plan's example; archetypes may override).
+
+| Zone | Multiplier | Pistol (26) | Bare Hands (15) |
+|---|---|---|---|
+| HEAD | the weapon's headshot multiplier (Pistol 2.5, Bare Hands 1.5) | 65 | 22.5 |
+| TORSO | 1.0 | 26 | 15 |
+| ARM_LEFT / ARM_RIGHT | 0.65 | 16.9 | 9.75 |
+| LEG_LEFT / LEG_RIGHT | 0.5 | 13 | 7.5 |
+
+- **Headshot rule:** HEAD uses the attacking weapon's headshot multiplier, scaled by the target's HEAD entry ÷ 2.5 (1 for every current target). A weapon-specific headshot value lets melee and future pellet weapons reward headshots less than the Pistol.
+- **Critical = headshot.** No random crits.
+- **Pistol time-to-kill against 100 health:** 4 body shots and 2 headshots (both checked by tests), 6 arm shots, 8 leg shots; at the falloff floor (≥ 60 m, × 0.6) a headshot is 39, so 3 are needed.
+- **Bare Hands:** 7 body punches, 5 headshot punches: a last resort.
+
+| Rule | Setting | Why |
+|---|---|---|
+| Minimum damage after armor | 1 per hit | GAME_DESIGN §6: armor is flat with a floor. No target has armor yet |
+| Stagger window | 1 s | Damage within 1 s of the previous hit adds up towards a stagger |
+| Attacker multiplier | 1 | Hook for damage upgrades (Phase 9) |
+
+**Hitbox rig (`HUMANOID_RIG`)**: head sphere r 0.13 m at 1.63 m (generous, D-007); torso capsule r 0.20 m from 0.98 to 1.30 m; arms r 0.07 m, shoulders at ±0.29 m; legs r 0.095 m at ±0.11 m. About 1.8 m tall, like the player. The head is the zone most worth tuning when real models arrive: it decides how forgiving headshots feel.
+
+### 2.4 Drops and pickups (`src/config/drops.ts`, Phase 3)
+
+| Value | Setting | Intent |
+|---|---|---|
+| Ammo pickup | 1 whole magazine per carried limited-reserve firearm | Meaningful but small; the Pistol (unlimited) takes nothing |
+| Pickup radius / vertical reach | 1.1 m / 1.5 m | Walking over it is enough; no pixel hunting |
+| Pickup lifetime | 30 s | Rewards moving to collect, without clutter |
+| Pickups on the ground at once | 16 (oldest removed) | Bounded cost |
+| Training dummy drop table | ammo, 50 % | Test value, not an enemy drop rate |
+
+Enemy drop rates, the Scavenger bonus and the ammo economy are Pass-2 work (waves and progression phases).
+
+### 2.5 Training dummies (`src/config/training.ts`, Phase 3, temporary)
+
+| Kind | Health | Stagger threshold | Respawn | Drops | Notes |
+|---|---|---|---|---|---|
+| standard | 100 | 40 | 3 s | trainingDummy | Stands in for a wave-1 Walker: 2 headshots or 4 body shots |
+| zoned | 400 | 60 | 3 s | none | Zones painted; tough enough to place many hits |
+
+These are validation values, not balance: dummies are removed from normal play when waves arrive.
 
 ---
 
@@ -86,3 +131,4 @@ Balance is never tuned from assumptions alone. Three passes:
 | 2026-09-25 | Player movement | Initial Pass-1 values | Phase 1 (D-038); verified by automated tests only |
 | 2026-09-26 | Pistol, Bare Hands, weapon rules | Initial Pass-1 values | Phase 2 (D-040) |
 | 2026-09-26 | Pistol recoil recovery | 7 → 9 °/s (before release) | The design intent "the kick settles within one shot interval" failed at 7 °/s (0.19 s > 0.167 s) |
+| 2026-09-26 | Combat rules, zone multipliers in use, humanoid rig, drops, training dummies | Initial Pass-1 values | Phase 3 (D-041). Zone multipliers are the plan's example; HEAD follows each weapon's headshot multiplier |

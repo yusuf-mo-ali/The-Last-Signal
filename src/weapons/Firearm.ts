@@ -109,11 +109,15 @@ export class Firearm implements Weapon {
       const hit = context.hitscan.cast(context.origin, direction, def.range);
       const distance = hit ? hit.distance : def.range;
       this.end.copy(context.origin).addScaledVector(direction, distance);
+      const baseDamage = def.damage / def.pellets;
+      const falloff = falloffFactor(def.falloff, distance);
       pellets.push({
         direction: toTuple(direction),
         hit,
         end: toTuple(this.end),
-        damage: (def.damage / def.pellets) * falloffFactor(def.falloff, distance),
+        baseDamage,
+        falloff,
+        damage: baseDamage * falloff,
       });
     }
 

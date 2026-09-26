@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 2 (weapon framework) complete.** You can enter a grey-box prototype map, move with full collision, and shoot the Pistol (with reloads, recoil and impact marks), punch with Bare Hands and switch weapons. There are no zombies or damage yet: Phase 3 (combat) is next.
+> **Status: Phase 3 (combat) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and fight **training dummies**: hit zones (headshots, body, arms, legs), damage, death and respawn, hit markers and damage numbers. The dummies are temporary test targets; there are no zombies yet: Phase 4 (zombie foundation) is next.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -61,7 +61,7 @@ npm run check        # typecheck + lint + format check + tests; run before every
 npm run test:e2e     # browser tests against the dev server and a production build (see TESTING.md)
 ```
 
-The game currently opens on the Phase 1 blockout map: a compact facility with a yard, a control room, a crawl duct, a corridor, a generator hall, a catwalk and a loading dock. Click to capture the mouse and start; Esc releases it and pauses. Add `?quality=low|medium|high|ultra` to the URL to pick a graphics preset (default High).
+The game currently opens on the Phase 1 blockout map: a compact facility with a yard, a control room, a crawl duct, a corridor, a generator hall, a catwalk and a loading dock. Three training dummies stand in the yard facing you: the one straight ahead is in your sights from the start (a headshot), and the one on the left has its hit zones painted. Click to capture the mouse and start; Esc releases it and pauses. Add `?quality=low|medium|high|ultra` to the URL to pick a graphics preset (default High).
 
 **Target browsers:** desktop Chrome, Edge and Firefox. Keyboard and mouse required.
 
@@ -75,6 +75,7 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
   - `tls.player()` reports position, speed and movement state; `tls.teleportPlayer(x, y, z, yaw?)` and `tls.look(yaw, pitch?)` move and turn the player.
   - `tls.view({ fov: 75, sensitivity: 1.5, invertY: false, headBob: true })` changes view settings live.
   - `tls.weapons()` shows the loadout and ammo; `tls.giveAmmo()`, `tls.setInfiniteAmmo(true)`, `tls.giveWeapon('pistol', 'secondary')` and `tls.unlockSecondary()` change it.
+  - `tls.dummies()` and `tls.combat()` show the training dummies and the last hits; `tls.spawnDummy('zoned')`, `tls.resetDummies()`, `tls.aimAtTarget('dummy-2', 'ARM_LEFT')`, `tls.showHitboxes()`, `tls.damageNumbers(false)` and `tls.spawnPickup('ammo')` help test combat.
   - `tls.transition('LOADING')` requests a game state change.
   - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
   - `tls.throwError()` shows the error screen.

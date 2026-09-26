@@ -1,6 +1,8 @@
 # Game Design — THE LAST SIGNAL
 
-> **Status:** Design baseline derived from `IMPLEMENTATION_PLAN.md`. No gameplay is implemented yet.
+> **Status:** Design baseline derived from `IMPLEMENTATION_PLAN.md`. Implemented so far: movement
+> (Phase 1), weapons (Phase 2) and combat against training dummies (Phase 3); each section notes
+> what exists.
 >
 > - Numbers in this document are **design intents**: roles, time-to-kill goals, ranges.
 >   - Exact tunable values will live in `src/config/*`.
@@ -135,7 +137,7 @@ The loadout is modelled around **three named categories**, never as "weapon slot
 | *Knife* (later) | Melee | Melee build | Melee swing | Bought or unlocked; faster and stronger than fists |
 | *SMG, secondary pistol, machine pistol, revolver* (later) | Primary / Secondary | Future content | — | Added as config entries; no new weapon code (D-011) |
 
-**Phase 2 (D-040):** the Pistol and Bare Hands are implemented; their values are in BALANCING.md. Bare Hands is a placeholder swing (a 1.6 m reach check with a 0.5 s cooldown); damage to enemies arrives with combat (Phase 3) and enemies (Phase 4). The Assault Rifle and Shotgun are future Primary purchases; the framework already supports automatic fire and pellets.
+**Phase 2 (D-040):** the Pistol and Bare Hands are implemented; their values are in BALANCING.md. Bare Hands is a placeholder swing (a 1.6 m reach check with a 0.5 s cooldown); since Phase 3 its swings (held or quick melee) deal damage through the same combat path as bullets. The Assault Rifle and Shotgun are future Primary purchases; the framework already supports automatic fire and pellets.
 
 **Time-to-kill intents**, wave 1 Walker:
 - Pistol: 1–2 headshots or 4–5 body shots.
@@ -167,18 +169,39 @@ The loadout is modelled around **three named categories**, never as "weapon slot
 
 Multipliers are configurable, and archetypes can override them (a Tank's body resists damage; its head does not).
 
-- **Critical damage [Proposed].** A crit is a headshot or a boss weak-point hit. There are **no random crits**, which would blur skill feedback in an FPS.
+- **Headshots use the weapon's own headshot multiplier** (Phase 3, D-041). The Pistol's 2.5× is the plan's HEAD value; Bare Hands hits the head for 1.5×. A target's HEAD override scales every weapon's headshot in proportion (a head twice as vulnerable doubles each weapon's value).
+- **Critical damage.** A crit is a headshot or a boss weak-point hit. There are **no random crits**, which would blur skill feedback in an FPS. Implemented for headshots (Phase 3); boss weak points come with bosses.
 - **Armor is a flat reduction per hit,** with a minimum-damage floor.
   - This naturally punishes many small hits (shotgun pellets, AR spray) more than a few large ones.
   - That is the mechanical meaning of "shotgun use → more armored enemies" (§15). It creates a real problem the player can solve by switching weapon or aiming better.
 - **Helmets (the "protected-head" counter)** absorb head damage until they break. Headshot-focused players are slowed down, not shut out, and knocking the helmet off feels good.
 - **Distance falloff** is configured per weapon.
-- **Hit reactions.** Enough damage within a short window triggers `STAGGER`. Tanks resist stagger except from headshots.
+- **Hit reactions.** Enough damage within a short window triggers `STAGGER`. Tanks resist stagger except from headshots. Phase 3 implements the rule and the `staggered` event (damage within 1 s of the previous hit adds up; each target has a threshold, or none to be immune); what a stagger does to an enemy's behaviour comes with the AI (Phase 4).
 - **Feedback:**
   - hit marker, with a distinct marker and sound for headshots
   - kill confirmation
   - optional damage numbers (settings toggle)
   - directional damage indicator when the player is hit
+- **Phase 3 placeholder feedback (D-041):** a hit marker on the crosshair (white for a hit, gold for a headshot, red and larger for a kill), floating damage numbers (gold for headshots; on by default until the settings toggle exists), a short spark where a bullet hits a body, and the target flashing and rocking away from the hit. Blood, gore and hit sounds come with the VFX and audio phases.
+
+### 6.1 Health and death (Phase 3, D-041)
+
+- **One health model for everything that can be hurt:** training dummies now; zombies, bosses and the player later. Health stays between 0 and the maximum; reaching 0 is death; death happens once, and a dead target ignores further damage and healing.
+- **A dead target is no longer hit:** shots pass through it to whatever is behind.
+- **Healing** never goes above the maximum; a maximum can change (upgrades such as Thick Skin), keeping the current fraction or clamping.
+
+### 6.2 Ammo drops (Phase 3 foundation, D-041)
+
+- A death can leave pickups, rolled from a **drop table** (each entry has its own chance; the Scavenger upgrade will raise them).
+- **Ammo pickups** give whole magazines to every carried firearm whose reserve is limited. The starter Pistol's reserve is unlimited (D-039), so it takes nothing, and a pickup that nobody needs stays on the ground until it expires (30 s).
+- Enemy drop tables, other pickup kinds (health, components) and the ammo economy come with the phases that need them.
+
+### 6.3 Training dummies (temporary, Phase 3)
+
+- **Validation targets, not a gameplay feature.** Three dummies stand in the yard facing the spawn until real enemies exist: a *standard* dummy straight ahead (100 health, standing in for a wave-1 Walker; it can drop ammo), another standard dummy, and a *zone* dummy with each body part painted (400 health, for checking where hits land).
+- They use exactly what zombies will: a hitbox rig with the six zones, health, stagger and a drop table. They never move or attack and do not block the player.
+- A killed dummy falls, stays down for 3 s and stands up again. Every new run restores the range.
+- The range is removed from normal play when waves arrive; the debug tools can still place dummies.
 
 ---
 
@@ -425,6 +448,7 @@ Minimal. The player must understand the situation within one second (§22).
 - **Largest elements:** health (bottom left) and ammo with the current weapon (bottom right).
 - **Loadout strip** (small, beside the ammo): Primary, Secondary (a lock icon while locked) and Melee, with the active one highlighted (D-039). Not built yet.
 - **Phase 2 placeholder:** a centre dot crosshair and the held weapon's name and ammunition (`12 / ∞`, `RELOADING`) until the UI phase.
+- **Phase 3 placeholder:** a hit marker around the crosshair (hit, headshot, kill) and floating damage numbers (§6).
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).

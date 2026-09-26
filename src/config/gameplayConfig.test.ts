@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { FACILITY } from '../world/levels/facility';
 import { ADAPTATION_GUARDRAILS, ADAPTIVE_METRICS } from './adaptation';
 import { BOSS_IDS, BOSSES } from './bosses';
+import { COMBAT_FEEDBACK, COMBAT_RULES, HUMANOID_RIG } from './combat';
+import { DROP_TABLE_IDS, DROP_TABLES, PICKUP_IDS, PICKUP_RULES, PICKUPS } from './drops';
 import { CURRENCIES, REWARD_SOURCES } from './economy';
 import { EFFECT_KINDS } from './effects';
 import {
@@ -14,6 +17,7 @@ import {
 import { MUTATION_IDS, MUTATIONS } from './mutations';
 import { ENVIRONMENT_STATES, SIGNAL_PHASES } from './signal';
 import { UPGRADE_CHOICES_PER_OFFER, UPGRADE_IDS, UPGRADE_TAGS, UPGRADES } from './upgrades';
+import { TRAINING_DUMMIES, TRAINING_DUMMY_KINDS, TRAINING_RANGE } from './training';
 import { DIFFICULTY_TIERS, FINAL_WAVE, MUTATION_FREE_WAVES } from './waves';
 import {
   LOADOUT_CATEGORIES,
@@ -201,5 +205,67 @@ describe('gameplay config skeletons (plan §31)', () => {
     expect(CURRENCIES).toEqual(['xp', 'scrap']);
     expect(ADAPTATION_GUARDRAILS.firstAdaptiveWave).toBeGreaterThan(MUTATION_FREE_WAVES);
     expect(ADAPTATION_GUARDRAILS.maxActiveAdaptations).toBeGreaterThan(0);
+  });
+});
+
+describe('combat data (Phase 3, D-041)', () => {
+  it('rules: a positive damage floor and stagger window', () => {
+    expect(COMBAT_RULES.minimumDamage).toBeGreaterThan(0);
+    expect(COMBAT_RULES.staggerWindow).toBeGreaterThan(0);
+  });
+
+  it('the humanoid rig covers every damage zone with positive radii', () => {
+    expect([...new Set(HUMANOID_RIG.shapes.map((s) => s.zone))].sort()).toEqual(
+      [...DAMAGE_ZONES].sort(),
+    );
+    expect(HUMANOID_RIG.shapes.every((s) => s.radius > 0)).toBe(true);
+  });
+
+  it('feedback timings: a kill marker outlasts a headshot, which outlasts a hit', () => {
+    expect(COMBAT_FEEDBACK.killMarkerTime).toBeGreaterThan(COMBAT_FEEDBACK.headshotMarkerTime);
+    expect(COMBAT_FEEDBACK.headshotMarkerTime).toBeGreaterThan(COMBAT_FEEDBACK.hitMarkerTime);
+    expect(COMBAT_FEEDBACK.maxDamageNumbers).toBeGreaterThan(0);
+  });
+
+  it('drops: every table names known pickups with probabilities in [0, 1]', () => {
+    for (const id of DROP_TABLE_IDS) {
+      for (const entry of DROP_TABLES[id]) {
+        expect(PICKUP_IDS).toContain(entry.pickup);
+        expect(entry.chance).toBeGreaterThanOrEqual(0);
+        expect(entry.chance).toBeLessThanOrEqual(1);
+      }
+    }
+    for (const id of PICKUP_IDS) {
+      const p = PICKUPS[id];
+      expect(p.id).toBe(id);
+      expect(p.magazines).toBeGreaterThan(0);
+      expect(p.radius).toBeGreaterThan(0);
+      expect(p.lifetime).toBeGreaterThan(0);
+    }
+    expect(PICKUP_RULES.maxActive).toBeGreaterThan(0);
+  });
+
+  it('training dummies: a standard dummy stands in for a 100-health Walker; zoned is tougher', () => {
+    for (const kind of TRAINING_DUMMY_KINDS) {
+      const d = TRAINING_DUMMIES[kind];
+      expect(d.kind).toBe(kind);
+      expect(d.health).toBeGreaterThan(0);
+      expect(d.respawnDelay).toBeGreaterThan(0);
+      expect(d.drops === null || DROP_TABLE_IDS.includes(d.drops)).toBe(true);
+    }
+    expect(TRAINING_DUMMIES.standard.health).toBe(100);
+    expect(TRAINING_DUMMIES.zoned.showZones).toBe(true);
+    expect(TRAINING_DUMMIES.zoned.health).toBeGreaterThan(TRAINING_DUMMIES.standard.health);
+  });
+
+  it('the range has both kinds, each dummy on the level floor, facing the spawn', () => {
+    const kinds = new Set(TRAINING_RANGE.dummies.map((d) => d.kind));
+    expect([...kinds].sort()).toEqual([...TRAINING_DUMMY_KINDS].sort());
+    for (const d of TRAINING_RANGE.dummies) {
+      expect(d.position[1]).toBe(0);
+      expect(d.yaw).toBeCloseTo(Math.PI, 12);
+      expect(Math.abs(d.position[0])).toBeLessThan(20);
+      expect(d.position[2]).toBeLessThan(FACILITY.spawn.position[2]);
+    }
   });
 });

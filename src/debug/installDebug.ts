@@ -11,7 +11,12 @@
  */
 
 import './debug.css';
-import { Vector3 } from 'three';
+import { Vector3, type Scene } from 'three';
+import type { CombatSystem, DamagedEvent } from '../combat/CombatSystem';
+import type { TrainingRange } from '../combat/training/TrainingRange';
+import { DAMAGE_ZONES, type DamageZone } from '../config/enemies';
+import { PICKUP_IDS, type PickupId } from '../config/drops';
+import { TRAINING_DUMMY_KINDS, type TrainingDummyKind } from '../config/training';
 import { ENGINE_CONFIG, type ViewSettings } from '../core/Config';
 import type { ErrorHandler } from '../core/ErrorHandler';
 import type { Game } from '../core/Game';
@@ -27,9 +32,12 @@ import {
 } from '../config/weapons';
 import type { WeaponManager } from '../weapons/WeaponManager';
 import type { Renderer } from '../render/Renderer';
+import type { CombatFeedback } from '../ui/CombatFeedback';
+import type { PickupManager } from '../world/PickupManager';
 import { DebugCommands, type DebugApi } from './DebugCommands';
 import { DebugOverlay } from './DebugOverlay';
 import { FrameStats, type FrameStatsSnapshot } from './FrameStats';
+import { HitboxDebugView } from './HitboxDebugView';
 
 /** Everything the debug tools may inspect. Passed in from the composition root. */
 export interface DebugContext {
@@ -43,6 +51,13 @@ export interface DebugContext {
   readonly player?: Player;
   /** The loadout, for `tls.weapons()`, `tls.giveAmmo()`, `tls.giveWeapon()`, … */
   readonly weapons?: WeaponManager;
+  /** Combat, for `tls.combat()`, `tls.dummies()`, `tls.spawnDummy()`, `tls.showHitboxes()`, … */
+  readonly combat?: CombatSystem;
+  readonly training?: TrainingRange;
+  readonly pickups?: PickupManager;
+  readonly feedback?: CombatFeedback;
+  /** The world scene, for debug drawing (hitboxes). */
+  readonly scene?: Scene;
   /** View settings access, for `tls.view()`. */
   readonly getView?: () => ViewSettings;
   readonly applyView?: (settings: ViewSettings) => ViewSettings;
@@ -64,8 +79,8 @@ declare global {
 
 /** Plan §29 commands whose systems arrive in later phases. */
 const PLANNED_COMMANDS: readonly (readonly [string, string, string])[] = [
-  ['healPlayer', 'Restore full health', 'Phase 3 (combat: health and damage)'],
-  ['setGodMode', 'Toggle invulnerability', 'Phase 3 (combat: health and damage)'],
+  ['healPlayer', 'Restore full health', 'Phase 4 (enemies attack the player)'],
+  ['setGodMode', 'Toggle invulnerability', 'Phase 4 (enemies attack the player)'],
   ['spawnEnemy', 'Spawn an enemy of a given type', 'Phase 4 (zombie foundation)'],
   ['killAll', 'Kill every enemy', 'Phase 4 (zombie foundation)'],
   ['startWave', 'Start a given wave number', 'Phase 6 (wave system)'],
@@ -133,12 +148,16 @@ export function installDebug(context: DebugContext): DebugTools {
     errors,
     ...(context.player ? { player: context.player } : {}),
     ...(context.weapons ? { weapons: context.weapons } : {}),
+    ...(context.combat ? { combat: context.combat } : {}),
+    ...(context.training ? { training: context.training } : {}),
+    ...(context.pickups ? { pickups: context.pickups } : {}),
+    ...(context.feedback ? { feedback: context.feedback } : {}),
     ...context.extras,
   });
 
   commands.register(
     'inspect',
-    'Live objects: game, renderer, input, pointerLock, errors, player, world, camera, …',
+    'Live objects: game, renderer, input, pointerLock, errors, player, weapons, combat, world, …',
     () => inspectable,
   );
   commands.register('state', 'Current game state (and the suspended phase while paused)', () => ({
@@ -214,6 +233,7 @@ export function installDebug(context: DebugContext): DebugTools {
   );
   registerPlayerCommands(commands, context);
   registerWeaponCommands(commands, context);
+  const disposeCombat = registerCombatCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -230,6 +250,7 @@ export function installDebug(context: DebugContext): DebugTools {
     dispose: () => {
       win.removeEventListener('keydown', onKeyDown);
       game.setFrameProbe(null);
+      disposeCombat();
       overlay.dispose();
       if (win.tls === api) {
         delete win.tls;
@@ -351,6 +372,214 @@ function registerWeaponCommands(commands: DebugCommands, context: DebugContext):
   );
 }
 
+/** The most recent hit, for the overlay (kept by the combat commands' listener). */
+let lastHit: DamagedEvent | null = null;
+
+function registerCombatCommands(commands: DebugCommands, context: DebugContext): () => void {
+  const { combat, training, pickups, feedback, player, scene, game } = context;
+  if (!combat) {
+    return () => undefined;
+  }
+  const disposers: (() => void)[] = [];
+  const recent: DamagedEvent[] = [];
+  let kills = 0;
+  disposers.push(
+    combat.events.on('damaged', (e) => {
+      lastHit = e;
+      recent.push(e);
+      if (recent.length > 10) {
+        recent.shift();
+      }
+    }),
+    combat.events.on('killed', () => {
+      kills++;
+    }),
+  );
+  const round = (n: number) => Math.round(n * 100) / 100;
+  commands.register('combat', 'Combat targets, kills and the last 10 hits', () => ({
+    targets: combat.targets.length,
+    alive: combat.aliveCount,
+    kills,
+    attackerMultiplier: combat.attackerMultiplier,
+    recentHits: recent.map((h) => ({
+      target: h.targetId,
+      weapon: h.weaponId,
+      zone: h.zone,
+      critical: h.critical,
+      amount: round(h.amount),
+      health: round(h.health),
+      killed: h.killed,
+      distance: round(h.distance),
+    })),
+  }));
+
+  let hitboxes: HitboxDebugView | null = null;
+  let removeHitboxFrame: (() => void) | null = null;
+  const setHitboxes = (visible: boolean): boolean => {
+    if (visible && !hitboxes && scene) {
+      const view = new HitboxDebugView(scene, combat);
+      hitboxes = view;
+      removeHitboxFrame = game.addFrameSystem({
+        frameUpdate: () => {
+          view.update();
+        },
+      });
+    } else if (!visible && hitboxes) {
+      removeHitboxFrame?.();
+      hitboxes.dispose();
+      hitboxes = null;
+    }
+    return hitboxes !== null;
+  };
+  commands.register(
+    'showHitboxes',
+    'Draw every target’s hit volumes (HEAD gold): tls.showHitboxes(false) hides them',
+    (visible?: boolean) => setHitboxes(visible ?? hitboxes === null),
+  );
+  disposers.push(() => setHitboxes(false));
+
+  if (feedback) {
+    commands.register(
+      'damageNumbers',
+      'Show/hide floating damage numbers: tls.damageNumbers(false)',
+      (enabled?: boolean) => {
+        feedback.setDamageNumbers(enabled ?? !feedback.damageNumbersEnabled);
+        return feedback.damageNumbersEnabled;
+      },
+    );
+  }
+
+  if (training) {
+    const list = () =>
+      training.dummies.map((d) => ({
+        id: d.id,
+        kind: d.definition.kind,
+        health: round(d.health.current),
+        maxHealth: d.health.max,
+        alive: d.health.isAlive,
+        deaths: d.deaths,
+        respawnIn: round(d.respawnTimer),
+        position: d.rig.position.toArray(),
+      }));
+    commands.register('dummies', 'Training dummies: health, alive, deaths, position', list);
+    commands.register(
+      'spawnDummy',
+      `Place a training dummy facing you: tls.spawnDummy(kind?, distance?) (${TRAINING_DUMMY_KINDS.join(', ')})`,
+      (kind = 'standard', distance = 4) => {
+        if (!(TRAINING_DUMMY_KINDS as readonly string[]).includes(kind)) {
+          throw new Error(`Unknown dummy "${kind}". Kinds: ${TRAINING_DUMMY_KINDS.join(', ')}`);
+        }
+        if (!player) {
+          throw new Error('spawnDummy needs the player');
+        }
+        const yaw = player.look.yaw;
+        const p = player.motor.position;
+        const dummy = training.spawn(
+          kind as TrainingDummyKind,
+          [p.x - Math.sin(yaw) * distance, p.y, p.z - Math.cos(yaw) * distance],
+          yaw + Math.PI,
+        );
+        return dummy.id;
+      },
+    );
+    commands.register('resetDummies', 'Put the training range back as configured', () => {
+      training.reset();
+      return list();
+    });
+    commands.register('clearDummies', 'Remove every training dummy', () => {
+      training.clear();
+      return list();
+    });
+    commands.register('reviveDummies', 'Stand every dummy up at full health now', () => {
+      training.reviveAll();
+      return list();
+    });
+  }
+
+  if (player) {
+    const eye = () => {
+      const p = player.motor.position;
+      return new Vector3(p.x, p.y + player.motor.eyeHeight, p.z);
+    };
+    const aimAt = (x: number, y: number, z: number) => {
+      const from = eye();
+      const dx = x - from.x;
+      const dy = y - from.y;
+      const dz = z - from.z;
+      player.look.setAngles(Math.atan2(-dx, -dz), Math.atan2(dy, Math.hypot(dx, dz)));
+      return { yaw: player.look.yaw, pitch: player.look.pitch };
+    };
+    commands.register(
+      'aimAt',
+      'Turn the view to look at a world point: tls.aimAt(x, y, z)',
+      (x: number, y: number, z: number) => {
+        if (![x, y, z].every(Number.isFinite)) {
+          throw new Error('aimAt(x, y, z) needs three finite numbers');
+        }
+        return aimAt(x, y, z);
+      },
+    );
+    commands.register(
+      'aimAtTarget',
+      `Aim at the middle of a target’s zone: tls.aimAtTarget(id, zone?) (${DAMAGE_ZONES.join(', ')})`,
+      (id: string, zone = 'HEAD') => {
+        const target = combat.get(id);
+        if (!target) {
+          throw new Error(`No combat target "${id}"`);
+        }
+        const shape = target.rig.definition.shapes.find((s) => s.zone === (zone as DamageZone));
+        if (!shape) {
+          throw new Error(`Unknown zone "${zone}". Zones: ${DAMAGE_ZONES.join(', ')}`);
+        }
+        const point =
+          shape.kind === 'sphere'
+            ? target.rig.toWorld(shape.center)
+            : target.rig.toWorld(shape.a).add(target.rig.toWorld(shape.b)).multiplyScalar(0.5);
+        return aimAt(point.x, point.y, point.z);
+      },
+    );
+  }
+
+  if (pickups) {
+    commands.register('pickups', 'Pickups on the ground', () =>
+      pickups.active.map((p) => ({
+        id: p.id,
+        pickup: p.definition.id,
+        position: p.position.toArray(),
+        age: round(p.age),
+      })),
+    );
+    commands.register(
+      'spawnPickup',
+      `Drop a pickup (default: at the player's feet): tls.spawnPickup(id?, x?, y?, z?) (${PICKUP_IDS.join(', ')})`,
+      (id = 'ammo', x?: number, y?: number, z?: number) => {
+        if (!(PICKUP_IDS as readonly string[]).includes(id)) {
+          throw new Error(`Unknown pickup "${id}". Pickups: ${PICKUP_IDS.join(', ')}`);
+        }
+        const at =
+          x !== undefined && y !== undefined && z !== undefined
+            ? new Vector3(x, y, z)
+            : (player?.motor.position ?? new Vector3());
+        return pickups.spawn(id as PickupId, at).id;
+      },
+    );
+  }
+
+  return () => {
+    for (const dispose of disposers) {
+      dispose();
+    }
+    lastHit = null;
+  };
+}
+
+function formatCombat(combat: CombatSystem, hit: DamagedEvent | null): string {
+  const last = hit
+    ? `  last ${hit.targetId} ${hit.zone} ${hit.amount.toFixed(1)}${hit.critical ? ' crit' : ''}${hit.killed ? ' KILL' : ''}`
+    : '';
+  return `combat targets ${combat.aliveCount}/${combat.targets.length} alive${last}`;
+}
+
 function throwingPresentation(error: Error) {
   return {
     render: (): void => {
@@ -375,6 +604,7 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     `state ${state}`,
     ...(player ? [formatPlayer(player)] : []),
     ...(weapons ? [formatWeapons(weapons)] : []),
+    ...(context.combat ? [formatCombat(context.combat, lastHit)] : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
 }

@@ -42,12 +42,22 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'weapons',
     'giveWeapon',
     'unlockSecondary',
+    'combat',
+    'dummies',
+    'spawnDummy',
+    'resetDummies',
+    'aimAt',
+    'aimAtTarget',
+    'showHitboxes',
+    'damageNumbers',
+    'pickups',
+    'spawnPickup',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
   expect(await page.evaluate(() => window.tls!.healPlayer())).toMatchObject({
     ok: false,
-    reason: expect.stringContaining('Phase 3') as unknown as string,
+    reason: expect.stringContaining('Phase 4') as unknown as string,
   });
   expect(
     await page.evaluate(() => typeof (window as unknown as Record<string, unknown>).__TLS_DEV__),
@@ -60,6 +70,7 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
   expect(text).toMatch(/draws \d+/);
   expect(text).toMatch(/state MAIN_MENU/);
   expect(text).toMatch(/weapon primary:pistol 12\/∞ ready {2}secondary locked/);
+  expect(text).toMatch(/combat targets 3\/3 alive/);
 
   await page.keyboard.press('Backquote');
   await expect(page.locator('.debug-overlay')).toBeHidden();

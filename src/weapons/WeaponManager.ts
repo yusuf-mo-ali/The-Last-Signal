@@ -8,7 +8,7 @@
  * - `secondary`: `locked` until `unlockSecondary()`, then one firearm or empty.
  *
  * Everything the manager does is also announced on `events` (shots, swings, reloads, switches,
- * refusals), which recoil, the view, the HUD, debug tools and later combat listen to.
+ * refusals), which recoil, combat, the view, the HUD and debug tools listen to.
  * Browser-independent and deterministic: randomness comes from the attack context's seeded `Rng`.
  */
 
@@ -286,6 +286,26 @@ export class WeaponManager {
     for (const firearm of this.firearms()) {
       firearm.refill();
     }
+  }
+
+  /**
+   * Adds `magazines` whole magazines to the reserve of every carried firearm whose reserve is
+   * limited (ammo pickups, Supply Terminal ammunition). A firearm with unlimited reserve takes
+   * nothing. Returns the rounds added in total; 0 means nobody needed ammunition.
+   */
+  addAmmo(magazines: number): number {
+    if (!(magazines > 0) || !Number.isFinite(magazines)) {
+      return 0;
+    }
+    let added = 0;
+    for (const firearm of this.firearms()) {
+      if (Number.isFinite(firearm.reserve)) {
+        const rounds = Math.round(firearm.definition.magazineSize * magazines);
+        firearm.addReserve(rounds);
+        added += rounds;
+      }
+    }
+    return added;
   }
 
   /** Debug: shots stop consuming ammunition. */

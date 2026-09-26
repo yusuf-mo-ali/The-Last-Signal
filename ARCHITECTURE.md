@@ -1,7 +1,8 @@
 # Architecture — THE LAST SIGNAL
 
-> **Status:** Proposed, pre-Phase 0. No source code exists yet. This document describes the
-> architecture that Phase 0 starts implementing.
+> **Status:** Phases 0–3 implemented (foundation, first-person controller, weapon framework,
+> combat). Sections describe the target architecture; "Phase N implementation" notes record what
+> exists in code.
 >
 > - Scope and requirements: `IMPLEMENTATION_PLAN.md` (source of truth)
 > - Rationale for each choice: `DECISIONS.md` (IDs such as `D-003` are referenced inline)
@@ -39,7 +40,7 @@ flowchart TB
   end
   subgraph Simulation["Simulation layer: pure TypeScript, headless, deterministic"]
     Core["core/ (FSM, EventBus, Time, RunSession)"]
-    Gameplay["player/ weapons/ enemies/ bosses/ waves/ adaptive/ progression/ signal/"]
+    Gameplay["player/ weapons/ combat/ enemies/ bosses/ waves/ adaptive/ progression/ signal/"]
     WorldSim["world/ (state), physics/, navigation/, modifiers/"]
   end
   subgraph Presentation["Presentation layer: Three.js, DOM, Web Audio"]
@@ -270,22 +271,27 @@ src/
 ├── weapons/                    Weapon, WeaponManager, hitscan/, projectile/, recoil/, ammo/, + melee/, + Loadout (D-039)
 │                               (Phase 2: types, Firearm, melee/MeleeWeapon, timing, hitscan, WeaponManager,
 │                               WeaponController, WeaponSystem, WeaponView; recoil lives in PlayerLook)
+│ + combat/                     (Phase 3, D-041) hitbox rigs, computeDamage, Health, CombatSystem;
+│                               + training/: TrainingRange, TrainingDummyView (temporary test targets)
 ├── enemies/                    Enemy, EnemyManager, EnemySpawner, zombie/, ai/, damage/, + modifiers/
+│                               (damage/ is served by combat/: enemies register rigs and Health there)
 ├── waves/                      WaveManager, WaveGenerator, WaveDifficulty, WaveMutation
 │ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
 ├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild, + SupplyTerminal (D-039)
 ├── signal/                     SignalSystem, SignalMutationSystem, SignalProgression
 ├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager,
-│                               + WorldView, SignalBeacon (Phase 1); levels/: types, geometry, facility (blockout)
+│                               + WorldView, SignalBeacon (Phase 1); levels/: types, geometry, facility (blockout);
+│                               + drops, PickupManager, PickupView (Phase 3: ammo drop foundation)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
 ├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen, + LockPrompt (Phase 0.4, temporary),
+│                               + WeaponHud (Phase 2), CombatFeedback (Phase 3): placeholders until the UI phase,
 │                               + StatusScreen (WebGL2 missing, fatal error, context lost / not recovered),
 │                               + UIManager, SettingsMenu, LoadingScreen, VictoryScreen, styles/
 ├── audio/                      AudioManager, MusicManager, SoundLibrary
 ├── effects/                    VFXManager, HitEffects, MuzzleFlash, ScreenEffects (visual only)
 ├── save/                       SaveManager, SettingsManager, + migrations/
 │ + debug/                      DEV-only, dynamically imported: installDebug (window.tls), DebugCommands,
-│                               FrameStats (probe), DebugOverlay, debug.css; hitbox visualiser later
+│                               FrameStats (probe), DebugOverlay, debug.css, HitboxDebugView (Phase 3)
 │ + analytics/                  Analytics interface, NullProvider, ConsoleProvider
 │ + utils/                      Pool, Rng (seeded), math helpers, assert
 tests/
@@ -386,15 +392,59 @@ presentation (every frame): WeaponView.update(simDt) (view model, flash, impact 
 - **Determinism.** Spread and recoil draw from one seeded `Rng` per game (D-014); with the same seed and inputs, shots are identical (tested).
 - **Frozen time freezes weapons.** No fixed steps run while paused, so reloads, cooldowns and recoil recovery all stop; the view model's animations use simulated time too.
 
-**Hitscan pipeline.** Steps 1–2 exist from Phase 2 (`Hitscan`); steps 3–4 plug in as a `HitscanTarget` in Phase 4; steps 5–6 are combat (Phase 3).
+**Hitscan pipeline.** Steps 1–2 exist from Phase 2 (`Hitscan`); steps 3–6 from Phase 3 (`CombatSystem` is the rigs' `HitscanTarget`, D-041).
 1. Build a ray from the eye along the aim direction, adding spread (recoil has already moved the aim).
 2. `CollisionWorld.raycast` finds the distance to the nearest wall, which caps the range.
 3. Broadphase: collect enemies whose bounding sphere the ray hits within that distance.
 4. Narrow phase: test **hitbox rigs**, which are analytic spheres or capsules for each damage zone (`HEAD, TORSO, ARM_LEFT, ARM_RIGHT, LEG_LEFT, LEG_RIGHT`). The nearest hit wins.
 5. `computeDamage()`, a pure function, applies these in order: base damage, distance falloff, zone multiplier (overridable per archetype), then player modifiers. Armor then subtracts a flat amount per hit, with a damage floor, and resistances apply last.
-6. Apply the damage and emit `enemy:damaged` or `enemy:killed`.
+6. Apply the damage to the target's `Health` and emit `damaged`, then `killed` once on death (the events are generic, not `enemy:`-prefixed: any target uses them).
 
 **Hitbox rigs are simulation data.** They have a few pose presets per AI state (upright, lunging, crawling) instead of following bones. This keeps combat cheap and testable without a browser. The presentation layer animates meshes to match the presets, and a debug overlay draws hitboxes to catch mismatches. Combat never raycasts render meshes.
+
+**Phase 3 implementation (D-041).** The combat model is reusable and knows nothing about zombies: anything with a `HitboxRig` and a `Health` registered with the `CombatSystem` can be shot. Training dummies are the only targets so far; they are **temporary validation targets**, built exactly as enemies will be, with no behaviour of their own.
+
+```text
+fixed step:  WeaponManager.step → Firearm.fire / MeleeWeapon.fire → Hitscan.cast
+               level: CollisionWorld.raycast (caps the range)
+               targets: CombatSystem.raycast (one HitscanTarget over all living rigs)
+                 per rig: bounding sphere → spheres/capsules in local space → nearest zone
+             'shot' / 'melee' events → CombatSystem.applyShot / applyMelee (same step)
+               per pellet or swing on a target:
+                 computeDamage(base, falloff, zone, weapon headshot ×, target overrides,
+                               attacker ×, armor, resistance)            [pure]
+                 Health.damage → { applied, overkill, killed }             [death once]
+                 events: damaged → (stagger window) staggered
+                         killed: owner's onKilled hook first, then the event
+             CombatSystem.fixedUpdate: stagger windows run down
+             TrainingRange.fixedUpdate: fallen dummies stand up after their delay (revive)
+               on a death: rollDrops(table, seeded Rng) → PickupManager.spawn
+             PickupManager.fixedUpdate: player within reach + collect() accepts → collected
+               ammo: WeaponManager.addAmmo(magazines) (limited reserves only)
+presentation (every frame): TrainingDummyView (one merged mesh per dummy; flash, tilt, fall)
+                            PickupView (pooled boxes) · WeaponView body sparks
+                            CombatFeedback (hit marker; pooled damage numbers)
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `config/combat.ts` | data | Hitbox shape and rig types, `HUMANOID_RIG`, `COMBAT_RULES` (damage floor, stagger window), `COMBAT_FEEDBACK` (presentation timings) |
+| `config/enemies.ts` | data | The plan's zones and `DEFAULT_ZONE_MULTIPLIERS` (unchanged from Phase 0.5) |
+| `config/drops.ts` | data | Pickup definitions (ammo), drop tables, pickup limits |
+| `config/training.ts` | data | Training dummy kinds and the range layout (temporary) |
+| `combat/hitbox.ts` | sim | Ray–sphere and ray–capsule tests, rig bounds, `HitboxRig` (position, yaw, poses, nearest zone) |
+| `combat/damage.ts` | sim | `computeDamage`, `zoneMultiplier` (pure) |
+| `combat/Health.ts` | sim | Reusable health: damage, heal, death once, revive, `setMax` |
+| `combat/CombatSystem.ts` | sim | Target registry, the rigs' `HitscanTarget`, applies shots and swings, stagger, events |
+| `combat/training/TrainingRange.ts` | sim | Places, registers and respawns dummies; rolls their drops |
+| `world/drops.ts`, `world/PickupManager.ts` | sim | Drop rolls; pickups on the ground, collection, lifetime |
+| `combat/training/TrainingDummyView.ts`, `world/PickupView.ts` | presentation | Placeholder visuals |
+| `ui/CombatFeedback.ts` | presentation | Hit marker (hit / headshot / kill), damage numbers, feedback totals |
+| `debug/HitboxDebugView.ts` | debug | Wireframes of every living rig (`tls.showHitboxes()`) |
+
+- **Order in the step:** world → player → weapons (combat resolves inside the weapon events) → combat timers → training range → pickups.
+- **Determinism.** Damage has no randomness; drops use their own seeded `Rng` stream (`<seed>:drops`), separate from spread and recoil. Same seed and inputs give identical combat events (tested).
+- **Frozen time freezes combat:** stagger windows, respawns and pickup lifetimes run on fixed steps only.
 
 ### 7.4 Enemies and AI (D-012)
 
@@ -518,9 +568,9 @@ Three sources change the world. They are layered rather than competing:
 
 - **`debug/` is dynamically imported behind `import.meta.env.DEV`,** so it is excluded from production bundles (Phase 0.5, verified: no debug chunk, code or CSS in `dist/`).
 - **`window.tls` is a structured command interface.** `tls.help()` lists every command.
-  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`.
+  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`; player and view commands (Phase 1); weapon commands (Phase 2); combat commands (Phase 3): `combat`, `dummies`, `spawnDummy`, `resetDummies`, `clearDummies`, `reviveDummies`, `aimAt`, `aimAtTarget`, `showHitboxes` (the hitbox visualiser), `damageNumbers`, `pickups`, `spawnPickup`.
   - The plan §29 commands are registered as stubs that name the phase implementing them.
-- **The overlay** shows FPS, frame interval, our per-frame cost (avg/p95/max), steps per frame, dropped time, draw calls, triangles, programs, viewport, context status, game state and pointer-lock state. It is toggled with Backquote or `tls.overlay()`. While it is hidden, the frame probe is detached. Enemy counts and hitboxes are added when those systems exist.
+- **The overlay** shows FPS, frame interval, our per-frame cost (avg/p95/max), steps per frame, dropped time, draw calls, triangles, programs, viewport, context status, game state and pointer-lock state. It is toggled with Backquote or `tls.overlay()`. While it is hidden, the frame probe is detached. Since Phase 2 and 3 it also shows the held weapon and the combat targets alive with the last hit; enemy counts are added with enemies.
 - **`analytics/`** provides an `Analytics.track(event, props)` interface. Production uses the `NullProvider` until a provider is chosen; dev uses `ConsoleProvider`. Event names come from plan §30, and no personal data is collected.
 
 ### 7.17 Error handling and browser hardening (D-017)
@@ -613,10 +663,16 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 - our CPU cost per frame ~1.2–1.3 ms while firing continuously.
 - Known small per-step garbage: the octree query and the movement intent allocate a few short-lived objects per step (`Octree.triangleCapsuleIntersect` returns new vectors). Negligible now; revisit only if profiling with enemies shows GC pauses.
 
+**Phase 3 baseline** (combat against training dummies; same container; TESTING.md §7.4):
+- `computeDamage` 0.05 µs; one ray against one rig 0.22 µs (0.03 µs when the broad phase rejects it); a hitscan cast against the level and 24 dummies 3.5 µs (60 dummies: 5.7 µs); a full shot applied to a dummy 5.6 µs; combat and range timers 0.08 µs per step with 24 dummies;
+- each dummy is **one draw call plus one shadow draw** (merged mesh): 3 dummies ~22 draw calls in total, 24 dummies ~59, 60 dummies ~113 (a mesh per shape had measured ~285 for 24, over the budget; D-041);
+- our CPU cost per frame ~2–2.6 ms firing ~6 shots/s at 24 dummies (p95 ≤ 6 ms), of which SwiftShader's CPU rendering is most;
+- the first shot of a session no longer hitches: hidden pooled objects are included in the shader prewarm (it had cost ~200 ms since Phase 2).
+
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);
 - Chrome's Rendering → *Frame Rendering Stats* and the Performance panel, which also work on production builds;
-- a stress-test debug command that spawns N enemies (arrives with enemies).
+- a stress-test debug command that spawns N enemies (arrives with enemies); until then, `tls.inspect().training.spawn()` places any number of dummies.
 
 ---
 

@@ -16,6 +16,7 @@ const SIMULATION = [
   'navigation',
   'player',
   'weapons',
+  'combat',
   'enemies',
   'bosses',
   'waves',

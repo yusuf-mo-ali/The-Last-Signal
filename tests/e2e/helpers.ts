@@ -16,6 +16,12 @@ import type { Player } from '../../src/player/Player';
 import type { World } from '../../src/world/World';
 import type { WeaponManager } from '../../src/weapons/WeaponManager';
 import type { WeaponView } from '../../src/weapons/WeaponView';
+import type { CombatSystem } from '../../src/combat/CombatSystem';
+import type { TrainingRange } from '../../src/combat/training/TrainingRange';
+import type { TrainingDummyView } from '../../src/combat/training/TrainingDummyView';
+import type { PickupManager } from '../../src/world/PickupManager';
+import type { PickupView } from '../../src/world/PickupView';
+import type { CombatFeedback } from '../../src/ui/CombatFeedback';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -30,6 +36,41 @@ export interface DevHandles {
   readonly frameActions: ActionMap;
   readonly weapons: WeaponManager;
   readonly weaponView: WeaponView;
+  readonly combat: CombatSystem;
+  readonly training: TrainingRange;
+  readonly pickups: PickupManager;
+  readonly feedback: CombatFeedback;
+  readonly dummyView: TrainingDummyView;
+  readonly pickupView: PickupView;
+}
+
+/** One entry of `tls.dummies()`. */
+export interface DummySnapshot {
+  readonly id: string;
+  readonly kind: 'standard' | 'zoned';
+  readonly health: number;
+  readonly maxHealth: number;
+  readonly alive: boolean;
+  readonly deaths: number;
+  readonly respawnIn: number;
+  readonly position: [number, number, number];
+}
+
+/** What `tls.combat()` returns. */
+export interface CombatSnapshot {
+  readonly targets: number;
+  readonly alive: number;
+  readonly kills: number;
+  readonly recentHits: readonly {
+    readonly target: string;
+    readonly weapon: string;
+    readonly zone: string;
+    readonly critical: boolean;
+    readonly amount: number;
+    readonly health: number;
+    readonly killed: boolean;
+    readonly distance: number;
+  }[];
 }
 
 /** What `tls.weapons()` returns (reserve `'unlimited'` stands for Infinity, which JSON lacks). */
@@ -83,6 +124,18 @@ export interface TlsApi {
   weapons(): WeaponsSnapshot;
   giveWeapon(id: string, category?: string): unknown;
   unlockSecondary(): boolean;
+  combat(): CombatSnapshot;
+  dummies(): DummySnapshot[];
+  spawnDummy(kind?: string, distance?: number): string;
+  resetDummies(): DummySnapshot[];
+  clearDummies(): DummySnapshot[];
+  reviveDummies(): DummySnapshot[];
+  aimAt(x: number, y: number, z: number): unknown;
+  aimAtTarget(id: string, zone?: string): unknown;
+  showHitboxes(visible?: boolean): boolean;
+  damageNumbers(enabled?: boolean): boolean;
+  pickups(): { id: number; pickup: string; position: number[]; age: number }[];
+  spawnPickup(id?: string, x?: number, y?: number, z?: number): number;
   player(): PlayerSnapshot;
   teleportPlayer(x: number, y: number, z: number, yaw?: number): unknown;
   look(yaw: number, pitch?: number): unknown;

@@ -2,7 +2,7 @@
 
 How the project is tested, how to run each level, what is covered, and what still needs a human in a real browser. Required by plan §36; strategy from plan §27 and ARCHITECTURE.md §9 (D-021, D-036).
 
-> **Status (end of Phase 2):** 623 unit and integration tests; 82 end-to-end tests (41 tests × `dev` and `prod`: 59 run, 23 skipped by design); manual QA checklist not yet run in a real browser (see §6).
+> **Status (end of Phase 3):** 749 unit and integration tests; 102 end-to-end tests (51 tests × `dev` and `prod`: 70 run, 32 skipped by design); manual QA checklist not yet run in a real browser (see §6).
 
 ---
 
@@ -50,7 +50,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 
 ---
 
-## 3. What is covered (Phases 0–2)
+## 3. What is covered (Phases 0–3)
 
 | Area | Unit / integration | End-to-end |
 |---|---|---|
@@ -65,7 +65,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Rendering** | `render/viewport.test.ts`: sizes and DPR at every target resolution | `smoke.spec`: WebGL 2, pixels drawn, animation. `resize.spec`: 5 resolutions, live DPR 2/1.25/3, DPR cap, collapsed container |
 | **Input** | `input/*.test.ts`: readers, edges at any frame/step ratio, wheel notches, glitch motion, real DOM listener path on Node `EventTarget`s, pointer-lock success/fallback/refusal/legacy/timeout, auto-pause, step discard | `input.spec`: default suppression, physical keys (AZERTY), edges, lock on click, motion/buttons/wheel, lock loss → pause, refusal → "click again", resume, blur/hidden |
 | **Errors / WebGL** | `core/ErrorHandler.test.ts`, `render/webglSupport.test.ts`, `render/ContextLossMonitor.test.ts` | `resilience.spec`: context loss/restore/timeout, forced frame/async/rejection errors, missing WebGL 2, renderer failure |
-| **Debug tools** | `debug/DebugCommands.test.ts`, `debug/FrameStats.test.ts` | `debug.spec`: `tls`, plan §29 stubs, player commands, overlay (dev); nothing in production |
+| **Debug tools** | `debug/DebugCommands.test.ts`, `debug/FrameStats.test.ts` | `debug.spec`: `tls`, plan §29 stubs (with their phases), player, weapon and combat commands, overlay with the weapon and combat lines (dev); nothing in production |
 | **Player config** (Phase 1) | `config/player.test.ts`: body proportions, speed order, responsiveness, `jumpSpeed`, fit with the blockout (dock jumpable, duct crouch-only) | — |
 | **Level geometry** | `world/levels/geometry.test.ts`: outward normals for boxes, ramps in all 4 directions and stairs; stairs render as steps and collide as a ramp; grouping by surface | — |
 | **Blockout map** | `world/levels/facility.test.ts`: brushes well-formed and in bounds, triangle budget, walkable slopes, clear spawn, clear ground at every route waypoint, duct fits crouched not standing, beacon clear | `smoke.spec`: map renders, beacon visible from the spawn |
@@ -80,6 +80,13 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Loadout and rules** | `weapons/WeaponManager.test.ts` (42 tests): starting loadout, reset, equip 1/2/3, locked and empty Secondary refused, raise time blocks firing, switching cancels reload, wheel cycles firearms only, semi trigger (one per press, rate cap, buffer, stale press), auto trigger, dry fire and auto reload, no fire during reload, unlimited reserve over many reloads, quick melee (stays on the Pistol, blocks firing, cooldown, cancels reload, always available), melee held + Fire, sprint lockout, acquire (locked, replace with no refund, empty category first, does not fit, melee never empty, future Knife as data, unknown ids), unlock once, determinism | `weapons.spec`: start loadout, 1/3, 2 refused while locked, wheel, V, pointer lock and resume click |
 | **Recoil** | `player/PlayerLook.test.ts`: kick, recovery never past the aim, pulling down counts, looking up does not, pitch clamp, reset | `weapons.spec`: recoil settles after firing |
 | **Weapons in the loop** | `weapons/WeaponController.test.ts`; `weapons/weapons.integration.test.ts`: nothing outside a run, shots from the eye hit the tower, recoil through the look, magazine/R/dry fire with real mouse and keys, 1/2/3/wheel/V, firing cancels sprint, fresh loadout per run, reproducible shots | `weapons.spec`: all of the above with real input; muzzle flash and impact markers |
+| **Combat data** (Phase 3) | `config/gameplayConfig.test.ts`: combat rules, the humanoid rig covers all six zones, feedback timings ordered, drop tables and pickups valid, dummy kinds (standard = 100 health), the range has both kinds on the floor facing the spawn | — |
+| **Hitbox rigs** | `combat/hitbox.test.ts` (33): ray–sphere and ray–capsule (sides, caps, along the axis, range, from inside, oblique ray checked against marching), zone resolution for all six zones including the rig's own left and right, facing ±90° and 180°, aiming at every shape's centre from any facing, position, from above, range cap, tie order, pose swap, bounds | `combat.spec`: hitbox visualiser draws 6 volumes per dummy |
+| **Damage calculation** | `combat/damage.test.ts` (18): plan multipliers per zone, HEAD from the weapon, target overrides (Tank body, head scaling), crit = headshot only (independent of multiplier size), falloff (and never above 1), falloff × zone, Bare Hands, attacker multiplier, armor floor, resistance, bad inputs → 0 never NaN, purity and determinism, Pass-1 time-to-kill | `combat.spec`: 65 head, 26 body, 16.9 arms, 13 legs |
+| **Health** | `combat/Health.test.ts` (12): start value and clamping, non-lethal, lethal with overkill, exactly lethal, floating-point dust, damage after death ignored, bad amounts ignored, heal cap and never while dead, revive, `setMax` | — |
+| **Combat system** | `combat/CombatSystem.test.ts` (22): registered with the hitscan, headshot, every zone, 2-headshot and 4-body kills, one `killed` and one `onKilled`, event order, shots after death ignored and passing through to the wall, walls block, nearest target in line (either registration order), falloff at 40 m, overrides/armor/resistance, attacker multiplier, stagger (window, threshold, immune, not on the kill), revive, remove, living count, multi-pellet shots (one kill), Bare Hands in and out of reach, driven by a `WeaponManager` (shot + quick melee; dispose), determinism | — |
+| **Training range, drops, pickups** | `combat/training/TrainingRange.test.ts` (9): configured range, headshot from the spawn, death → down → respawn at full health, zoned toughness, sure drop at the feet / failed roll, spawn/remove, reset, revive all. `world/PickupManager.test.ts` (10): spawn, collect in reach only when needed, vertical reach, stays then expires, no collector, cap; `rollDrops` reproducible, matches its chance, clamps and multiplier, one draw per entry. `WeaponManager.addAmmo` | `combat.spec`: pickup collected by walking onto it |
+| **Combat in the loop** | `combat/combat.integration.test.ts` (15): nothing outside a run; from the spawn a click is a headshot, two kill; later shots pass through to the tower; body/arm/leg from the spawn; respawn; reload mid-fight; V quick melee in reach and out of reach; walls block; nearest in line; kill → ammo drop → walk over it (limited reserve) and not taken with the unlimited Pistol; new run restores the range; pause freezes respawns; identical events for the same seed | `combat.spec`: headshot / body / arms and legs with markers and damage numbers; kill, fall, ignored shots, stand-up; reload in combat; V; pickups; hitboxes; numbers off. Production: headshot → kill → ignored → reload → hit again, read from the DOM |
 
 **Every end-to-end test also asserts a clean page:** no console errors or warnings, page errors, failed requests or HTTP errors. The only exceptions are ones a test deliberately provokes, and those are listed in the test.
 
@@ -96,6 +103,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 - **Tests must be able to fail.** For important behaviour, plant a realistic bug and confirm a test goes red.
   - Phases 0.2 and 0.4: 16 of 16 unit-level mutations were caught.
   - Phase 0.6: a planted e2e bug (refusal feedback removed) failed in both projects.
+  - Phase 3: 21 of 21 combat mutations caught: wrong headshot multiplier, damage applied twice, damage after death, death event fired twice, rig rotation sign flipped (wrong zone), last shape winning instead of the nearest (wrong zone), falloff ignored, walls not blocking targets, dead targets still hittable, nearest target not preferred, arm multiplier wrong in config, armor ignoring the damage floor, stagger window never expiring, dummies never standing up, drop chance inverted, pickups taken when not needed, ammo added to unlimited reserves, quick melee never damaging, healing above the maximum, broad phase ignoring shape radii, crit flag on every strong zone. The first run caught 17; the 4 survivors exposed missing tests (rigs only tested facing 0° and 180°, crit only tested with default multipliers) and two equivalent mutants (a redundant stagger reset was removed; the wall mutant was re-planted as the real two-part bug). Every file was restored byte-identically (hash-checked).
   - Phase 2: 17 of 17 weapon mutations caught (shots not spending ammo, fire-rate remainder dropped, firing while reloading, reload ignoring a finite reserve, no falloff, crouch spread inverted, locked Secondary reported as empty, semi-auto firing while held, switching keeping the reload, quick melee switching to melee, wheel cycling into melee, acquiring into a locked Secondary, no auto reload, firing during quick melee, recoil never applied, recovery overshooting the aim, walls not blocking targets).
   - Phase 1: 9 of 9 movement mutations caught (no sub-steps, no headroom check, no diagonal normalisation, sprint in any direction, no coyote time, no jump buffer, sliding on slopes, no ground snap, no kill plane). The first run caught 5; the 4 survivors exposed weak test setups, which were fixed.
   - Mutations are always reverted.
@@ -165,6 +173,16 @@ Record the date, browser version and results in PROGRESS.md.
 - [ ] **Shots:** impact marks appear where shots hit walls, floors and crates; the muzzle flash is visible at 60 Hz and above.
 - [ ] **Sprint:** shooting while sprinting stops the sprint briefly.
 - [ ] **Resume:** after Esc, the click that resumes does not fire.
+
+### Combat (Phase 3)
+- [ ] **Range:** three dummies in the yard face you at the start; the left one has painted zones (yellow head, white torso, blue arms, green legs).
+- [ ] **Headshot:** from the spawn, one click hits the dummy ahead in the head: gold hit marker, gold "65", a spark, the dummy flashes and rocks back.
+- [ ] **Body, arms, legs:** on the zone dummy, body shots show a white marker and "26"; arms "17"; legs "13". The zone hit matches the colour you aimed at (dev: `tls.showHitboxes()` draws the volumes).
+- [ ] **Kill:** the second headshot shows the red kill marker; the dummy falls; shots at it now hit the tower behind; after 3 s it stands up again.
+- [ ] **Melee:** walk up to a dummy and press V: "15", the Pistol stays in hand. With fists held (3), left click punches for 15.
+- [ ] **Walls:** a dummy behind a wall or the tower cannot be hit.
+- [ ] **Feedback feel:** markers are readable but not distracting; damage numbers can be turned off (dev: `tls.damageNumbers(false)`).
+- [ ] **Performance:** firing continuously at the dummies causes no hitch, including the very first shot of a session.
 
 ### Resilience
 - [ ] **Context loss** (dev, real GPU): `tls.loseContext()` shows "Graphics paused"; `tls.restoreContext()` restores the scene and "Paused" → click resumes.
@@ -247,6 +265,23 @@ Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *r
 
 - **Weapon simulation (Node, headless):** 0.45 µs per step idle, 2.7 µs per step firing every step, 0.34 µs quick melee; one hitscan ray against the blockout ≈ 1 µs.
 - **Reading:** firing adds ~0.1 ms to our frame cost. The view model adds 2 draw calls; each impact marker adds one (32 at most). All far inside the budgets; nothing was optimised.
+
+**Phase 3 baseline (2026-09-26, combat against training dummies, development build, firing ~6 shots/s at the dummies for 5 s):**
+
+| Resolution | Preset | Dummies | Firing | FPS (SwiftShader) | Our frame cost avg / p95 / max (ms) | Draw calls | Triangles | Programs |
+|---|---|---|---|---|---|---|---|---|
+| 1920×1080 | High | 3 (the range) | no | 6.4 | 1.29 / 2.3 / 3.3 | 22 | 9,812 | 8 |
+| 1920×1080 | High | 3 | yes | 6.4 | 1.98 / 4.7 / 8.2 | 21 | 9,800 | 8 |
+| 1920×1080 | High | 24 | yes | 5.0 | 2.51 / 5.6 / 10.8 | 58 | 58,494 | 8 |
+| 1920×1080 | Low | 24 | yes | 6.9 | 2.56 / 6.0 / 6.4 | 59 | 62,796 | 8 |
+| 1366×768 | High | 24 | yes | 8.1 | 2.18 / 3.8 / 9.6 | 60 | 62,798 | 8 |
+| 1920×1080 | Low | 60 (stress) | yes | 5.9 | 2.85 / 5.5 / 6.5 | 113 | 141,532 | 8 |
+
+- **Combat simulation (Node, headless):** `computeDamage` 0.05 µs; one ray against a rig 0.22 µs (0.03 µs rejected by the broad phase); a hitscan cast (level + rigs) 2.9 µs with 3 dummies, 3.5 µs with 24, 5.7 µs with 60; a full shot fired and applied (events, damage, health) 4.2 / 5.6 / 7.0 µs; combat and range timers 0.01 / 0.08 / 0.17 µs per step.
+- **Two findings, both fixed with evidence:**
+  - **Draw calls over budget with many dummies.** With one mesh per hit volume, 24 dummies measured 280–285 draw calls (6 meshes + 6 shadow draws each), over the Low budget of 250. Each dummy is now one merged, vertex-coloured mesh: 24 dummies ~59 draw calls, 60 dummies ~113. Enemies should follow the same rule (D-041).
+  - **First-shot hitch (since Phase 2).** The first shot of a session cost ~210–226 ms: the muzzle flash and impact markers start hidden, and `renderer.compile` skips hidden objects, so their first draw paid its setup mid-play. Measured on the Phase 2 commit too (209.7 ms), so it was not a Phase 3 regression. `WorldView.prewarm` now renders hidden objects once behind the start prompt: the first shot costs ~4 ms, like any other.
+- **Reading:** combat's CPU cost is negligible (microseconds per shot). Triangles grow with dummies (~2,600 per dummy including its shadow draw) and could be reduced with fewer sphere and capsule segments if a GPU measurement ever asks for it; nothing else needs optimising.
 
 **Phase 1 details:**
 - **Player simulation (Node, headless):** 5.0 µs per step standing, 6.0 µs sprinting in the open, 10.3 µs pushing into a wall. At 60 steps/s that is under 0.1 % of a frame. Level collision: 480 triangles; world build ≈ 50 ms once at startup (including JIT warm-up).

@@ -1,10 +1,12 @@
 /**
- * Presentation of the weapons (D-003, D-040): a blockout first-person view model attached to the
- * camera, a muzzle flash, and impact markers where shots hit the level. It reads the
+ * Presentation of the weapons (D-003, D-040, D-041): a blockout first-person view model attached to
+ * the camera, a muzzle flash, impact markers where shots hit the level and a short spark where they
+ * hit a body (a target's hitbox rig). It reads the
  * `WeaponManager` state and listens to its events; it never changes the simulation.
  *
  * Kept cheap (plan §25): every mesh, geometry and material is created once. Impact markers are a
- * fixed ring of meshes reused oldest-first, so firing allocates nothing on the GPU. No lights are
+ * fixed ring of meshes reused oldest-first (sparks likewise), so firing allocates nothing on the
+ * GPU. No lights are
  * added (D-022): the flash is an unlit additive quad.
  */
 
@@ -16,6 +18,8 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
+  Sprite,
+  SpriteMaterial,
   Vector3,
   type Material,
   type PerspectiveCamera,
@@ -27,6 +31,8 @@ import type { WeaponManager } from './WeaponManager';
 const IMPACT_MARKERS = 32;
 const IMPACT_LIFETIME = 10;
 const FLASH_TIME = 0.05;
+const BODY_SPARKS = 8;
+const SPARK_TIME = 0.1;
 const PUNCH_TIME = 0.25;
 /** How far below the view a weapon starts when it is raised. */
 const RAISE_DROP = 0.3;
@@ -42,6 +48,9 @@ export class WeaponView {
   private readonly flash: Mesh;
   private readonly markers: Mesh[] = [];
   private readonly markerAge: number[] = [];
+  private readonly sparks: Sprite[] = [];
+  private readonly sparkAge: number[] = [];
+  private nextSpark = 0;
   private nextMarker = 0;
   private flashTimer = 0;
   private punchTimer = 0;
@@ -114,12 +123,34 @@ export class WeaponView {
       this.markerAge.push(Number.POSITIVE_INFINITY);
     }
 
+    // ---- body-hit sparks (in the world) -----------------------------------------------------
+    const sparkMaterial = this.track(
+      new SpriteMaterial({
+        color: 0xffb060,
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    for (let i = 0; i < BODY_SPARKS; i++) {
+      const spark = new Sprite(sparkMaterial);
+      spark.visible = false;
+      spark.name = 'body-spark';
+      spark.scale.setScalar(0.14);
+      scene.add(spark);
+      this.sparks.push(spark);
+      this.sparkAge.push(Number.POSITIVE_INFINITY);
+    }
+
     this.unsubscribe.push(
       manager.events.on('shot', (shot) => {
         this.onShot(shot);
       }),
-      manager.events.on('melee', () => {
+      manager.events.on('melee', (swing) => {
         this.punchTimer = PUNCH_TIME;
+        if (swing.hit?.kind === 'target') {
+          this.spark(swing.hit.point);
+        }
       }),
     );
     this.update(0);
@@ -128,6 +159,11 @@ export class WeaponView {
   /** Impact markers currently shown (tests, debug). */
   get activeImpactMarkers(): number {
     return this.markers.filter((m) => m.visible).length;
+  }
+
+  /** Body-hit sparks currently shown (tests, debug). */
+  get activeSparks(): number {
+    return this.sparks.filter((s) => s.visible).length;
   }
 
   get muzzleFlashVisible(): boolean {
@@ -181,6 +217,16 @@ export class WeaponView {
         marker.visible = false;
       }
     }
+    for (let i = 0; i < BODY_SPARKS; i++) {
+      const spark = this.sparks[i];
+      if (!spark?.visible) {
+        continue;
+      }
+      // Shown for at least one frame, like the muzzle flash.
+      const age = this.sparkAge[i] ?? Number.POSITIVE_INFINITY;
+      spark.visible = age <= SPARK_TIME;
+      this.sparkAge[i] = age + dt;
+    }
   }
 
   dispose(): void {
@@ -190,6 +236,9 @@ export class WeaponView {
     this.camera.remove(this.root);
     for (const marker of this.markers) {
       marker.removeFromParent();
+    }
+    for (const spark of this.sparks) {
+      spark.removeFromParent();
     }
     for (const resource of this.disposables) {
       resource.dispose();
@@ -202,6 +251,10 @@ export class WeaponView {
     this.kick = 1;
     for (const pellet of shot.pellets) {
       const hit = pellet.hit;
+      if (hit?.kind === 'target') {
+        this.spark(hit.point);
+        continue;
+      }
       if (hit?.kind !== 'world') {
         continue;
       }
@@ -217,6 +270,17 @@ export class WeaponView {
       marker.lookAt(this.scratch.set(px + nx, py + ny, pz + nz));
       marker.visible = true;
       this.markerAge[index] = 0;
+    }
+  }
+
+  private spark(point: readonly [number, number, number]): void {
+    const index = this.nextSpark;
+    this.nextSpark = (index + 1) % BODY_SPARKS;
+    const spark = this.sparks[index];
+    if (spark) {
+      spark.position.set(point[0], point[1], point[2]);
+      spark.visible = true;
+      this.sparkAge[index] = 0;
     }
   }
 

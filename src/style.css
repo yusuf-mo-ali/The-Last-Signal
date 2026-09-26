@@ -223,3 +223,95 @@ body {
   font-size: 1.6rem;
   font-weight: 600;
 }
+
+/* ---- Combat feedback (Phase 3 placeholder, ui/CombatFeedback.ts) -------------------------- */
+.combat-feedback {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.combat-feedback[hidden],
+.combat-feedback [hidden] {
+  display: none;
+}
+
+.hit-marker {
+  --hit-color: rgb(255 255 255);
+
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+}
+
+.hit-marker[data-kind='head'] {
+  --hit-color: rgb(255 210 60);
+}
+
+.hit-marker[data-kind='kill'] {
+  --hit-color: rgb(255 70 60);
+
+  transform: scale(1.35);
+}
+
+.hit-marker__tick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 2px;
+  background: var(--hit-color);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 55%);
+}
+
+.hit-marker__tick:nth-child(1) {
+  transform: translate(-50%, -50%) rotate(45deg) translateX(-8px);
+}
+
+.hit-marker__tick:nth-child(2) {
+  transform: translate(-50%, -50%) rotate(135deg) translateX(-8px);
+}
+
+.hit-marker__tick:nth-child(3) {
+  transform: translate(-50%, -50%) rotate(225deg) translateX(-8px);
+}
+
+.hit-marker__tick:nth-child(4) {
+  transform: translate(-50%, -50%) rotate(315deg) translateX(-8px);
+}
+
+.hit-marker--pop {
+  animation: hit-marker-pop 120ms ease-out;
+}
+
+@keyframes hit-marker-pop {
+  from {
+    opacity: 0.4;
+  }
+}
+
+.damage-number {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: rgb(255 255 255);
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 85%);
+  will-change: transform, opacity;
+}
+
+.damage-number[data-kind='head'] {
+  color: rgb(255 210 60);
+  font-size: 1.15rem;
+}
+
+.damage-number[data-kind='kill'] {
+  color: rgb(255 120 90);
+  font-size: 1.2rem;
+}

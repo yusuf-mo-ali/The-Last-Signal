@@ -54,6 +54,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-038 | Phase 1 first-person foundation: movement model, collision, look, blockout, run entry | Accepted |
 | D-039 | Loadout of Melee, Primary and Secondary; weapons bought with Scrap at the Supply Terminal (resolves O-2) | Accepted |
 | D-040 | Phase 2 weapon framework: timing, trigger, reload, hitscan, recoil, melee placeholder, events | Accepted |
+| D-041 | Phase 3 combat: hitbox rigs, pure damage, reusable Health, one-time death, feedback, drops, training dummies | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -787,6 +788,42 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 - Bare Hands, the Pistol and the rules are in BALANCING.md (created in this phase).
 - Debug tools gain `weapons`, `giveAmmo`, `setInfiniteAmmo`, `giveWeapon` and `unlockSecondary`.
 - Open for later: aim down sights (right mouse), weapon sway, audio, per-weapon view models, damage to enemies.
+
+## D-041 — Phase 3 combat: hitbox rigs, pure damage, reusable Health, one-time death, feedback, drops, training dummies
+**Status:** Accepted · **Date:** 2026-09-26 · **Implements:** plan §10 (Phase 3), D-007, D-009 (hooks), D-014, D-015, D-022, D-040
+
+**Context.** Phase 3 builds the combat foundation that zombies (Phase 4), bosses and the player's own health will use. There are no enemies yet, so the pipeline is validated against **training dummies**, which are temporary test targets and not a gameplay feature.
+
+**Decision.**
+
+1. **One pipeline, nothing zombie-specific.** Weapon hit → hitbox resolution → damage calculation → `Health` → death → events. It lives in a new `src/combat/` folder (simulation layer, lint-enforced; an addition to the plan tree like those in D-023). Anything with a hitbox rig and a `Health` can be registered with the `CombatSystem`: dummies now, enemies and bosses later.
+2. **Hitbox rigs (D-007).** A rig is config data (`HitboxRigDefinition`): analytic spheres and capsules, each tagged with a plan zone (`HEAD, TORSO, ARM_LEFT, ARM_RIGHT, LEG_LEFT, LEG_RIGHT`), in the owner's local space (feet origin, facing −z, so its own right is +x). `HitboxRig` places it (position, yaw), swaps poses (`setPose`, for AI poses later), and answers "where does this ray first enter, in which zone": a bounding-sphere broad phase, then every shape, nearest wins; on an exact tie the shape listed first wins. Rays are moved into local space; shapes are never transformed; nothing allocates per ray. `HUMANOID_RIG` (~1.8 m, generous head) is the first rig.
+3. **Hit resolution is the existing hitscan.** `CombatSystem` is one `HitscanTarget` over all its living targets, given the level's hit distance as its range, so walls block targets and the nearest target wins without combat knowing about walls. Dead targets are skipped: shots pass through them.
+4. **Damage is one pure function (`computeDamage`).** `base × falloff × zone multiplier × attacker multiplier`, then armor (flat per hit, never below `COMBAT_RULES.minimumDamage`, never raising a weaker hit), then resistance (a fraction, last). No randomness, no state; unusable inputs give 0, never NaN.
+   - **Zone multiplier:** body zones come from the target's table (the plan's defaults in `config/enemies.ts`, archetype overrides). **HEAD uses the attacking weapon's `headshotMultiplier`** (Pistol 2.5, which is the plan's HEAD value; Bare Hands 1.5), scaled by the target's HEAD entry relative to the plan's, so a tougher or weaker head changes every weapon's headshot in proportion. This keeps the per-weapon headshot value approved in Phase 2 and the plan's zone table consistent.
+   - **Critical damage = a headshot** (GAME_DESIGN §6: no random crits). Boss weak points will add a flag to their shapes.
+   - **Falloff** comes from the weapon's hit result: pellets now carry `baseDamage` and `falloff` as well as their product. Melee has none.
+   - **Hooks, default neutral:** `CombatSystem.attackerMultiplier` (upgrades), per-target `armor`, `resistance` and zone overrides (archetypes, modifiers).
+5. **Reusable `Health`.** Current and maximum, damage, healing, revive, `setMax` (keep fraction or clamp), configurable start. Health stays in [0, max]; reaching 0 is death; **death happens once** (a dead owner ignores damage and healing until `revive`); floating-point dust below 1e-9 counts as dead; zero, negative and NaN amounts change nothing.
+6. **Death and deactivation.** The killing hit emits `damaged` (with `killed: true`), then the target's `onKilled` hook (its owner's deactivation or removal hook), then `killed`, exactly once. `remove` unregisters a target (despawn, pool return); `revive` brings one back (`revived`).
+7. **Events (D-015)** on `CombatSystem.events`: `damaged` (target, weapon, source shot/melee, quick, zone, critical, amount applied, amount dealt, health left, point, direction, distance, killed), `staggered`, `killed`, `revived`. Combat listens to the weapons' `shot` and `melee` events, so a hit is resolved in the same fixed step it was fired. Bare Hands (held or quick melee) deals damage through the same path, with no falloff.
+8. **Hit reactions.** Damage landing within `COMBAT_RULES.staggerWindow` (1 s) of the previous hit adds up; reaching the target's `staggerThreshold` emits `staggered` and restarts the count. A killing hit never staggers; no threshold means stagger-immune. What a stagger does (the AI `STAGGER` state) belongs to the enemy phase.
+9. **Feedback (placeholder presentation).** `ui/CombatFeedback`: a hit marker on the crosshair (white hit, gold headshot, red and larger kill) and optional damage numbers (on by default; pooled DOM nodes projected from the hit point, rising and fading). Its root also carries running totals (`data-hits`, `data-headshots`, `data-kills`) so automated checks can read the feedback in any build. `WeaponView` adds a short additive spark at body hits (8 pooled sprites). Dummies flash and tilt away from hits, tilt more on a stagger, fall on death.
+10. **Ammo drops (plan §10), foundation only.** Data in `config/drops.ts`: pickup definitions (ammo: whole magazines, radius, lifetime) and drop tables (entries rolled independently with the owner's seeded `Rng`, chances scalable for Scavenger). `rollDrops` is pure apart from the injected `Rng`. `world/PickupManager` holds pickups (capped, oldest removed, lifetime), collects them when the player is within reach and the `collect` callback accepts them; a pickup nobody needs stays on the ground. Ammo goes to `WeaponManager.addAmmo`, which gives whole magazines to limited reserves only, so with the starter Pistol's unlimited reserve (D-039) pickups are not taken. Any death can roll a table: dummies do now, enemies will. There is no pickup economy, no other pickup kinds and no Supply Terminal.
+11. **Training dummies (temporary).** `config/training.ts` defines two kinds on the humanoid rig: *standard* (100 health, the Pass-1 Walker placeholder, drops ammo, 3 s respawn) and *zoned* (400 health, each zone painted, no drops). `combat/training/TrainingRange` places the configured range (three dummies in the yard facing the spawn; the first straight ahead, so the spawn view is a headshot), registers them with combat, rolls drops on death and stands them up again after the delay. No AI, no movement, no attacks, no collision with the player. The range is on in every build while there is nothing else to shoot (`TRAINING_RANGE.enabled`), so the production build can be verified too; the wave phase turns it off, and the debug tools can still spawn dummies.
+12. **Rendering stays inside the budget.** Each dummy is one merged mesh with vertex colours (one draw plus one shadow draw). With a mesh per shape, 24 dummies measured ~285 draw calls, over the Low budget of 250; merged, 24 dummies cost ~59 and 60 cost ~113. Enemies should follow the same rule (one body mesh per enemy).
+13. **Prewarm covers hidden objects (refines D-022).** `WorldView.prewarm` shows every hidden object (muzzle flash, impact markers, sparks, pickups) for one render behind the start prompt, because `compile` only visits visible objects. The first shot of a session had cost ~200 ms (present since Phase 2, found by the Phase 3 measurements); it now costs the same as any other shot.
+14. **Debug (dev only):** `tls.combat()`, `dummies()`, `spawnDummy(kind?, distance?)`, `resetDummies()`, `clearDummies()`, `reviveDummies()`, `aimAt(x, y, z)`, `aimAtTarget(id, zone?)`, `showHitboxes()` (the hitbox visualiser: wireframes from the simulation's rigs, HEAD gold), `damageNumbers()`, `pickups()`, `spawnPickup(id?, x?, y?, z?)`; an overlay line with living targets and the last hit. `healPlayer` and `setGodMode` stay stubs, now labelled Phase 4: nothing damages the player until enemies attack.
+
+**Why.**
+- A pure damage function and a `Health` that knows nothing about zones or weapons make every combat rule testable in Node and reproducible; the same pieces serve dummies, zombies, bosses and later the player.
+- Rigs as data, tested through the existing hitscan, keep combat cheap and deterministic (D-007) and let walls and nearest-hit work unchanged.
+- Validating against dummies that use exactly the enemy format means Phase 4 adds behaviour, not combat plumbing.
+
+**Consequences.**
+- Combat values (zone multipliers, headshot rule, stagger, drops, dummy health) are logged in BALANCING.md.
+- Player health and damage to the player are not in this phase; `Health` is ready for them (Phase 4, D-029).
+- Open for later: boss weak points (a flag on shapes), helmets (per-zone armor that breaks), pose presets per AI state, hit reactions in the AI, a settings toggle for damage numbers, real blood and impact VFX, enemy collision with the player.
 
 ---
 

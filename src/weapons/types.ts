@@ -1,6 +1,6 @@
 /**
  * Shared weapon types (plan §9, D-011, D-040). Results are plain data (tuples, ids, numbers) so
- * combat (Phase 3), the adaptive profile, analytics and tests can consume them without three.js
+ * combat (D-041), the adaptive profile, analytics and tests can consume them without three.js
  * objects or references back into the weapon.
  */
 
@@ -58,7 +58,11 @@ export interface PelletResult {
   readonly hit: HitResult | null;
   /** Where the ray stopped: the hit point, or the end of the range. */
   readonly end: Vec3Tuple;
-  /** Damage this pellet would deal at that distance (before zone multipliers, applied by combat). */
+  /** The weapon's damage for one pellet, before falloff. */
+  readonly baseDamage: number;
+  /** Distance falloff factor at the hit (or range) distance, 0–1. */
+  readonly falloff: number;
+  /** `baseDamage × falloff`: before zone multipliers, which combat applies. */
   readonly damage: number;
 }
 
@@ -105,7 +109,7 @@ export interface Weapon {
 /** Why a category could not be equipped. */
 export type EquipRefusal = 'locked' | 'empty';
 
-/** Notifications from `WeaponManager` (consumed by recoil, views, HUD, debug, later combat). */
+/** Notifications from `WeaponManager` (consumed by recoil, combat, views, HUD, debug). */
 export interface WeaponEvents {
   shot: ShotResult;
   melee: MeleeResult;

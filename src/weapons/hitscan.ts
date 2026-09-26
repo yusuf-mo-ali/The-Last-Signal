@@ -2,11 +2,13 @@
  * Hitscan: instant rays against the level and, later, against enemy hitboxes (ARCHITECTURE §7.3,
  * D-007, D-040). Browser-independent.
  *
- * Phase 2 hits only the level. Enemies (Phase 4) register as `HitscanTarget`s: the nearest of the
- * level and every target wins, so walls block shots without the combat code knowing about walls.
+ * The level is always tested. Hitbox rigs join as `HitscanTarget`s (the combat system, Phase 3):
+ * the nearest of the level and every target wins, so walls block shots without the combat code
+ * knowing about walls.
  */
 
 import { Vector3 } from 'three';
+import type { DamageZone } from '../config/enemies';
 import type { CollisionWorld } from '../physics/CollisionWorld';
 import type { Rng } from '../utils/Rng';
 import type { Vec3Tuple } from './types';
@@ -25,12 +27,16 @@ export interface TargetHit {
   readonly point: Vec3Tuple;
   /** Which target (e.g. an enemy id) and which of its damage zones. */
   readonly targetId: string;
-  readonly zone: string;
+  readonly zone: DamageZone;
 }
 
 export type HitResult = WorldHit | TargetHit;
 
-/** Anything a shot can hit besides the level (enemy hitbox rigs from Phase 4). */
+/**
+ * Anything a shot can hit besides the level: the combat system registers one for every hitbox rig
+ * it manages (training dummies in Phase 3, enemies from Phase 4). Given the distance to the
+ * nearest hit so far as `maxDistance`, it returns a nearer hit or null.
+ */
 export interface HitscanTarget {
   raycast(origin: Vector3, direction: Vector3, maxDistance: number): TargetHit | null;
 }
