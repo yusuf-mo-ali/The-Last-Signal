@@ -221,10 +221,10 @@ Game  (lives for the whole page)
     ├── EventBus scope (run subscriptions auto-removed on dispose)
     ├── Rng (seeded)
     ├── World: level instance, CollisionWorld, NavGrid, EnvironmentState, PickupManager
-    ├── Player, WeaponManager
+    ├── Player, WeaponManager (owns the run's Loadout, D-039)
     ├── EnemyManager, EnemySpawner, BossManager, AIScheduler
     ├── WaveManager, SignalMutationSystem, AdaptiveDirector, SignalProgression
-    ├── XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild
+    ├── XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild, SupplyTerminal (Scrap shop between waves, D-039)
     └── view bindings + VFX emitters   (omitted when headless)
 ```
 
@@ -267,11 +267,11 @@ src/
 │ + modifiers/                  Stat, StatBlock, modifier stacks, TriggerRegistry
 ├── player/                     Player, PlayerController, CameraController, PlayerHealth, PlayerMovement
 │                               (Phase 1: PlayerMotor is the plan's PlayerMovement; + PlayerLook, HeadBob)
-├── weapons/                    Weapon, WeaponManager, hitscan/, projectile/, recoil/, ammo/, + melee/
+├── weapons/                    Weapon, WeaponManager, hitscan/, projectile/, recoil/, ammo/, + melee/, + Loadout (D-039)
 ├── enemies/                    Enemy, EnemyManager, EnemySpawner, zombie/, ai/, damage/, + modifiers/
 ├── waves/                      WaveManager, WaveGenerator, WaveDifficulty, WaveMutation
 │ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
-├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild
+├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild, + SupplyTerminal (D-039)
 ├── signal/                     SignalSystem, SignalMutationSystem, SignalProgression
 ├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager,
 │                               + WorldView, SignalBeacon (Phase 1); levels/: types, geometry, facility (blockout)
@@ -322,7 +322,34 @@ One mechanism handles upgrades, mutations, difficulty scaling, enemy modifiers a
 - One `Weapon` class, configured from `config/weapons.ts`.
 - Weapons differ through composable parts: fire mode (semi or auto), shot pattern (single ray or N pellets), recoil pattern and ammo model.
 - Pistol, Assault Rifle and Shotgun are config entries, not subclasses.
-- Melee lives in `weapons/melee/` and works in every weapon slot (see O-6).
+- Melee weapons (Bare Hands now, a Knife later) are config entries too, built from a melee attack part (reach, arc, damage, cooldown) instead of a hitscan part. They live in `weapons/melee/` and share the plan's weapon interface: `fire()` attacks, `reload()` does nothing, `canFire()` checks the cooldown, `getAmmo()` returns `null` (unlimited).
+
+**Loadout (D-039, resolves O-2).** The player's weapons are held by a `Loadout` with three **named** categories, never an array of numbered slots:
+
+```ts
+type LoadoutCategory = 'melee' | 'primary' | 'secondary';
+
+interface Loadout {
+  readonly melee: MeleeWeapon;                  // never empty: Bare Hands is the fallback
+  readonly primary: Firearm | null;             // the Pistol at run start
+  readonly secondary:                           // present from the first run, locked until unlocked
+    | { readonly state: 'locked' }
+    | { readonly state: 'unlocked'; readonly weapon: Firearm | null };
+  readonly active: LoadoutCategory;             // which one is in the player's hands
+}
+```
+
+- **`WeaponManager`** (in `weapons/`) owns the `Loadout` for one run and is the only code that changes it:
+  - `equip(category)`: switch to Primary, Secondary or Melee (with a switch time); refused, with a "locked"/"empty" event, when the category cannot be used.
+  - `cycle(direction)`: the mouse wheel; skips locked and empty categories.
+  - `quickMelee()`: a melee attack from any active weapon, without changing `active`. Melee is therefore always available.
+  - `acquire(weaponId)`: puts a weapon into the category its definition allows (replacing what was there; Melee falls back to Bare Hands, never to nothing).
+  - `unlockSecondary()`: moves Secondary from `locked` to `unlocked`.
+- **Definitions declare their categories.** `config/weapons.ts` gives every weapon a kind (`firearm` or `melee`) and the categories it fits (`fits: ['primary']`, `['primary', 'secondary']` for the starter Pistol [Proposed], `['melee']`). A new weapon of any kind is a config entry, not new loadout code.
+- **Input maps to categories, not numbers.** The Phase 0.4 actions `weapon1/2/3` become `equipPrimary`, `equipSecondary` and `equipMelee`; `weaponNext/Previous` drive `cycle`; `melee` (V) drives `quickMelee`. The physical keys stay 1 / 2 / 3, wheel and V.
+- **Acquisition is source-agnostic.** The Supply Terminal (Scrap purchases between waves, progression phases), unlocks and the debug tools all call the same `acquire` / `unlockSecondary`. Prices, stock and the Scrap balance belong to `progression/` (economy), never to `weapons/`.
+- **Run scope.** The loadout belongs to the run (`RunSession`, §5): a new run starts from `STARTING_LOADOUT` in config: Bare Hands, Pistol, Secondary locked.
+- **Phase 2 scope:** the loadout model with all three categories, the Pistol as the only firearm, Bare Hands as a basic melee placeholder, Secondary present but locked. No melee arsenal, no Secondary content, no shop.
 
 **Hitscan pipeline.**
 1. Build a ray from the camera along the aim direction, adding spread and recoil.

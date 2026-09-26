@@ -3,7 +3,7 @@
 > The working state of the project. Every session reads this file first and updates it last, so
 > work can be resumed safely (plan §36).
 >
-> **Last updated:** 2026-09-25 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
+> **Last updated:** 2026-09-26 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
 > (open PR into `main`: yusuf-mo-ali/The-Last-Signal#1)
 
 ---
@@ -137,9 +137,16 @@
     - Performance baseline recorded (TESTING.md §7.4): player step 5–10 µs; 11 draw calls, ~1,100 triangles; our frame cost ~1 ms. Reference-machine FPS still needs the physical machine.
   - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
 
+- [x] **O-2 resolved** (D-039, 2026-09-26, docs only).
+  - Loadout modelled as three **named** categories: **Melee** (always available; Bare Hands at start, e.g. a Knife later), **Primary** (the Pistol at start; AR, Shotgun, SMG later) and **Secondary** (in the data from the start, locked until progression / a milestone unlocks it).
+  - Initial run: Bare Hands · Pistol · Secondary locked.
+  - Acquisition: the **Supply Terminal** between waves, with **Scrap** as the primary purchase currency.
+  - Also answers the melee part of O-6 (always-available quick melee, default key V) and part of O-1 (what Scrap buys). New open question O-13 (terminal presentation, Secondary unlock condition).
+  - Documented in GAME_DESIGN (§4.1, §5, §11, §14), ARCHITECTURE (§5, §6, §7.3), DECISIONS (D-039, D-011, open questions) and README (controls). No code changes.
+
 ## Active Task
 
-None. Phase 1 is complete; waiting for approval to start **Phase 2**.
+None. Phase 1 is complete and O-2 is resolved; waiting for approval to start **Phase 2**.
 
 ## Known Bugs
 
@@ -148,15 +155,16 @@ None.
 ## Next Task
 
 **Phase 2: Weapon Framework (plan §9).** Suggested steps, each a small commit:
-1. **Weapon data and framework** (D-011): the `Weapon` interface and config for the Pistol (M1) from `src/config/weapons.ts`; fire modes, fire rate with fractional cooldown remainders (D-004), magazine and reload state machine, ammo. Start `BALANCING.md`.
-2. **Hitscan** against the level (`CollisionWorld.raycast`) with spread and a range; impact markers for debugging. Enemy hitbox rigs arrive with Phase 4 (D-007).
-3. **Recoil and view kick** applied through `PlayerLook` (so aim and camera stay one source of truth), plus sprint lowering the weapon and firing cancelling sprint (GAME_DESIGN §4.2).
-4. **Weapon view model** (blockout), fire/reload input via the step `ActionMap` (`fire`, `aim`, `reload`, `weapon1–3`, wheel).
-5. **Verify:** unit tests (fire timing at any frame rate, reload, ammo, spread determinism with `Rng`), headless integration, e2e firing with real mouse buttons; `giveAmmo` / `setInfiniteAmmo` debug commands.
+1. **Weapon data and framework** (D-011): the `Weapon` interface and config for the Pistol (M1) from `src/config/weapons.ts`; fire modes, fire rate with fractional cooldown remainders (D-004), magazine and reload state machine, ammo. Weapon definitions declare their kind (firearm / melee) and the loadout categories they fit. Start `BALANCING.md`.
+2. **Loadout** (D-039): `Loadout` with named Melee, Primary and Secondary categories; `WeaponManager` with `equip`, `cycle`, `quickMelee`, `acquire` and `unlockSecondary`; `STARTING_LOADOUT` = Bare Hands, Pistol, Secondary locked. Bare Hands as a basic melee placeholder (a short-range swing against the level; damage against enemies arrives with combat). No Knife, no Secondary weapons, no shop.
+3. **Hitscan** against the level (`CollisionWorld.raycast`) with spread and a range; impact markers for debugging. Enemy hitbox rigs arrive with Phase 4 (D-007).
+4. **Recoil and view kick** applied through `PlayerLook` (so aim and camera stay one source of truth), plus sprint lowering the weapon and firing cancelling sprint (GAME_DESIGN §4.2).
+5. **Weapon view model** (blockout), fire/reload/switch input via the step `ActionMap`: `fire`, `aim`, `reload`, `equipPrimary` (1), `equipSecondary` (2, refused while locked), `equipMelee` (3), wheel cycling, quick `melee` (V). The `weapon1–3` actions are renamed accordingly.
+6. **Verify:** unit tests (fire timing at any frame rate, reload, ammo, spread determinism with `Rng`, loadout rules: locked Secondary, melee always available, replacement), headless integration, e2e firing and switching with real mouse buttons and keys; `giveAmmo` / `setInfiniteAmmo` debug commands.
 
 **Needed from you:**
 - Approval to start Phase 2.
-- O-2 (in-run weapon acquisition) before the end of Phase 2; O-6 (melee binding) if melee is wanted in Phase 2.
+- Optionally, O-13 (Supply Terminal presentation, Secondary unlock condition). It is not needed for Phase 2; the defaults apply otherwise.
 - Run the Phase 1 performance measurement on the reference machine (TESTING.md §7.2, Phase 1 scenario, `?quality=low`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
 - A manual QA pass of TESTING.md §6 in real browsers, especially the new "Movement and camera" section: feel can only be judged by hand.
 
@@ -183,8 +191,7 @@ Nothing is blocked now. These later tasks need decisions (full list in `DECISION
 
 | Task | Blocked on | Needed by |
 |---|---|---|
-| In-run weapon acquisition | O-2 | End of Phase 2 |
-| Melee action; Heavy Hands upgrade | O-6 (melee binding) | Phase 2 / Phase 9 |
+| Supply Terminal presentation; Secondary unlock condition | O-13 | Phase 9 / Phase 14 |
 | Technician upgrade | O-6 (no utility/trap system defined) | Phase 9 |
 | Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU. The Phase 1 map and `?quality=low` are ready | Now (Phase 1 baseline), then each phase |
 | v1 zombie roster | O-3 | Phase 5 |

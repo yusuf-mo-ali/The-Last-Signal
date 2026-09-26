@@ -24,7 +24,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-008 | Flow-field navigation on a nav grid | Accepted |
 | D-009 | One data-driven modifier/trigger system | Accepted |
 | D-010 | Engine config vs gameplay config | Accepted |
-| D-011 | One weapon framework, weapons as data | Accepted |
+| D-011 | One weapon framework, weapons as data | Accepted (loadout by D-039) |
 | D-012 | Enemy = archetype + modifiers | Accepted |
 | D-013 | Level defined as data | Accepted |
 | D-014 | Seeded, injected RNG | Accepted |
@@ -52,7 +52,8 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-036 | End-to-end harness and Phase 0 verification conventions | Accepted |
 | D-037 | Performance targets, reference hardware and graphics quality scaling (resolves O-9) | Accepted |
 | D-038 | Phase 1 first-person foundation: movement model, collision, look, blockout, run entry | Accepted |
-| O-1 … O-12 | Open questions (see the end of this file) | Open (O-9 resolved by D-037) |
+| D-039 | Loadout of Melee, Primary and Secondary; weapons bought with Scrap at the Supply Terminal (resolves O-2) | Accepted |
+| O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
 
@@ -209,6 +210,7 @@ A flat machine would bring back hidden flags (such as "state before pause"), whi
 - One `Weapon` class built from composable parts (fire mode, shot pattern, recoil, ammo model) and driven by config.
 - Pistol, Assault Rifle and Shotgun are config entries.
 - The plan's interface (`fire, reload, canFire, getAmmo, getState`) is kept.
+- How the player carries weapons (Melee, Primary, Secondary) is decided in D-039.
 
 **Why.**
 - Plan §9 says not to duplicate weapon logic, and all weapons must share one framework.
@@ -716,21 +718,58 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 
 ---
 
+## D-039 — Loadout of Melee, Primary and Secondary; Scrap purchases at the Supply Terminal
+**Status:** Accepted · **Date:** 2026-09-26 · **Resolves:** O-2 · **Partly answers:** O-1 (what Scrap buys), O-6 (melee) · **Refines:** D-011
+
+**Context.** The plan names three weapons (Pistol, Assault Rifle, Shotgun) and a "Shotgun + Melee" build, but not how the player carries or obtains them (O-2), nor a melee action (O-6). The project owner has defined the loadout and acquisition design.
+
+**Decision.**
+
+1. **Three named categories, not numbered slots.** The loadout is modelled explicitly as **Melee**, **Primary** and **Secondary** (ARCHITECTURE §7.3). Code never treats them as "slot 0/1/2".
+
+   | Category | Run start | Later |
+   |---|---|---|
+   | Melee | Bare Hands (fists) | Melee weapons bought or unlocked, e.g. a Knife |
+   | Primary | Pistol (the initial firearm) | Assault Rifle, Shotgun, SMG, … |
+   | Secondary | **Locked** (present in the data) | Unlocked by progression / a milestone; then e.g. a secondary pistol, machine pistol or revolver |
+
+2. **Melee is always available**, regardless of the firearm held: quick melee (V, the proposed default key) attacks without switching away, and the melee category can never be empty (Bare Hands is the fallback).
+3. **Switching:** 1 = Primary, 2 = Secondary (refused while locked or empty), 3 = hold the melee weapon [Proposed], mouse wheel = cycle through available categories. The Phase 0.4 input actions `weapon1/2/3` are renamed to `equipPrimary`, `equipSecondary`, `equipMelee` in Phase 2; the physical keys do not change.
+4. **Weapons declare which categories they fit.** One weapon per category; acquiring into a filled category replaces the weapon there [Proposed: no refund in v1]. The starter Pistol fits Primary and Secondary [Proposed].
+5. **Acquisition:** weapons, melee weapons and ammunition [Proposed] are bought at the **Supply Terminal between waves**, with **Scrap** as the primary purchase currency. The Secondary slot and some weapons are unlocked through progression / milestones. `WeaponManager.acquire()` and `unlockSecondary()` are the only entry points, whatever the source (shop, unlock, debug).
+6. **Initial run:** Bare Hands · Pistol · Secondary locked (`STARTING_LOADOUT` in config).
+7. **Phase 2 scope:** the full loadout model (all three categories), the Pistol, and a basic Bare Hands melee placeholder. **Not** in Phase 2: the melee arsenal (Knife etc.), Secondary weapon content, the Supply Terminal, prices, unlock conditions.
+
+**Why.**
+- Named categories make the rules (melee always usable, Secondary locked, what fits where) explicit in types instead of hidden in slot indices, and let later phases add weapons, melee purchases and the Secondary unlock without rewriting the weapon core.
+- Always-available melee plus the Pistol's unlimited reserve [Proposed] guarantees the player can always fight back, so no purchase choice can soft-lock a run.
+- A between-wave shop keeps acquisition a deliberate choice and gives Scrap a clear, in-run use.
+
+**Relation to the plan.** Plan §16 describes Scrap as "used for persistent purchases". D-039 makes Scrap the purchase currency at the in-run Supply Terminal, as decided by the project owner. Whether unspent Scrap also buys anything persistent stays open (O-1). The previous O-2 recommendation (weapon cards on upgrade screens after waves 2 and 4) is withdrawn.
+
+**Consequences.**
+- GAME_DESIGN §4.1 (controls), §5 (loadout, weapons, acquisition), §11 (Scrap), §14 (HUD loadout strip) and ARCHITECTURE §5 and §7.3 are updated.
+- New open question O-13: how the Supply Terminal is presented, and what unlocks the Secondary slot.
+- The Supply Terminal itself, prices and stock arrive with the progression / economy phases (plan Phases 9 and 14) and the UI phase; they are logged in BALANCING.md.
+
+---
+
 ## Open questions
 
 None of these block Phase 0. Each lists the phase that needs the answer and the default that applies if there is no answer.
 
 | ID | Question | Needed by | Recommendation (default) |
 |---|---|---|---|
-| **O-1** | What do XP and Scrap buy? The plan says "persistent purchases" and "unlocks progression" but defines no screen or items. | Phase 9 (Progression) | XP → profile level that unlocks new cards and weapons; Scrap → between-run "Workshop" of small permanent perks (adds one menu screen) |
-| **O-2** | How does the player get the Assault Rifle and Shotgun during a run? | Phase 2 end (Weapons) | Start with the Pistol; weapon cards offered on the upgrade screens after waves 2 and 4 |
+| **O-1** | What does XP buy, and does unspent Scrap buy anything persistent? (**Partly answered by D-039:** Scrap is the purchase currency at the Supply Terminal between waves.) | Phase 9 (Progression) | XP → profile level that unlocks new cards and purchasable weapons; unspent Scrap does not carry over between runs |
+| ~~**O-2**~~ | ~~How does the player get the Assault Rifle and Shotgun during a run?~~ **Resolved 2026-09-26 → D-039:** loadout of Melee (Bare Hands), Primary (Pistol) and Secondary (locked); weapons bought with Scrap at the Supply Terminal between waves | — | — |
 | **O-3** | Which 4 of the 5 archetypes ship in v1 (plan §12 lists 5, §42 targets 4)? | Phase 5 (Archetypes) | Walker, Runner, Tank, Screamer; defer Climber (most expensive: climb navigation and animation) |
 | **O-4** | Which 6 of the 8 mutations ship in v1? | Phase 7 (Mutations) | BLACKOUT, HUNGER, STATIC, SCREAM, HIVE, BLOOD MOON; defer LOW GRAVITY and OVERLOAD |
 | **O-5** | Boss placement, and what "unlimited waves" means next to a wave-20 victory. | Phase 6 / Phase 13 | Siren at wave 20 (final); the generator supports unlimited waves; endless mode after victory is a later nice-to-have |
-| **O-6** | The controls lack **melee** and **interact**, and no **utility/trap** system exists, yet Heavy Hands, Technician, `meleeUsage` and signal objectives depend on them. | Phase 2 (melee), Phase 12 (interact) | Add Melee = V and Interact = E. Keep Technician out of the pool until a utility item is designed |
+| **O-6** | The controls lack **interact**, and no **utility/trap** system exists, yet Technician and signal objectives depend on them. (**Melee answered by D-039:** always-available quick melee, default key V.) | Phase 12 (interact) | Interact = E. Keep Technician out of the pool until a utility item is designed |
 | **O-7** | "Every normal wave receives one mutation" (§14) vs "mutations become noticeable at 10–15 min" (§33). | Phase 7 | Waves 1–3 mutation-free; waves 4–19 one each; wave 20 boss rules |
 | **O-8** | Where do the 3D models, animations, sounds and music come from, and under what licences? | Milestone 2 (first real assets) | CC0 sources (e.g. Kenney, Quaternius, CC0 sound libraries), with a CREDITS file; blockout until then (D-030) |
 | ~~**O-9**~~ | ~~What is the reference "weaker supported hardware" for the 30 FPS floor?~~ **Resolved 2026-09-25 → D-037:** i5-4440, 16 GB DDR3-1333, GTX 750; ~30 FPS at 1080p Low; ~60 FPS on capable hardware at High | — | — |
 | **O-10** | Does BLACKOUT need a player flashlight? | Phase 7 | Yes, as a simple toggle (F) using one of the ≤2 shadow-casting light slots, if playtests show BLACKOUT is frustrating |
 | **O-11** | Project licence (code) and asset licence policy. | Before any public release | Decide before the first public deployment |
 | **O-12** | Are signal objectives mandatory to progress, or optional but rewarded? | Phase 12 | Optional but rewarded: the phase advances with wave number; objectives add signal strength and rewards (no soft-locks) |
+| **O-13** | How is the Supply Terminal presented (a screen in the between-wave flow, or a terminal in the facility reached with Interact), and what unlocks the Secondary slot (a wave / signal milestone, an XP level, or a Scrap purchase)? | Phase 9 (Progression) / Phase 14 (Economy) | A terminal-styled screen right after the upgrade choice (time stays frozen, no walking between waves); Secondary unlocks at the first signal milestone (end of wave 5, "components collected") |

@@ -49,7 +49,7 @@ A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared a
 
 **Pacing target [Proposed].**
 - Waves last about 45 s early, rising to about 90 s late.
-- Each wave ends with a short breather (about 10–15 s) and the upgrade screen.
+- Each wave ends with a short breather (about 10–15 s), the upgrade screen and the Supply Terminal (§5.3).
 - A full run is therefore roughly 25–35 minutes.
 
 This maps onto the plan's first-session curve (§33):
@@ -81,10 +81,13 @@ Plan §3 controls are kept. Controls must be rebindable later, so bindings live 
 | Sprint | Shift | Hold. A toggle option can come later |
 | Crouch | **C** | Ctrl is available as an opt-in rebind. As a default, **Ctrl+W (crouch while moving forward) closes the browser tab**, and pages cannot block it (D-017) |
 | Jump | Space | |
-| Switch weapon | 1 / 2 / 3, mouse wheel | |
+| Equip Primary | 1 | Loadout §5.1 (D-039) |
+| Equip Secondary | 2 | Does nothing (brief "locked" feedback) until the Secondary slot is unlocked |
+| Equip melee weapon | 3 [Proposed] | Holds the melee weapon as the active weapon: Fire then attacks with it |
+| Cycle weapons | Mouse wheel | Cycles through the *available* loadout entries only (a locked or empty slot is skipped) |
 | Pause | Esc | The game pauses when pointer lock is lost; the browser consumes this Esc press |
 | **Interact** | **E** [Proposed, O-6] | Signal objectives (hold to repair or activate) |
-| **Melee** | **V** [Proposed, O-6] | Required by the Heavy Hands upgrade, the `meleeUsage` metric, and the "Shotgun + Melee" build |
+| **Quick melee** | **V** (proposed default key) | **Always available** (D-039): a melee attack from whatever weapon is held, without switching away from it. Needed by Heavy Hands, the `meleeUsage` metric and the "Shotgun + Melee" build |
 
 ### 4.2 Core stats (intent)
 
@@ -102,24 +105,50 @@ Plan §3 controls are kept. Controls must be rebindable later, so bindings live 
 
 ## 5. Weapons
 
-All weapons share one framework, and each is a config entry (D-011).
+All weapons share one framework, and each is a config entry (D-011). The player carries them in an explicit three-part **loadout** (D-039, resolves O-2).
 
-| Weapon | Role | Fire mode | Design intent |
+### 5.1 Loadout: Melee, Primary, Secondary
+
+The loadout is modelled around **three named categories**, never as "weapon slots 1–3":
+
+| Category | At run start | Later | Rules |
 |---|---|---|---|
-| **Pistol** | Reliable starter; precision | Semi-automatic | Always available. **Unlimited reserve ammo [Proposed]**: the magazine still needs reloading. This prevents soft-locks when the player runs dry |
-| **Assault Rifle** | Sustained damage at mid range | Automatic | High fire rate, medium damage, recoil that climbs with sustained fire |
-| **Shotgun** | Close-range burst | Pump action, N pellets | Damage is spread across pellets. Devastating up close, but **weak against armor** (see §6) |
+| **Melee** | **Bare Hands** (fists) | Melee weapons bought or unlocked, e.g. a **Knife** | **Always available**, whatever firearm is held: quick melee (V) attacks without switching away. Never empty: Bare Hands is the fallback |
+| **Primary** | **Pistol** | Assault Rifle, Shotgun; later e.g. an SMG | Holds one firearm. The Pistol is the initial firearm |
+| **Secondary** | **Locked** | Unlocked through progression / a milestone (O-13); then holds one firearm such as a secondary pistol, machine pistol or revolver | Exists in the data from the first run, but cannot be equipped while locked |
+
+- **Switching:** 1 equips the Primary, 2 the Secondary (once unlocked and filled), 3 holds the melee weapon [Proposed]; the mouse wheel cycles through what is available. Quick melee (V) works from any of them.
+- **Each weapon declares the categories it fits.** Assault Rifle and Shotgun fit Primary; secondary pistols fit Secondary; a Knife fits Melee. The starter Pistol fits Primary *and* Secondary [Proposed], so once the Secondary slot unlocks the player can keep it as a sidearm.
+- **One weapon per category.** Acquiring a weapon for a category that is already filled replaces the weapon there [Proposed: no refund in v1; the Pistol stays cheap to buy back].
+- **No soft-locks.** Melee is always usable, so the player can always deal damage; the Pistol keeps unlimited reserve ammo [Proposed], and the Supply Terminal sells ammunition [Proposed].
+
+**Initial run:** Bare Hands · Pistol (Primary) · Secondary locked.
+
+### 5.2 Weapons
+
+| Weapon | Category | Role | Fire mode | Design intent |
+|---|---|---|---|---|
+| **Bare Hands** | Melee | Always-available fallback | Melee swing | Weak but reliable; pushes back or finishes a weakened enemy. The baseline every melee weapon improves on |
+| **Pistol** | Primary (also fits Secondary [Proposed]) | Reliable starter; precision | Semi-automatic | The initial firearm. **Unlimited reserve ammo [Proposed]**: the magazine still needs reloading |
+| **Assault Rifle** | Primary | Sustained damage at mid range | Automatic | High fire rate, medium damage, recoil that climbs with sustained fire |
+| **Shotgun** | Primary | Close-range burst | Pump action, N pellets | Damage is spread across pellets. Devastating up close, but **weak against armor** (see §6) |
+| *Knife* (later) | Melee | Melee build | Melee swing | Bought or unlocked; faster and stronger than fists |
+| *SMG, secondary pistol, machine pistol, revolver* (later) | Primary / Secondary | Future content | — | Added as config entries; no new weapon code (D-011) |
 
 **Time-to-kill intents**, wave 1 Walker:
 - Pistol: 1–2 headshots or 4–5 body shots.
 - Assault Rifle: about 6–8 body hits.
 - Shotgun: one point-blank shot.
+- Bare Hands: a last resort (several hits), not a primary damage source.
 
-**Weapon acquisition [Open O-2].** The plan does not say how the player obtains the AR and Shotgun. Recommendation:
-- Start with the Pistol.
-- An early upgrade screen (waves 2 and 4) offers **weapon cards** alongside upgrades.
-- The first weapon the player picks steers their early build.
-- No shop UI is needed.
+### 5.3 Acquisition (resolves O-2, D-039)
+
+- **Where:** the **Supply Terminal**, a shop available **between waves**.
+- **Currency:** **Scrap** is the primary purchase currency.
+- **What it sells:** firearms for Primary (and Secondary once unlocked), melee weapons, and ammunition [Proposed]. The stock and prices are balance data (BALANCING.md, from the progression / economy phases).
+- **When and how it is presented** (a screen in the between-wave flow, or a terminal in the facility) is open question O-13; the default is a screen right after the upgrade choice, so the between-wave breather never becomes a walking section (§12, plan §19).
+- **Unlocks:** the Secondary slot, and weapons that must be unlocked before they can be bought, come from progression / milestones (O-13).
+- The earlier recommendation (weapon cards on the upgrade screens after waves 2 and 4) is withdrawn.
 
 ---
 
@@ -267,6 +296,7 @@ The first four rules come from the plan. Exact thresholds go in `config/adaptati
 
 **Currencies (§21):** XP and SCRAP only.
 - Sources: kills, headshots, wave completion, boss kills, optional objectives and rare events.
+- **Scrap is spent at the Supply Terminal between waves** on weapons, melee weapons and ammunition (§5.3, D-039).
 
 **Upgrade selection** happens after every completed wave:
 - Three random cards, with no duplicates within one offer.
@@ -287,7 +317,7 @@ The first four rules come from the plan. Exact thresholds go in `config/adaptati
 | Adrenaline | + movement speed | MOBILITY | Plan |
 | Scavenger | + ammo drop chance | UTILITY | Plan |
 | Vampire | Heal a little on each kill | SURVIVAL | Plan |
-| Heavy Hands | + melee damage (needs melee, O-6) | CLOSE_QUARTERS | Plan |
+| Heavy Hands | + melee damage (melee is always available, D-039) | CLOSE_QUARTERS | Plan |
 | Technician | Faster trap/utility cooldown. **Blocked:** the plan defines no trap or utility system (O-6) | UTILITY | Plan |
 | Quick Hands | + reload speed | MOBILITY | [Proposed] |
 | Deep Pockets | + magazine size | UTILITY | [Proposed] |
@@ -309,14 +339,15 @@ That makes 14 usable upgrades and 1 blocked.
 | Mobility + SMG/Rifle | Adrenaline, Gunner, Quick Hands (the AR fills the SMG role in v1) |
 | Survival + Healing | Vampire, Second Wind, Thick Skin |
 
-### 11.3 What XP and Scrap buy [Open O-1]
+### 11.3 What XP and Scrap buy [Partly open, O-1]
 
 The plan says Scrap is for "persistent purchases" and XP "unlocks progression", but defines no screen or content for either.
 
-**Recommendation:**
-- **XP** raises a persistent profile level. Levels add new upgrade cards and variants to the pool, so first runs stay simple.
-- **Scrap** is spent in a small between-runs **Workshop** on modest permanent perks.
-- This needs one extra menu screen, which the plan's UI list does not include.
+**Decided (D-039):** Scrap is the primary purchase currency at the **Supply Terminal between waves** (weapons, melee weapons, ammunition). The terminal is the Scrap sink during a run.
+
+**Still open (O-1), recommendation:**
+- **XP** raises a persistent profile level. Levels add new upgrade cards, variants and purchasable weapons to the pool, so first runs stay simple.
+- **Unspent Scrap** at the end of a run: whether any of it carries over to modest permanent purchases (the plan's "persistent purchases") is not decided. Default: it does not; the run's Scrap is spent at the terminal.
 
 ---
 
@@ -390,6 +421,7 @@ Minimal. The player must understand the situation within one second (§22).
 ```
 
 - **Largest elements:** health (bottom left) and ammo with the current weapon (bottom right).
+- **Loadout strip** (small, beside the ammo): Primary, Secondary (a lock icon while locked) and Melee, with the active one highlighted (D-039).
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).

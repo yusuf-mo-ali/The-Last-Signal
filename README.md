@@ -91,8 +91,10 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
 | Pause | Esc | Working |
 | Fire / Aim | Left click / Right click | Phase 2 |
 | Reload | R | Phase 2 |
-| Weapons | 1 / 2 / 3 | Phase 2 |
-| Interact / Melee | E / V (proposed) | Later phases |
+| Primary / Secondary / Melee weapon | 1 / 2 / 3 (Secondary starts locked) | Phase 2 |
+| Cycle weapons | Mouse wheel | Phase 2 |
+| Quick melee (always available) | V (proposed default) | Phase 2 |
+| Interact | E (proposed) | Later phases |
 
 Controls will be rebindable. Crouch defaults to C rather than Ctrl because browsers do not let pages block Ctrl+W, so crouch-walking with Ctrl would close the tab.
 
