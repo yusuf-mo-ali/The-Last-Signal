@@ -10,9 +10,9 @@
 
 ## Current Phase
 
-**Phase 3: Combat System. Complete** (plan §10, D-041). Shots and swings resolve against hitbox rigs (six zones), damage is calculated by one pure function, a reusable `Health` handles damage and a one-time death, and combat events drive placeholder feedback (hit markers, damage numbers, sparks, dummy reactions) and ammo drops. Everything is validated against **training dummies**, temporary targets that use the exact format zombies will. See "Phase 3 acceptance review" below. Phase 4 (zombie foundation) has not started and is awaiting approval.
+**Phase 4: Zombie Foundation. Complete** (plan §11, D-042). A generic enemy framework (archetype data, a behaviour, pooled enemies registered with the Phase 3 combat model), the plan's seven AI states in an explicit transition table, decisions at 10 Hz spread over the steps with exact timing every step, navigation that fits the blockout (straight pursuit, or the level's authored route graph), a telegraphed melee attack, player health with death, game over and restart, and the first archetype, the **Walker**. See "Phase 4 acceptance review" below. Phase 5 (zombie archetypes) has not started and is awaiting approval.
 
-- Phases 0 (Project Foundation), 1 (First Person Foundation) and 2 (Weapon Framework) are complete: see their acceptance reviews.
+- Phases 0 (Project Foundation), 1 (First Person Foundation), 2 (Weapon Framework) and 3 (Combat System) are complete: see their acceptance reviews.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -182,29 +182,47 @@
     - Performance (TESTING.md §7.4): microseconds per shot; two findings fixed with measurements: 24 dummies drew ~285 draw calls (over the Low budget of 250), now ~59 with one merged mesh per dummy; and the first shot of a session hitched ~210 ms (present since Phase 2), now ~4 ms because hidden pooled objects are prewarmed.
   - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
 
+- [x] **Phase 4: Zombie Foundation** (plan §11, D-042).
+  - **Enemy framework** (`src/enemies/`): archetype data (`EnemyArchetypeConfig`: the plan's base fields plus body, rig, perception, attack shape, patrol, combat overrides, drops, behaviour), `Enemy` (pooled; the player's capsule motor as its body, a hitbox rig, a `Health`, an AI state machine), `EnemyManager` (spawn with a living cap and unique ids, combat registration exactly like a dummy, think scheduling, separation, movement, death, removal exactly once, `canStand` spawn validation). Nothing generic names an archetype; the Walker is data plus the melee brain.
+  - **AI** (`enemies/ai/`): `EnemyStateMachine` (IDLE, PATROL, DETECT, CHASE, ATTACK, STAGGER, DEAD; one legal-transition table, strict mode throws); `meleeBrain`: perception (sight, memory, lose range, alerts from hits), chase, the attack (wind-up with a locked facing, one committed strike that can be dodged, blocked by walls, recovery, cooldown), stagger, target loss, idle and patrol. `think` runs at 10 Hz spread evenly over the steps; timing runs every step.
+  - **Navigation** (`src/navigation/`): straight pursuit when a body can walk the line (`LineTester`), otherwise A* over the facility's authored route graph (37 nodes, 48 links, every link walked by a Walker body in tests); stuck detection falls back to the route; `clearance` validates spawn spots.
+  - **Player health** (`player/PlayerHealth.ts`): 100, damage only in `WAVE_ACTIVE` / `BOSS` (D-029), death once → `GAME_OVER` → "You died" → click → a new run that resets player, enemies, dummies, pickups and weapons. Until waves exist, a run goes straight into one open-ended wave.
+  - **Combat integration:** no redesign; `CombatSystem` gains `applyDamage` and `kill` (direct damage for debug and later hazards).
+  - **Presentation (placeholder):** `EnemyView` (one skinned mesh per enemy built from its rig: zone colours, eyes, shamble, wind-up arms and orange glow, hit flash, stagger, fall and sink); `HealthHud` (health and a damage flash); the "You died" prompt.
+  - **Test encounter (temporary):** three Walkers placed each run (two sentries beyond detection range of the spawn, one patroller), back 10 s after their body goes.
+  - **Debug (dev only):** `tls.playerHealth()`, `healPlayer()`, `setGodMode()`, `damagePlayer()`, `killPlayer()`, `enemies()`, `enemy(id)`, `spawnEnemy()`, `spawnWalkers(n)`, `killEnemy()`, `killAll()`, `damageEnemy()`, `setEnemyState()`, `alertEnemies()`, `clearEnemies()`, `freezeEnemies()`, `showAI()` (AI visualiser); overlay enemy line.
+  - Verified:
+    - 185 new unit and integration tests (934 in the suite), including Walker chases into every area of the facility, the whole fight both ways through the real loop, identical results at 30, 60 and 144 Hz rendering, and the enemy cost at 1–64 Walkers.
+    - Planted bugs: 46 of 46 unit-level and 4 of 4 end-to-end wiring bugs caught. The first unit run caught 34 of 44; the survivors exposed missing tests (a wall stepped behind during the wind-up, the attack pose never reset, turning per step instead of per second, a greedy A*, falling out of the level, the encounter's respawn delay, direct damage to the dead, a dead player still "vulnerable"), one equivalent mutant (replaced), and a real weakness in the stuck fallback (an obstacle the straight-line rays cannot see, such as a low kerb, sent it straight back into the obstacle), which was fixed and tested (TESTING.md §4).
+    - `npm run check` passes; `npm run build` has no warnings (game 122.1 kB, 40.0 kB gzipped; three.js +5 kB for skinning); no debug code in `dist/`.
+    - `npm run test:e2e`: 114 tests, 37 skipped by design. On the earlier host every Phase 0–3 spec passed with the Phase 4 changes (76 passed; the one failure was a page reload caused by editing a source file mid-run, and it passed on its own). The final run landed on a host about half as fast: `enemies.spec` passes in dev and production (7 of 7), and 4 wall-clock-sensitive Phase 1–3 dev tests fail there, identically on the unchanged Phase 3 commit (control run), so they are environmental (TESTING.md §8). New `enemies.spec` (6 tests): spawn → detect → chase → wind-up → the player hit through their Health; body shot, headshot + stagger, recovery, kill, corpse, clean removal; a Walker's last hit kills the player → GAME_OVER once → a new run resets everything; hitbox and AI debug views; a crowd of 16; and a production test with real keys only (walk into the yard, get killed, click for a new run). All Phase 0–3 specs still pass (updated for the run flow and the three extra combat targets).
+    - Browser screenshots inspected (idle, chase, wind-up from the front and in profile, stagger, dead, game over).
+    - Performance (TESTING.md §7.4): simulation cost measured at 1–64 Walkers (well inside the 4 ms step budget). One finding fixed with measurements: a body mesh plus an arms mesh per enemy drew 272 draw calls at 64 Walkers (over the Low budget of 250); one skinned mesh per enemy draws 144.
+  - Live Vercel preview: the PR's Vercel deployment succeeds, but the preview is still not reachable from the container (proxy 403 for `*.vercel.app`).
+
 ## Active Task
 
-None. Phase 3 is complete; waiting for approval to start **Phase 4**.
+None. Phase 4 is complete; waiting for approval to start **Phase 5**.
 
 ## Known Bugs
 
-None.
+- **Test infrastructure, not the game:** 4 Phase 1–3 end-to-end tests are wall-clock-sensitive and fail when software rendering drops below ~7 FPS (TESTING.md §8). The player can walk through enemies (a known Phase 4 limitation, not a bug: D-042).
 
 ## Next Task
 
-**Phase 4: Zombie Foundation (plan §11).** A reusable enemy framework on top of the Phase 3 combat model. Suggested steps, each a small commit:
-1. **Enemy data** (`config/enemies.ts`): fill `EnemyArchetypeConfig` for the Walker (health 100 as the Pass-1 value, speed, attack damage, range, detection range, cooldown, stagger threshold, drop table).
-2. **Enemy framework** (`enemies/`): an `Enemy` with a `HitboxRig` + `Health` registered with the `CombatSystem` (exactly like a training dummy), an `EnemyManager` with pooling and a `maxAlive` cap, and removal through the `onKilled` hook.
-3. **AI state machine** (plan §11: IDLE, PATROL, DETECT, CHASE, ATTACK, STAGGER, DEAD): cheap steering every step, decisions on a scheduler at 5–10 Hz (D-008, ARCHITECTURE §7.4); `staggered` → STAGGER; deaths drop ammo through the drop tables.
-4. **Movement and navigation** for the Walker in the blockout (nav grid / flow field per D-008, or direct steering first, whichever the plan step needs), and collision with the player.
-5. **Player health and damage to the player** with the Phase 3 `Health` (D-029: only during active waves), making `healPlayer` / `setGodMode` real; the training range is kept for testing until waves replace it.
-6. **Verify:** unit tests for the AI transitions and scheduling, headless integration (a Walker chases, attacks and dies), e2e, the 24-enemy performance scenario (TESTING.md §7.2).
+**Phase 5: Zombie Archetypes (plan §12).** The Runner (fast, lower health, dangerous in groups), the Tank (very high health, slow, resistant to normal body shots), the Screamer (keeps its distance; alerts nearby zombies; temporary screen/audio effects) and the Climber (counters elevated positions), each with a clear purpose, plus the Elite/trait modifiers (D-012). Suggested steps, each a small commit:
+1. **Decide O-3** (the v1 roster): the default is Walker, Runner, Tank, Screamer, with the Climber deferred (it needs climb links and vertical navigation).
+2. **Runner and Tank as data** (`config/enemies.ts`): the melee brain already takes speed, health, turn rate, attack shape and zone overrides from config; the Tank's body resistance is a zone-multiplier override, its stagger immunity no threshold. A Runner lunge, if wanted, is an option of the melee behaviour.
+3. **Screamer** as a new brain: keep a distance, a telegraphed scream (interruptible by damage), `EnemyManager.alert` for zombies in a radius, a screen/audio event for the presentation.
+4. **Traits** (Armored, Helmeted, Elite): overlays on an archetype's data (armor per zone, a breakable head armor, a stat boost and a visual tell).
+5. **Presentation:** per-archetype placeholder silhouettes (the view builds any rig), the Screamer's tell.
+6. **Verify:** per-archetype intent tests (time-to-kill, speed vs the player, Tank body shots), behaviour tests, e2e with a mixed group, performance with the heavier archetypes.
 
 **Needed from you:**
-- Approval to start Phase 4.
-- A manual QA pass of TESTING.md §6 in real browsers, including the new "Combat" section: hit feel and feedback readability can only be judged by hand.
-- Run the performance measurement on the reference machine (TESTING.md §7.2), and confirm the GTX 750's VRAM (1 GB or 2 GB).
-- Optionally, O-3 (the v1 zombie roster) before Phase 5, and O-13; the defaults apply otherwise.
+- Approval to start Phase 5.
+- A manual QA pass of TESTING.md §6 in real browsers, including the new "Enemies" section: the Walker's feel (speed, the wind-up tell, dodging, shooting it) can only be judged by hand.
+- O-3 (the v1 zombie roster) before Phase 5; the default applies otherwise.
+- Run the performance measurement on the reference machine (TESTING.md §7.2, now with `tls.spawnWalkers(24)`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -214,7 +232,6 @@ None.
   - Replacing `LockPrompt` with the pause menu (UI phase).
 - **From 0.5:**
   - Balance numbers in `src/config/` (each system's phase, logged in BALANCING.md).
-  - Enemy counts in the overlay (Phases 4+; the hitbox visualiser exists since Phase 3).
   - The analytics interface (plan §30).
 - **From 0.6:** CI (a GitHub Actions workflow running check, build and e2e on each PR) is recommended but not yet added.
 - **From 1:**
@@ -229,12 +246,18 @@ None.
   - Bare Hands hit arcs and animation-timed impacts (combat).
   - Impact markers as one `InstancedMesh` if draw calls ever matter (they do not now).
 - **From 3:**
-  - Enemy use of the combat model (Phase 4): archetype zone overrides, pose presets per AI state, STAGGER behaviour, enemy drop tables.
-  - Player health and damage to the player (Phase 4, D-029); `healPlayer` / `setGodMode`.
+  - Pose presets per AI state beyond the attack's reach pose (with real animation).
   - Helmets (per-zone armor that breaks), boss weak points (a crit flag on shapes), armored modifiers (D-012).
   - A settings toggle for damage numbers (settings phase); blood, gore, hit and kill sounds (VFX and audio phases); a kill feed.
   - Other pickup kinds (health, components) and the ammo economy (progression / economy phases).
   - Training dummies removed from normal play when waves arrive (`TRAINING_RANGE.enabled`); they do not collide with the player.
+- **From 4:**
+  - The wave spawner, spawn points and the wave flow (Phase 6) replace the placeholder run flow and the test encounter (`TRAINING_ENEMIES.enabled`).
+  - Body blocking: the player can walk through enemies (they stop short and push away from the player, but the player's motor does not collide with them).
+  - A flow field (D-008) or a spatial hash for separation, only if a measurement with bigger hordes asks for it (at 64 Walkers the AI costs well under a millisecond per step).
+  - Distance-based think rates ("distant enemies think less often"), not needed at the measured cost.
+  - The full HUD (low-health vignette and heartbeat, damage direction), healing, and a real game-over screen (wave reached, cause of death: GAME_DESIGN §16).
+  - Final zombie models and animation (D-030).
 
 ## Blocked Tasks
 
@@ -310,6 +333,31 @@ Reviewed 2026-09-25 against the code on this branch.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
 - O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 4 acceptance review (plan §11)
+
+Reviewed 2026-09-26 against the code on this branch, with the scope the project owner set for Phase 4 (the Walker and a reusable enemy foundation; no waves, no other archetypes, no final art).
+
+| Plan §11 / Phase 4 requirement | Status | Evidence |
+|---|---|---|
+| Reusable enemy framework: health, movement speed, attack damage, attack range, detection range, attack cooldown, target, state | Done | `EnemyArchetypeConfig` (the plan's fields first), `Enemy`, `EnemyManager`; nothing generic names an archetype; config intent tests |
+| AI states IDLE, PATROL, DETECT, CHASE, ATTACK, STAGGER, DEAD | Done | `EnemyStateMachine`: one table, all 49 pairs tested against an independent table, strict mode in dev and tests |
+| No expensive logic every render frame; controlled update intervals | Done | Decisions at 10 Hz (`thinkInterval`, configurable), spread over the steps; exact timing every fixed step; measured 1–64 Walkers (decisions never pile up; ≤ 11 in any step at 64) |
+| Walker: slow, durable, melee, detection and chase, no ranged attack | Done | `ENEMY_STATS.walker` + the melee brain; BALANCING §2.6 |
+| Targeting: acquire, lose, distance, line of sight, attack range | Done | Perception tests (range, walls, memory, lose range, alerts, dead targets) |
+| Movement: no walls or floors crossed, stable around obstacles, no teleport or jitter, frame-rate independent | Done | Capsule motor; 10 facility chases with penetration, step and floor checks; determinism and 30/60/144 Hz; turn rate; crowd; a hidden obstacle bypassed |
+| Navigation fitted to the blockout | Done | Straight pursuit + authored route graph (every link walked by a body in tests); D-042 refines D-008 |
+| Melee attack: range, damage, cooldown, wind-up, once per attack, not while dead or staggered, through the player's Health | Done | Melee brain tests (timing to the step, dodging, arc, walls, stagger/death cancel), integration (85/70/55 a cooldown apart) |
+| Player health: max, damage, death once, game-over hook, no damage after death, reset each run | Done | `PlayerHealth` tests; integration; e2e (HUD, "You died", new run at 100) |
+| Stagger from the Phase 3 event | Done | STAGGER cancels a wind-up, stops, recovers to attack / chase / idle |
+| Combat registration like the dummies | Done | Same pipeline: headshot 65 + stagger, zones, 2 headshots / 5 body shots, dead bodies not hit, walls block |
+| Placeholder presentation with readable hit zones and feedback | Done | `EnemyView` (skinned, zone colours, wind-up glow, hit flash, stagger, fall and sink), `HealthHud`; screenshots |
+| Debug tools (dev only) | Done | `tls` enemy and player commands, `showAI()`, `showHitboxes()`, freeze, forced states; absent from `dist/` |
+| Performance at 1, 4, 8, 16, 32, 64 Walkers | Done | Headless test + browser measurements (TESTING.md §7.4); draw calls fixed with evidence (272 → 144 at 64) |
+
+**Open items that do not block Phase 5:** manual feel check in real browsers; reference-machine measurement; Vercel preview not reachable from the container; no CI yet; the player can walk through enemies (body blocking deferred).
 
 ---
 
@@ -394,7 +442,7 @@ Reviewed 2026-09-25 against the code on this branch.
 
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
-| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–3 complete |
+| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–4 complete (a player can shoot zombies and die; waves remain) |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | Not started |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
@@ -412,5 +460,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 3: combat coverage, mutations, manual QA, performance) |
-| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies |
+| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 4: enemy coverage, mutations, manual QA, performance at 1–64 Walkers) |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules |

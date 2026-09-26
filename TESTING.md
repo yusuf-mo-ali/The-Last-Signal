@@ -2,7 +2,7 @@
 
 How the project is tested, how to run each level, what is covered, and what still needs a human in a real browser. Required by plan §36; strategy from plan §27 and ARCHITECTURE.md §9 (D-021, D-036).
 
-> **Status (end of Phase 3):** 749 unit and integration tests; 102 end-to-end tests (51 tests × `dev` and `prod`: 70 run, 32 skipped by design); manual QA checklist not yet run in a real browser (see §6).
+> **Status (end of Phase 4):** 934 unit and integration tests; 114 end-to-end tests (57 tests × `dev` and `prod`: 77 run, 37 skipped by design); manual QA checklist not yet run in a real browser (see §6). On the final, slower container host (about half the frame rate of earlier runs), 4 development-build tests from Phases 1–3 that hold keys for a fixed wall-clock time fail; they fail identically on the Phase 3 commit on that host (§8).
 
 ---
 
@@ -23,11 +23,11 @@ How the project is tested, how to run each level, what is covered, and what stil
 
 | Command | What it does | When |
 |---|---|---|
-| `npm test` | Unit + integration tests (Vitest, ~2 s) | Constantly |
+| `npm test` | Unit + integration tests (Vitest, ~7 s) | Constantly |
 | `npm run test:watch` | Vitest in watch mode | While developing |
 | `npm run check` | Typecheck (app + e2e) → lint → format check → unit/integration tests | **Before every commit** |
 | `npm run build` | Typecheck + production build | Before every commit |
-| `npm run test:e2e` | Playwright against the dev server and a production preview (~2 min) | Before committing changes to rendering, input, UI, error handling or the build; before merging |
+| `npm run test:e2e` | Playwright against the dev server and a production preview (~8 min in software rendering) | Before committing changes to rendering, input, UI, error handling or the build; before merging |
 
 ### End-to-end setup
 
@@ -50,7 +50,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 
 ---
 
-## 3. What is covered (Phases 0–3)
+## 3. What is covered (Phases 0–4)
 
 | Area | Unit / integration | End-to-end |
 |---|---|---|
@@ -65,7 +65,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Rendering** | `render/viewport.test.ts`: sizes and DPR at every target resolution | `smoke.spec`: WebGL 2, pixels drawn, animation. `resize.spec`: 5 resolutions, live DPR 2/1.25/3, DPR cap, collapsed container |
 | **Input** | `input/*.test.ts`: readers, edges at any frame/step ratio, wheel notches, glitch motion, real DOM listener path on Node `EventTarget`s, pointer-lock success/fallback/refusal/legacy/timeout, auto-pause, step discard | `input.spec`: default suppression, physical keys (AZERTY), edges, lock on click, motion/buttons/wheel, lock loss → pause, refusal → "click again", resume, blur/hidden |
 | **Errors / WebGL** | `core/ErrorHandler.test.ts`, `render/webglSupport.test.ts`, `render/ContextLossMonitor.test.ts` | `resilience.spec`: context loss/restore/timeout, forced frame/async/rejection errors, missing WebGL 2, renderer failure |
-| **Debug tools** | `debug/DebugCommands.test.ts`, `debug/FrameStats.test.ts` | `debug.spec`: `tls`, plan §29 stubs (with their phases), player, weapon and combat commands, overlay with the weapon and combat lines (dev); nothing in production |
+| **Debug tools** | `debug/DebugCommands.test.ts`, `debug/FrameStats.test.ts` | `debug.spec`: `tls`, the remaining plan §29 stubs (with their phases), player, weapon, combat, enemy and player-health commands, overlay with the weapon, combat and enemy lines (dev); nothing in production |
 | **Player config** (Phase 1) | `config/player.test.ts`: body proportions, speed order, responsiveness, `jumpSpeed`, fit with the blockout (dock jumpable, duct crouch-only) | — |
 | **Level geometry** | `world/levels/geometry.test.ts`: outward normals for boxes, ramps in all 4 directions and stairs; stairs render as steps and collide as a ramp; grouping by surface | — |
 | **Blockout map** | `world/levels/facility.test.ts`: brushes well-formed and in bounds, triangle budget, walkable slopes, clear spawn, clear ground at every route waypoint, duct fits crouched not standing, beacon clear | `smoke.spec`: map renders, beacon visible from the spawn |
@@ -86,6 +86,15 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Health** | `combat/Health.test.ts` (12): start value and clamping, non-lethal, lethal with overkill, exactly lethal, floating-point dust, damage after death ignored, bad amounts ignored, heal cap and never while dead, revive, `setMax` | — |
 | **Combat system** | `combat/CombatSystem.test.ts` (22): registered with the hitscan, headshot, every zone, 2-headshot and 4-body kills, one `killed` and one `onKilled`, event order, shots after death ignored and passing through to the wall, walls block, nearest target in line (either registration order), falloff at 40 m, overrides/armor/resistance, attacker multiplier, stagger (window, threshold, immune, not on the kill), revive, remove, living count, multi-pellet shots (one kill), Bare Hands in and out of reach, driven by a `WeaponManager` (shot + quick melee; dispose), determinism | — |
 | **Training range, drops, pickups** | `combat/training/TrainingRange.test.ts` (9): configured range, headshot from the spawn, death → down → respawn at full health, zoned toughness, sure drop at the feet / failed roll, spawn/remove, reset, revive all. `world/PickupManager.test.ts` (10): spawn, collect in reach only when needed, vertical reach, stays then expires, no collector, cap; `rollDrops` reproducible, matches its chance, clamps and multiplier, one draw per entry. `WeaponManager.addAmmo` | `combat.spec`: pickup collected by walking onto it |
+| **Enemy data** (Phase 4) | `config/gameplayConfig.test.ts`: every implemented archetype is consistent (known behaviour and drop table, reach ≥ attack range, wind-up + recovery within the cooldown, lose range > detection range, eyes below the top of the body, patrol pauses ordered); the Walker's intents (under half the player's walking speed, tougher than the basic target, melee; 5 body shots or 2 headshots; a headshot or two quick body shots stagger it, one body shot does not; 7 hits kill the player; backing off during the wind-up escapes it); decisions at 5–10 Hz; the reach pose moves only the arms; the test encounter stands on the floor | — |
+| **AI state machine** | `enemies/ai/EnemyStateMachine.test.ts`: the seven plan states; all 49 pairs against an independently written table; DEAD terminal and reachable from every living state; no self-transitions; strict mode throws and changes nothing; listener and time in state; reset for reuse | `enemies.spec`: forced states through `tls.setEnemyState` (illegal refused) |
+| **Navigation** | `navigation/RouteGraph.test.ts`: shortest route by distance, exact (not greedy) A*, one-way links, deterministic ties, nearest nodes preferring the same level, broken definitions rejected. `navigation/LineTester.test.ts`: walkable lines (walls, low crates, low openings, the body's width, height difference, ramps), sight, ground, ray counts. `navigation/clearance.test.ts`: bodies against boxes (round footprint), steps, roofs, ramps and stairs in all four directions, the facility (every node fits, tower / crates / walls / duct / under the stairs refused). `navigation/facilityRoutes.test.ts`: the facility graph is connected, every node on the floor, **every link walked both ways by a Walker body** through the real collision | — |
+| **Walker behaviour** | `enemies/ai/meleeBrain.test.ts` (25): detection (range, walls, reaction tell, alert from a hit); chase and attack (stops short, one strike per attack at exactly the wind-up, cooldown cadence, dodging by stepping out of reach, committed arc, a wall stepped behind during the wind-up blocks the strike, reach pose for the attack and back to rest, never through a wall, height); stagger (cancels the wind-up, restart, recovery), death during the wind-up; losing the target (dead, range, memory); idle and patrol (near home, no patrol, seeded); think rate (once per interval, spread, configurable) | `enemies.spec`: detect → chase → wind-up (glow) → hit through the player's Health |
+| **Enemy manager** | `enemies/EnemyManager.test.ts` (16): combat registration (a headshot from the front), hit volumes follow the body, living cap, unimplemented archetypes refused, `canStand` (room and ground), death once and removal once after the corpse time, double despawn, falling out of the level, pool reuse with fresh state, clear for a new run, drops, inactive / frozen, `forceState`, alert; test encounter (placement, respawn only after its delay, far enough from the spawn) | `enemies.spec`: spawn, cleanup exactly once (view and combat) |
+| **Movement** | `enemies/movement.test.ts` (15): a Walker reaches a target in **every area of the facility** (open yard, behind the desk, annex, catwalk, under it, dock, bay, generator, corridor, container) with no wall penetration, no teleport, never below the floor; determinism; turn rate never exceeded, and per second at a 120 Hz step; a crowd spreads out and still arrives; an obstacle the straight-line test cannot see (a low kerb) is bypassed along the route | `enemies.spec`: 16 Walkers stay on the floor and apart |
+| **Player health** | `player/PlayerHealth.test.ts` (8): start at 100, damage with source and direction, death once (no damage or vulnerability after), D-029 window, god mode, bad amounts, healing, reset | `enemies.spec`: HUD health, death → game over → new run at 100 |
+| **Enemies in the loop** | `enemies/enemies.integration.test.ts` (13): a run goes into `WAVE_ACTIVE`; pause; Pistol vs Walker (headshot 65 + stagger, zones, two headshots / five body shots kill, the body is not hit and is removed, V quick melee); Walker vs player (15 per hit a cooldown apart, one GAME_OVER, no damage after death, restart resets everything, walls block, **identical at 30, 60 and 144 Hz rendering**); Phase 2–3 shots unchanged | `enemies.spec`: body shot, headshot + stagger, recovery, kill, corpse, removal; player death by a Walker; new run; AI and hitbox debug views; production: walk into the yard, get hit and killed, click for a new run (DOM only) |
+| **Enemy cost** | `enemies/performance.test.ts`: 1, 4, 8, 16, 32 and 64 Walkers chasing: decisions once per think interval and never more than their share in any step, rays per decision bounded, step time within the 4 ms budget (`PERF_REPORT=1` prints the table in §7.4) | — |
 | **Combat in the loop** | `combat/combat.integration.test.ts` (15): nothing outside a run; from the spawn a click is a headshot, two kill; later shots pass through to the tower; body/arm/leg from the spawn; respawn; reload mid-fight; V quick melee in reach and out of reach; walls block; nearest in line; kill → ammo drop → walk over it (limited reserve) and not taken with the unlimited Pistol; new run restores the range; pause freezes respawns; identical events for the same seed | `combat.spec`: headshot / body / arms and legs with markers and damage numbers; kill, fall, ignored shots, stand-up; reload in combat; V; pickups; hitboxes; numbers off. Production: headshot → kill → ignored → reload → hit again, read from the DOM |
 
 **Every end-to-end test also asserts a clean page:** no console errors or warnings, page errors, failed requests or HTTP errors. The only exceptions are ones a test deliberately provokes, and those are listed in the test.
@@ -103,6 +112,8 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 - **Tests must be able to fail.** For important behaviour, plant a realistic bug and confirm a test goes red.
   - Phases 0.2 and 0.4: 16 of 16 unit-level mutations were caught.
   - Phase 0.6: a planted e2e bug (refusal feedback removed) failed in both projects.
+  - Phase 4: 46 of 46 enemy mutations caught, across the state machine (a dead enemy chasing again, ATTACK straight from IDLE), perception (seeing through walls, detection range ignored, targets never forgotten, a dead target kept, alerts forgotten beyond the lose range, no reaction tell), the attack (a strike every step, no wind-up, no cooldown, attack range = detection range, a strike through a wall stepped behind during the wind-up, the reach ignored, the committed arc ignored, the facing tracking the target, the attack pose never reset), stagger (not cancelling the wind-up, never recovering), movement (unlimited turn rate, turning per step instead of per second, separation pulling together, re-plans restarting from the nearest node, a straight-line test ignoring the body's width, a greedy A*, never giving up a blocked straight walk, cutting corners back into the obstacle, never lifting the block, hit volumes not following the body), limited-rate AI (thinking every step, everyone thinking on the same step), lifecycle (bodies never removed, ghost hit volumes after removal, pooled enemies keeping their health or AI state, fallen enemies never removed, dead enemies still acting, the encounter respawning at once), combat and player (direct damage to the dead, hits not alerting, damage after death, damage outside the D-029 window, death announced on every hit, a new run not restoring the player) and spawn clearance (ramps ignored, square footprint). The first run caught 34 of 44. The survivors exposed eight missing tests, one equivalent mutant (a pooled enemy's target is already cleared on release; replaced), and a real weakness: after a straight walk failed on an obstacle the rays cannot see (a low kerb), the enemy cut corners straight back into it and retried after a fixed 2 s, so it never got round. It now follows the route link by link until the route ends or it reaches its target (D-042), with a test. Every file was restored byte-identically (hash-checked).
+  - Phase 4, end-to-end: 4 of 4 planted wiring bugs in the composition root (`main.ts`, which no unit test loads) were caught by `enemies.spec`: a new run keeping the dead player's health (the dev new-run test, and the real-keys test in dev and production), a new run keeping the old enemies (the dev new-run test: wrong ids and positions), the player's death never ending the run, and runs staying in `WAVE_START` so the player can never be hurt (both also caught in production).
   - Phase 3: 21 of 21 combat mutations caught: wrong headshot multiplier, damage applied twice, damage after death, death event fired twice, rig rotation sign flipped (wrong zone), last shape winning instead of the nearest (wrong zone), falloff ignored, walls not blocking targets, dead targets still hittable, nearest target not preferred, arm multiplier wrong in config, armor ignoring the damage floor, stagger window never expiring, dummies never standing up, drop chance inverted, pickups taken when not needed, ammo added to unlimited reserves, quick melee never damaging, healing above the maximum, broad phase ignoring shape radii, crit flag on every strong zone. The first run caught 17; the 4 survivors exposed missing tests (rigs only tested facing 0° and 180°, crit only tested with default multipliers) and two equivalent mutants (a redundant stagger reset was removed; the wall mutant was re-planted as the real two-part bug). Every file was restored byte-identically (hash-checked).
   - Phase 2: 17 of 17 weapon mutations caught (shots not spending ammo, fire-rate remainder dropped, firing while reloading, reload ignoring a finite reserve, no falloff, crouch spread inverted, locked Secondary reported as empty, semi-auto firing while held, switching keeping the reload, quick melee switching to melee, wheel cycling into melee, acquiring into a locked Secondary, no auto reload, firing during quick melee, recoil never applied, recovery overshooting the aim, walls not blocking targets).
   - Phase 1: 9 of 9 movement mutations caught (no sub-steps, no headroom check, no diagonal normalisation, sprint in any direction, no coyote time, no jump buffer, sliding on slopes, no ground snap, no kill plane). The first run caught 5; the 4 survivors exposed weak test setups, which were fixed.
@@ -183,6 +194,16 @@ Record the date, browser version and results in PROGRESS.md.
 - [ ] **Walls:** a dummy behind a wall or the tower cannot be hit.
 - [ ] **Feedback feel:** markers are readable but not distracting; damage numbers can be turned off (dev: `tls.damageNumbers(false)`).
 - [ ] **Performance:** firing continuously at the dummies causes no hitch, including the very first shot of a session.
+
+### Enemies (Phase 4)
+- [ ] **Encounter:** at the start, standing at the spawn, nothing attacks. Two Walkers stand guard to either side of the yard ahead; a third wanders the north-east yard. Health reads `HEALTH 100` bottom left.
+- [ ] **Detection:** walk north into the yard: a guard notices you (it turns to face you for a moment), then walks straight at you. It never passes through walls, crates or the tower.
+- [ ] **Telegraph and dodge:** when it reaches you it stops, raises its arms and glows orange; step back or to the side before the glow peaks and it misses. Stay and you lose 15 health, with a red flash at the screen edges. It swings again at most every ~1.6 s.
+- [ ] **Shooting it:** body shots take 5 to kill, headshots 2. A headshot makes it rock back and interrupts a wind-up. A killed Walker falls, lies for 5 s, sinks and is gone; about 10 s later it is back at its post.
+- [ ] **Chase everywhere:** lead one into the control room (through the door), up the stairs or ramp onto the catwalk, onto the dock and into the generator hall: it follows without getting stuck (dev: `tls.showAI()` shows its route in cyan).
+- [ ] **Death and restart:** let the Walkers kill you: "YOU DIED / Click to start a new run", the mouse is released and nothing moves. Clicking starts a new run at full health with the three Walkers back at their posts.
+- [ ] **Crowd** (dev): `tls.setGodMode(true)`, then `tls.spawnWalkers(24)` and `tls.alertEnemies()`: they surround you without stacking inside each other; the frame rate stays smooth (§7).
+- [ ] **Debug views** (dev): `tls.showAI()` labels each Walker with its state and health and draws its detection (yellow) and attack (orange) range; `tls.showHitboxes()` matches the drawn bodies, including the arms raised in the wind-up.
 
 ### Resilience
 - [ ] **Context loss** (dev, real GPU): `tls.loseContext()` shows "Graphics paused"; `tls.restoreContext()` restores the scene and "Paused" → click resumes.
@@ -283,6 +304,44 @@ Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *r
   - **First-shot hitch (since Phase 2).** The first shot of a session cost ~210–226 ms: the muzzle flash and impact markers start hidden, and `renderer.compile` skips hidden objects, so their first draw paid its setup mid-play. Measured on the Phase 2 commit too (209.7 ms), so it was not a Phase 3 regression. `WorldView.prewarm` now renders hidden objects once behind the start prompt: the first shot costs ~4 ms, like any other.
 - **Reading:** combat's CPU cost is negligible (microseconds per shot). Triangles grow with dummies (~2,600 per dummy including its shadow draw) and could be reduced with fewer sphere and capsule segments if a GPU measurement ever asks for it; nothing else needs optimising.
 
+**Phase 4 baseline (2026-09-26, Walkers chasing the player, god mode):**
+
+*Simulation, headless (Node; `PERF_REPORT=1 npx vitest run src/enemies/performance.test.ts`).* N Walkers chase a target circling the south yard (the expensive case: all steering, re-planning, colliding and pushing apart). Per 60 Hz fixed step:
+
+| Walkers | Step (ms), avg / worst | think (µs) | update (µs) | separation (µs) | movement + collision (µs) | combat timers (µs) | One shot into the crowd (µs) | Decisions per step (max) | Rays per step |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 0.03 / 0.7 | 2 | 1 | 1 | 6 | 0.3 | 5.7 | 0.17 (1) | 0.8 |
+| 4 | 0.06 / 3.0 | 7 | 1 | 1 | 14 | 0.1 | 4.7 | 0.67 (1) | 3.7 |
+| 8 | 0.09 / 1.0 | 12 | 2 | 1 | 28 | 0.2 | 3.1 | 1.33 (2) | 6.9 |
+| 16 | 0.14 / 0.7 | 21 | 3 | 4 | 52 | 0.2 | 4.0 | 2.67 (3) | 13.7 |
+| 32 | 0.26 / 1.1 | 38 | 5 | 17 | 101 | 0.2 | 4.2 | 5.33 (6) | 25.9 |
+| 64 | 0.63 / 1.5 | 96 | 11 | 79 | 251 | 0.5 | 6.4 | 10.67 (11) | 48.2 |
+
+- **Inside the budget:** 64 Walkers cost ~0.65 ms per step, 16 % of the 4 ms simulation budget (D-037); the planned wave default of 24 about 0.2 ms. The worst single steps (≤ 3.6 ms) are isolated garbage-collection or compilation pauses, not the AI.
+- **Where it goes:** movement and collision (the capsule motor against the level octree) ~4 µs per Walker per step; decisions ~9 µs each, one per Walker every 6th step (~4.5 rays each); exact timing (`update`) ~0.2 µs per Walker. Decisions are spread evenly: never more than ⌈N ÷ 6⌉ in any step.
+- **The only non-linear part** is separation (every pair: 2,016 pairs at 64, ~40 ns each). It is 12 % of the step at 64 and negligible at 24; a spatial hash (ARCHITECTURE §7.4) is only worth it if the living cap grows well beyond 64.
+
+*Browser (development build, SwiftShader, 6 s of the player strafing while the crowd chases; `tls.spawnWalkers(n)` with the test encounter and the dummies cleared):*
+
+| Resolution | Preset | Walkers | FPS (SwiftShader) | Our frame cost avg / p95 / max (ms) | Draw calls | Triangles | JS heap (MB) |
+|---|---|---|---|---|---|---|---|
+| 1366×768 | High | 0 | 11.5 | 1.12 / 2.1 / 4.7 | 16 | 1,220 | 28.6 |
+| 1366×768 | High | 1 | 11.0 | 1.54 / 2.4 / 4.7 | 18 | 3,668 | 33.0 |
+| 1366×768 | High | 4 | 9.6 | 1.65 / 2.3 / 4.7 | 24 | 11,012 | 31.9 |
+| 1366×768 | High | 8 | 8.4 | 2.13 / 5.6 / 7.8 | 32 | 20,804 | 29.6 |
+| 1366×768 | High | 16 | 7.4 | 2.65 / 5.2 / 7.6 | 48 | 40,388 | 32.9 |
+| 1366×768 | High | 32 | 6.4 | 3.85 / 5.7 / 5.8 | 80 | 79,556 | 32.1 |
+| 1366×768 | High | 64 | 4.9 | 7.15 / 12.4 / 14.1 | 144 | 157,892 | 35.4 |
+| 1920×1080 | High | 24 | 4.8 | 4.51 / 9.3 / 13.7 | 64 | 59,972 | 30.1 |
+| 1920×1080 | Low | 24 | 6.5 | 3.69 / 6.0 / 15.2 | 64 | 59,972 | 29.2 |
+| 1920×1080 | High | 64 | 3.6 | 8.85 / 13.4 / 16.7 | 144 | 157,892 | 29.8 |
+| 1920×1080 | Low | 64 | 5.2 | 8.10 / 12.2 / 12.6 | 144 | 157,892 | 34.1 |
+
+- **Finding, fixed with evidence: draw calls over budget at 64 Walkers.** The first version drew each Walker as two meshes (body, and arms pivoting at the shoulders), each with a shadow draw: 4 draw calls per Walker, **272 at 64 Walkers** (1920×1080 Low: 272, over the budget of 250). Each Walker is now **one skinned mesh** (two bones: body and arms), so the arms still animate and cast shadows: 2 draw calls per Walker, **144 at 64**. Frame cost and triangles are unchanged within noise (skinning adds one tiny bone-texture upload per Walker per frame, the halved draw calls take as much away).
+- **Our frame cost** includes up to 5 simulation steps per frame at these low software frame rates (at 64 Walkers ~3 ms of the ~7 ms is simulation). On real hardware at 60 FPS a frame runs one step.
+- **Memory:** the JS heap stays at 29–35 MB from 0 to 64 Walkers (differences are garbage-collection timing, not growth). GPU memory: one merged geometry per archetype, one small material and bone texture per visible Walker; 18 geometries in total.
+- **Triangles** (~2,450 per Walker including its shadow draw) are the next thing to reduce if the reference GPU asks for it (fewer capsule and sphere segments); nothing suggests it does.
+
 **Phase 1 details:**
 - **Player simulation (Node, headless):** 5.0 µs per step standing, 6.0 µs sprinting in the open, 10.3 µs pushing into a wall. At 60 steps/s that is under 0.1 % of a frame. Level collision: 480 triangles; world build ≈ 50 ms once at startup (including JIT warm-up).
 - **Reading:** our CPU work is ~1 ms per frame. SwiftShader's CPU rasteriser is the entire bottleneck (7 FPS at 1080p), so these rates say nothing about the GTX 750. The blockout is far inside every budget (draw calls 11 of 250).
@@ -293,6 +352,7 @@ Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *r
 
 ## 8. Known gaps
 
+- **Wall-clock-sensitive e2e tests.** Four Phase 1–3 development-build tests (`player.spec` WASD / jump / collision, `combat.spec` body-shot marker) hold keys or watch for a marker over a fixed real time. They assume ~10 FPS of software rendering; below ~7 FPS simulated time falls behind (at most 5 steps per frame) and they fail. Seen on the slower host of the Phase 4 final run, reproduced on the unchanged Phase 3 commit on that host, and passing on the earlier host. Fix when CI arrives: drive them by simulated time (as `enemies.spec` does) or run the suite at a smaller viewport.
 - **No CI yet.** Recommended next infrastructure step: a GitHub Actions workflow running `npm ci`, `npm run check`, `npm run build` and `npm run test:e2e` on every PR. That would make "green" objective for every change.
 - **Vercel preview not reachable from the Claude Code container.** Its network policy denies `*.vercel.app`; allowing it would let the e2e suite run against each preview (`E2E_BASE_URL`).
 - **Manual QA (§6) pending** in real Chrome, Edge and Firefox.

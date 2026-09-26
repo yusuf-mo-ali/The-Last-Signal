@@ -102,6 +102,7 @@ Plan §3 controls are kept. Controls must be rebindable later, so bindings live 
   - A jump reaches 1.15 m: it clears low cover (up to ~1 m) and the loading dock, not a 1.6 m crate. Small forgiveness windows: 0.1 s coyote time, 0.12 s jump buffer.
   - Mouse look: 60° vertical FOV (about 90° horizontal at 16:9), pitch limited to ±89°, subtle head bob (3 cm) while moving on the ground only.
 - **Damage window [Proposed, D-029].** The player can only take damage during `WAVE_ACTIVE` and `BOSS`. This removes a whole class of edge cases, such as dying on the upgrade screen.
+- **Phase 4 implementation (D-042).** Health 100 (`src/config/player.ts`). Enemy hits lower it only inside the damage window; at 0 the player dies once, the run ends (`GAME_OVER`, "You died"), and a click starts a new run at full health with the enemies reset. Until the wave system exists, a run goes straight into one open-ended wave (`WAVE_ACTIVE`), so the player can be hurt during play. No healing yet (upgrades and pickups later).
 
 ---
 
@@ -176,7 +177,7 @@ Multipliers are configurable, and archetypes can override them (a Tank's body re
   - That is the mechanical meaning of "shotgun use → more armored enemies" (§15). It creates a real problem the player can solve by switching weapon or aiming better.
 - **Helmets (the "protected-head" counter)** absorb head damage until they break. Headshot-focused players are slowed down, not shut out, and knocking the helmet off feels good.
 - **Distance falloff** is configured per weapon.
-- **Hit reactions.** Enough damage within a short window triggers `STAGGER`. Tanks resist stagger except from headshots. Phase 3 implements the rule and the `staggered` event (damage within 1 s of the previous hit adds up; each target has a threshold, or none to be immune); what a stagger does to an enemy's behaviour comes with the AI (Phase 4).
+- **Hit reactions.** Enough damage within a short window triggers `STAGGER`. Tanks resist stagger except from headshots. Phase 3 implements the rule and the `staggered` event (damage within 1 s of the previous hit adds up; each target has a threshold, or none to be immune). Phase 4: a staggered enemy stops for its stagger duration and loses the attack it was winding up (§7.1).
 - **Feedback:**
   - hit marker, with a distinct marker and sound for headshots
   - kill confirmation
@@ -230,6 +231,23 @@ Multipliers are configurable, and archetypes can override them (a Tank's body re
 **Fairness rules:**
 - Every attack has a wind-up tell (animation and sound).
 - Zombies never spawn in the player's view or within a minimum distance of them.
+
+### 7.1 The Walker (Phase 4, D-042)
+
+The first zombie, and the baseline the others are measured against. Values are in `src/config/enemies.ts`; the reasoning is in BALANCING.md §2.6.
+
+- **Slow and durable:** it walks at 1.6 m/s (the player walks at 5) and has 120 health, so it takes two Pistol headshots or five body shots. It never runs, lunges or attacks from range.
+- **Senses:** it notices the player within 12 m if it can see them, turns toward them for a moment (0.6 s, the "noticed you" tell), then walks at them. It keeps chasing while it can see the player, or for 5 s after losing sight of them, up to 24 m away. A shot that hits it tells it where the shooter is, whatever the range.
+- **Finds its way:** straight at the player when nothing is in the way; otherwise along the facility's routes (through doorways, up the stairs and the ramp to the catwalk, onto the dock), never through walls.
+- **Attack (the telegraph):** within 1.5 m it stops, raises its arms forward and glows orange for 0.7 s, then strikes once for 15. The strike is committed: it lands only if the player is still within 1.9 m, in front of it and not behind a wall, so stepping back or aside during the wind-up dodges it. It attacks again at most every 1.6 s. Seven hits kill a player at full health.
+- **Stagger:** 35 damage within 1 s (any headshot does it) stops it for 0.7 s and cancels a wind-up in progress.
+- **Death:** it falls, lies there for 5 s, sinks and is gone. It sometimes drops ammo (20%).
+- **Idle:** without a target it stands, or wanders a few metres around where it was placed.
+- **Placeholder look:** a grey-box humanoid built from its own hit volumes (pale green head and arms, dark shirt and trousers, yellow eyes), so what you see is exactly what you can hit. Final models and animation come later (D-030).
+
+### 7.2 The test encounter (temporary, Phase 4)
+
+Until waves exist (Phase 6), every new run places three Walkers: two standing guard to either side of the yard (8 m off the path north from the spawn, 14–15 m from the spawn, so a player who stays at the spawn is left alone) and one wandering the north-east yard. A Walker whose body has gone comes back 10 s later. It is on in every build, like the training dummies, so the Walker can be played in production; the wave system replaces it.
 
 ---
 
@@ -449,6 +467,7 @@ Minimal. The player must understand the situation within one second (§22).
 - **Loadout strip** (small, beside the ammo): Primary, Secondary (a lock icon while locked) and Melee, with the active one highlighted (D-039). Not built yet.
 - **Phase 2 placeholder:** a centre dot crosshair and the held weapon's name and ammunition (`12 / ∞`, `RELOADING`) until the UI phase.
 - **Phase 3 placeholder:** a hit marker around the crosshair (hit, headshot, kill) and floating damage numbers (§6).
+- **Phase 4 placeholder:** health bottom left (`HEALTH 85` and a bar) and a brief red flash at the screen edges when the player is hit; "You died / Click to start a new run" at game over.
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).

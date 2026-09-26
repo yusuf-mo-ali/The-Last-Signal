@@ -168,7 +168,7 @@ test('losing the lock pauses; a refused re-lock says so; a later click resumes',
         const { game } = window.tls!.inspect();
         return [game.state.current, game.state.pausedState, game.time.scale];
       }),
-    ).toEqual(['PAUSED', 'WAVE_START', 0]);
+    ).toEqual(['PAUSED', 'WAVE_ACTIVE', 0]);
   }
 
   // Chromium's real refusal: the canvas rejects the next request with its SecurityError.
@@ -200,7 +200,7 @@ test('losing the lock pauses; a refused re-lock says so; a later click resumes',
         return [game.state.current, input.isButtonDown(0)];
       }),
       'resumes the same phase; the resume click is not a shot',
-    ).toEqual(['WAVE_START', false]);
+    ).toEqual(['WAVE_ACTIVE', false]);
   }
   expect(issues.problems()).toEqual([]);
 });

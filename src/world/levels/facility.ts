@@ -18,7 +18,7 @@
  *        x=-24                                      x=+24
  */
 
-import type { Brush, LevelDefinition, SurfaceKind, Vec3 } from './types';
+import type { Brush, LevelDefinition, NavGraphDefinition, SurfaceKind, Vec3 } from './types';
 
 const box = (min: Vec3, max: Vec3, surface: SurfaceKind): Brush => ({
   kind: 'box',
@@ -138,11 +138,115 @@ const loadingBay: Brush[] = [
   box([12, 0, 12], [15, 2.6, 17], 'metal'),
 ];
 
+/**
+ * Enemy route graph (D-042). Nodes sit on open floor at least one body radius clear of walls, at
+ * doorways, stair and ramp ends and around the large obstacles; every link is a straight walk a
+ * Walker's capsule can make (verified by `facility.test.ts`, which walks each one with the real
+ * body). The open yard needs few nodes: enemies walk straight at a target they can reach.
+ */
+export const FACILITY_NAVIGATION: NavGraphDefinition = {
+  nodes: [
+    // Yard.
+    { id: 'yard-s', position: [0, 0, 11] },
+    { id: 'yard-w', position: [-9, 0, 4] },
+    { id: 'yard-e', position: [9, 0, 2] },
+    { id: 'yard-sw', position: [-18, 0, 8] },
+    { id: 'yard-nw', position: [-14, 0, -9] },
+    { id: 'yard-n', position: [0, 0, -8] },
+    { id: 'yard-ne', position: [10, 0, -4] },
+    { id: 'yard-far-e', position: [19, 0, 2] },
+    { id: 'yard-se', position: [17, 0, 10] },
+    // Control room (south and west doors; the duct is crouch-only, too low for enemies).
+    { id: 'cr-door-in', position: [0, 0, -14.5] },
+    { id: 'cr-c', position: [0, 0, -17] },
+    { id: 'cr-w', position: [-8.5, 0, -18] },
+    { id: 'cr-e', position: [8.5, 0, -18] },
+    { id: 'cr-nw', position: [-7, 0, -22] },
+    { id: 'cr-ne', position: [7, 0, -22] },
+    { id: 'annex-e', position: [-12.5, 0, -18] },
+    // Stairs, catwalk and ramp.
+    { id: 'stairs-bottom', position: [-22.25, 0, -17] },
+    { id: 'stairs-top', position: [-22.25, CATWALK_HEIGHT, -6.5] },
+    { id: 'catwalk-mid', position: [-22.25, CATWALK_HEIGHT, 1] },
+    { id: 'catwalk-s', position: [-22.25, CATWALK_HEIGHT, 8.5] },
+    { id: 'ramp-bottom', position: [-22.25, 0, 18.5] },
+    // Loading bay and dock.
+    { id: 'sw-corner', position: [-19, 0, 21.5] },
+    { id: 'bay-w', position: [-10, 0, 21.5] },
+    { id: 'bay-n', position: [-10, 0, 16.5] },
+    { id: 'dock-w', position: [-5.5, DOCK_HEIGHT, 21.5] },
+    { id: 'dock-e', position: [6.5, DOCK_HEIGHT, 21.5] },
+    { id: 'dock-ramp-bottom', position: [12.5, 0, 21.5] },
+    { id: 'bay-e', position: [17, 0, 20.5] },
+    // Service corridor and generator hall.
+    { id: 'corridor-s', position: [14.7, 0, -5] },
+    { id: 'corridor-mid', position: [14.7, 0, -12.75] },
+    { id: 'hall-door', position: [17.8, 0, -12.75] },
+    { id: 'hall-w', position: [17.2, 0, -18] },
+    { id: 'hall-nw', position: [17.2, 0, -22.5] },
+    { id: 'hall-ne', position: [22.5, 0, -22.5] },
+    { id: 'hall-e', position: [22.5, 0, -14] },
+    { id: 'hall-se', position: [23, 0, -7] },
+    { id: 'hall-sw', position: [17.5, 0, -7] },
+  ],
+  links: [
+    { from: 'yard-s', to: 'yard-w' },
+    { from: 'yard-s', to: 'yard-e' },
+    { from: 'yard-s', to: 'bay-n' },
+    { from: 'yard-s', to: 'yard-se' },
+    { from: 'yard-w', to: 'yard-nw' },
+    { from: 'yard-w', to: 'yard-sw' },
+    { from: 'yard-sw', to: 'yard-nw' },
+    { from: 'yard-nw', to: 'yard-n' },
+    { from: 'yard-nw', to: 'annex-e' },
+    { from: 'yard-n', to: 'yard-ne' },
+    { from: 'yard-n', to: 'cr-door-in' },
+    { from: 'yard-e', to: 'yard-ne' },
+    { from: 'yard-e', to: 'yard-far-e' },
+    { from: 'yard-ne', to: 'corridor-s' },
+    { from: 'yard-far-e', to: 'yard-se' },
+    { from: 'yard-far-e', to: 'hall-sw' },
+    { from: 'yard-far-e', to: 'hall-se' },
+    { from: 'yard-se', to: 'bay-e' },
+    { from: 'cr-door-in', to: 'cr-c' },
+    { from: 'cr-door-in', to: 'cr-w' },
+    { from: 'cr-door-in', to: 'cr-e' },
+    { from: 'cr-c', to: 'cr-w' },
+    { from: 'cr-c', to: 'cr-e' },
+    { from: 'cr-w', to: 'cr-nw' },
+    { from: 'cr-e', to: 'cr-ne' },
+    { from: 'cr-nw', to: 'cr-ne' },
+    { from: 'cr-w', to: 'annex-e' },
+    { from: 'annex-e', to: 'stairs-bottom' },
+    { from: 'stairs-bottom', to: 'stairs-top' },
+    { from: 'stairs-top', to: 'catwalk-mid' },
+    { from: 'catwalk-mid', to: 'catwalk-s' },
+    { from: 'catwalk-s', to: 'ramp-bottom' },
+    { from: 'ramp-bottom', to: 'sw-corner' },
+    { from: 'sw-corner', to: 'bay-w' },
+    { from: 'bay-w', to: 'bay-n' },
+    { from: 'bay-e', to: 'dock-ramp-bottom' },
+    { from: 'dock-ramp-bottom', to: 'dock-e' },
+    { from: 'dock-e', to: 'dock-w' },
+    { from: 'corridor-s', to: 'corridor-mid' },
+    { from: 'corridor-mid', to: 'hall-door' },
+    { from: 'hall-door', to: 'hall-w' },
+    { from: 'hall-door', to: 'hall-e' },
+    { from: 'hall-door', to: 'hall-sw' },
+    { from: 'hall-w', to: 'hall-nw' },
+    { from: 'hall-nw', to: 'hall-ne' },
+    { from: 'hall-ne', to: 'hall-e' },
+    { from: 'hall-e', to: 'hall-se' },
+    { from: 'hall-sw', to: 'hall-se' },
+  ],
+};
+
 export const FACILITY: LevelDefinition = {
   name: 'Facility (blockout)',
   spawn: { position: [0, 0, 14], yaw: 0 }, // facing the tower and its beacon
   killPlaneY: -20,
   brushes: [...perimeter, ...yard, ...controlRoom, ...eastWing, ...catwalk, ...loadingBay],
+  navigation: FACILITY_NAVIGATION,
 };
 
 /** Where the signal beacon sits: on top of the tower. */

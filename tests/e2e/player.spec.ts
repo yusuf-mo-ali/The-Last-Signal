@@ -63,7 +63,7 @@ test.describe('player (development build)', () => {
 
     expect(await isPointerLocked(page)).toBe(true);
     expect(await lockPrompt(page)).toEqual({ mode: 'hidden', hidden: true });
-    expect(await page.evaluate(() => window.tls!.inspect().game.state.current)).toBe('WAVE_START');
+    expect(await page.evaluate(() => window.tls!.inspect().game.state.current)).toBe('WAVE_ACTIVE');
     const p = await player(page);
     expect(p.position).toEqual(before.position);
     expect(p).toMatchObject({ grounded: true, crouched: false, speed: 0, respawns: 0 });

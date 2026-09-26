@@ -325,7 +325,7 @@ test.describe('combat (development build)', () => {
       const debug = scene?.getObjectByName('hitbox-debug');
       return debug?.children.filter((c) => c.visible).length ?? 0;
     });
-    expect(drawn).toBe(18); // 3 dummies × 6 zones
+    expect(drawn).toBe(36); // 6 targets (3 dummies, the 3 test-encounter Walkers) × 6 zones
     expect(await page.evaluate(() => window.tls!.showHitboxes(false))).toBe(false);
 
     expect(await page.evaluate(() => window.tls!.damageNumbers(false))).toBe(false);

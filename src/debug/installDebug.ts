@@ -11,10 +11,17 @@
  */
 
 import './debug.css';
-import { Vector3, type Scene } from 'three';
+import { Vector3, type Camera, type Scene } from 'three';
 import type { CombatSystem, DamagedEvent } from '../combat/CombatSystem';
 import type { TrainingRange } from '../combat/training/TrainingRange';
-import { DAMAGE_ZONES, type DamageZone } from '../config/enemies';
+import {
+  AI_STATES,
+  DAMAGE_ZONES,
+  IMPLEMENTED_ENEMY_IDS,
+  type AiState,
+  type DamageZone,
+  type ImplementedEnemyId,
+} from '../config/enemies';
 import { PICKUP_IDS, type PickupId } from '../config/drops';
 import { TRAINING_DUMMY_KINDS, type TrainingDummyKind } from '../config/training';
 import { ENGINE_CONFIG, type ViewSettings } from '../core/Config';
@@ -23,7 +30,11 @@ import type { Game } from '../core/Game';
 import { GameStateId } from '../core/GameState';
 import type { InputState } from '../input/InputState';
 import type { PointerLock } from '../input/PointerLock';
+import type { EnemyManager } from '../enemies/EnemyManager';
+import type { TrainingEncounter } from '../enemies/TrainingEncounter';
+import type { EnemyTarget } from '../enemies/types';
 import type { Player } from '../player/Player';
+import type { PlayerHealth } from '../player/PlayerHealth';
 import {
   LOADOUT_CATEGORIES,
   WEAPON_IDS,
@@ -37,6 +48,7 @@ import type { PickupManager } from '../world/PickupManager';
 import { DebugCommands, type DebugApi } from './DebugCommands';
 import { DebugOverlay } from './DebugOverlay';
 import { FrameStats, type FrameStatsSnapshot } from './FrameStats';
+import { EnemyDebugView } from './EnemyDebugView';
 import { HitboxDebugView } from './HitboxDebugView';
 
 /** Everything the debug tools may inspect. Passed in from the composition root. */
@@ -56,8 +68,14 @@ export interface DebugContext {
   readonly training?: TrainingRange;
   readonly pickups?: PickupManager;
   readonly feedback?: CombatFeedback;
-  /** The world scene, for debug drawing (hitboxes). */
+  /** The world scene, for debug drawing (hitboxes, AI). */
   readonly scene?: Scene;
+  /** Enemies, for `tls.enemies()`, `tls.spawnEnemy()`, `tls.killAll()`, `tls.showAI()`, … */
+  readonly enemies?: EnemyManager;
+  readonly encounter?: TrainingEncounter;
+  /** Player health, for `tls.playerHealth()`, `tls.healPlayer()`, `tls.setGodMode()`, … */
+  readonly playerHealth?: PlayerHealth;
+  readonly playerTarget?: EnemyTarget;
   /** View settings access, for `tls.view()`. */
   readonly getView?: () => ViewSettings;
   readonly applyView?: (settings: ViewSettings) => ViewSettings;
@@ -79,10 +97,6 @@ declare global {
 
 /** Plan §29 commands whose systems arrive in later phases. */
 const PLANNED_COMMANDS: readonly (readonly [string, string, string])[] = [
-  ['healPlayer', 'Restore full health', 'Phase 4 (enemies attack the player)'],
-  ['setGodMode', 'Toggle invulnerability', 'Phase 4 (enemies attack the player)'],
-  ['spawnEnemy', 'Spawn an enemy of a given type', 'Phase 4 (zombie foundation)'],
-  ['killAll', 'Kill every enemy', 'Phase 4 (zombie foundation)'],
   ['startWave', 'Start a given wave number', 'Phase 6 (wave system)'],
   ['triggerMutation', 'Apply a Signal Mutation', 'Phase 7 (mutations)'],
   ['spawnBoss', 'Spawn a boss', 'Phase 13 (bosses)'],
@@ -148,6 +162,9 @@ export function installDebug(context: DebugContext): DebugTools {
     errors,
     ...(context.player ? { player: context.player } : {}),
     ...(context.weapons ? { weapons: context.weapons } : {}),
+    ...(context.enemies ? { enemies: context.enemies } : {}),
+    ...(context.encounter ? { encounter: context.encounter } : {}),
+    ...(context.playerHealth ? { playerHealth: context.playerHealth } : {}),
     ...(context.combat ? { combat: context.combat } : {}),
     ...(context.training ? { training: context.training } : {}),
     ...(context.pickups ? { pickups: context.pickups } : {}),
@@ -234,6 +251,7 @@ export function installDebug(context: DebugContext): DebugTools {
   registerPlayerCommands(commands, context);
   registerWeaponCommands(commands, context);
   const disposeCombat = registerCombatCommands(commands, context);
+  const disposeEnemies = registerEnemyCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -251,6 +269,7 @@ export function installDebug(context: DebugContext): DebugTools {
       win.removeEventListener('keydown', onKeyDown);
       game.setFrameProbe(null);
       disposeCombat();
+      disposeEnemies();
       overlay.dispose();
       if (win.tls === api) {
         delete win.tls;
@@ -605,8 +624,254 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     ...(player ? [formatPlayer(player)] : []),
     ...(weapons ? [formatWeapons(weapons)] : []),
     ...(context.combat ? [formatCombat(context.combat, lastHit)] : []),
+    ...(context.enemies ? [formatEnemies(context.enemies, context.playerHealth)] : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
+}
+
+function registerEnemyCommands(commands: DebugCommands, context: DebugContext): () => void {
+  const { enemies, playerHealth, player, playerTarget, scene, game, container } = context;
+  const disposers: (() => void)[] = [];
+  const round = (n: number) => Math.round(n * 100) / 100;
+
+  if (playerHealth) {
+    const status = () => ({
+      health: round(playerHealth.current),
+      max: playerHealth.max,
+      dead: playerHealth.isDead,
+      vulnerable: playerHealth.vulnerable,
+      godMode: playerHealth.godMode,
+    });
+    commands.register('playerHealth', 'Player health, death, god mode', status);
+    commands.register(
+      'healPlayer',
+      'Restore health (default: full): tls.healPlayer(amount?)',
+      (amount?: number) => {
+        playerHealth.heal(amount ?? playerHealth.max);
+        return status();
+      },
+    );
+    commands.register(
+      'setGodMode',
+      'Toggle invulnerability: tls.setGodMode(true)',
+      (enabled?: boolean) => {
+        playerHealth.godMode = enabled ?? !playerHealth.godMode;
+        return playerHealth.godMode;
+      },
+    );
+    commands.register(
+      'damagePlayer',
+      'Hurt the player like an enemy hit would (respects the damage window and god mode)',
+      (amount = 10) => {
+        playerHealth.damage({ amount, source: { kind: 'debug' } });
+        return status();
+      },
+    );
+    commands.register('killPlayer', 'Kill the player (ends the run: GAME_OVER)', () => {
+      playerHealth.damage({ amount: playerHealth.current, source: { kind: 'debug' } });
+      return status();
+    });
+  }
+
+  if (!enemies) {
+    return () => undefined;
+  }
+  const summary = () =>
+    enemies.enemies.map((e) => ({
+      id: e.id,
+      archetype: e.config.id,
+      state: e.state,
+      health: round(e.health.current),
+      maxHealth: e.health.max,
+      position: e.motor.position.toArray().map(round),
+      target: e.target?.id ?? null,
+      targetDistance: e.target
+        ? round(
+            Math.hypot(
+              e.target.position.x - e.motor.position.x,
+              e.target.position.z - e.motor.position.z,
+            ),
+          )
+        : null,
+      canSeeTarget: e.canSeeTarget,
+      nav: e.navMode,
+      attack: e.attackPhase,
+      attacks: e.attacks,
+    }));
+  commands.register('enemies', 'Every enemy: state, health, position, target, attack', summary);
+  commands.register('enemy', 'One enemy in detail: tls.enemy(id)', (id: string) => {
+    const e = enemies.get(id);
+    if (!e) {
+      throw new Error(`No enemy "${id}"`);
+    }
+    const routes = enemies.routes;
+    return {
+      ...summary().find((s) => s.id === id),
+      heading: round(e.heading),
+      timeInState: round(e.fsm.time),
+      attackTimer: round(e.attackTimer),
+      attackCooldown: round(e.attackCooldown),
+      staggerTimer: round(e.staggerTimer),
+      lastSeen: round(enemies.now - e.lastSeenAt),
+      route: routes ? e.route.slice(e.routeCursor).map((n) => routes.nodes[n]?.id) : [],
+      patrols: e.patrols,
+      corpseTimer: round(e.corpseTimer),
+    };
+  });
+
+  const inFront = (distance: number, sideways = 0): [number, number, number] => {
+    if (!player) {
+      throw new Error('needs the player');
+    }
+    const yaw = player.look.yaw;
+    const p = player.motor.position;
+    return [
+      p.x - Math.sin(yaw) * distance + Math.cos(yaw) * sideways,
+      p.y,
+      p.z - Math.cos(yaw) * distance - Math.sin(yaw) * sideways,
+    ];
+  };
+  const archetypeOf = (type: string): ImplementedEnemyId => {
+    if (!(IMPLEMENTED_ENEMY_IDS as readonly string[]).includes(type)) {
+      throw new Error(
+        `Unknown or not yet implemented enemy "${type}". Enemies: ${IMPLEMENTED_ENEMY_IDS.join(', ')}`,
+      );
+    }
+    return type as ImplementedEnemyId;
+  };
+  commands.register(
+    'spawnEnemy',
+    `Spawn an enemy facing you: tls.spawnEnemy(type?, distance?) (${IMPLEMENTED_ENEMY_IDS.join(', ')})`,
+    (type = 'walker', distance = 6) => {
+      const archetype = archetypeOf(type);
+      const at = inFront(distance);
+      if (!enemies.canStand(archetype, at)) {
+        throw new Error(`No room for a ${type} ${distance} m ahead (wall, obstacle or no ground)`);
+      }
+      const yaw = (player?.look.yaw ?? 0) + Math.PI;
+      const enemy = enemies.spawn(archetype, at, { yaw, patrol: false });
+      if (!enemy) {
+        throw new Error('Enemy cap reached');
+      }
+      return enemy.id;
+    },
+  );
+  commands.register(
+    'spawnWalkers',
+    'Spawn a group of Walkers in rows in front of you (skipping blocked spots): tls.spawnWalkers(count?, distance?)',
+    (count = 8, distance = 10) => {
+      const yaw = (player?.look.yaw ?? 0) + Math.PI;
+      const ids: string[] = [];
+      // Rows of six, 1.3 m apart; spots inside walls or obstacles, or off the ground, are skipped.
+      for (let i = 0; ids.length < count && i < count * 4; i++) {
+        const row = Math.floor(i / 6);
+        const column = (i % 6) - 2.5;
+        const at = inFront(distance + row * 1.4, column * 1.3);
+        if (!enemies.canStand('walker', at)) {
+          continue;
+        }
+        const enemy = enemies.spawn('walker', at, { yaw, patrol: false });
+        if (!enemy) {
+          break; // the cap
+        }
+        ids.push(enemy.id);
+      }
+      return ids;
+    },
+  );
+  commands.register('killEnemy', 'Kill an enemy through combat: tls.killEnemy(id)', (id: string) =>
+    enemies.kill(id),
+  );
+  commands.register('killAll', 'Kill every living enemy', () => {
+    let killed = 0;
+    for (const e of enemies.enemies) {
+      if (e.alive && enemies.kill(e.id)) {
+        killed++;
+      }
+    }
+    return killed;
+  });
+  commands.register(
+    'damageEnemy',
+    'Damage an enemy directly (no zone multiplier): tls.damageEnemy(id, amount)',
+    (id: string, amount = 25) => {
+      const hit = context.combat?.applyDamage(id, { amount });
+      return hit ? { health: round(hit.health), killed: hit.killed } : null;
+    },
+  );
+  commands.register(
+    'setEnemyState',
+    `Force an AI state (legal transitions only; STAGGER staggers, DEAD kills): tls.setEnemyState(id, state) (${AI_STATES.join(', ')})`,
+    (id: string, state: string) => {
+      if (!(AI_STATES as readonly string[]).includes(state)) {
+        throw new Error(`Unknown state "${state}". States: ${AI_STATES.join(', ')}`);
+      }
+      return enemies.forceState(id, state as AiState);
+    },
+  );
+  commands.register('alertEnemies', 'Tell every enemy where the player is', () => {
+    if (!playerTarget) {
+      throw new Error('needs the player');
+    }
+    return enemies.enemies.filter((e) => enemies.alert(e.id, playerTarget)).length;
+  });
+  commands.register('clearEnemies', 'Remove every enemy (including the test encounter)', () => {
+    context.encounter?.clear();
+    enemies.clear();
+    return enemies.enemies.length;
+  });
+  commands.register(
+    'freezeEnemies',
+    'Stop enemies thinking and moving (the rest runs on): tls.freezeEnemies(true)',
+    (frozen?: boolean) => {
+      enemies.frozen = frozen ?? !enemies.frozen;
+      return enemies.frozen;
+    },
+  );
+
+  let aiView: EnemyDebugView | null = null;
+  let removeAiFrame: (() => void) | null = null;
+  const setAi = (visible: boolean): boolean => {
+    const camera = (context.extras as { camera?: Camera } | undefined)?.camera;
+    if (visible && !aiView && scene && camera) {
+      const view = new EnemyDebugView(scene, container, enemies);
+      aiView = view;
+      removeAiFrame = game.addFrameSystem({
+        frameUpdate: () => {
+          view.update(camera);
+        },
+      });
+    } else if (!visible && aiView) {
+      removeAiFrame?.();
+      aiView.dispose();
+      aiView = null;
+    }
+    return aiView !== null;
+  };
+  commands.register(
+    'showAI',
+    'Show AI states, detection and attack ranges, targets and routes: tls.showAI(false) hides them',
+    (visible?: boolean) => setAi(visible ?? aiView === null),
+  );
+  disposers.push(() => setAi(false));
+
+  return () => {
+    for (const dispose of disposers) {
+      dispose();
+    }
+  };
+}
+
+function formatEnemies(enemies: EnemyManager, health: PlayerHealth | undefined): string {
+  const counts = new Map<string, number>();
+  for (const e of enemies.enemies) {
+    counts.set(e.state, (counts.get(e.state) ?? 0) + 1);
+  }
+  const states = [...counts].map(([state, n]) => `${state} ${n}`).join(', ');
+  const player = health
+    ? `  player ${Math.ceil(health.current)}/${health.max}${health.godMode ? ' god' : ''}`
+    : '';
+  return `enemies ${enemies.aliveCount} alive${states ? ` (${states})` : ''}${player}`;
 }
 
 function formatPlayer(player: Player): string {

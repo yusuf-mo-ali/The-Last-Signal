@@ -1,11 +1,12 @@
 /**
  * Minimal "click to play / click to resume" prompt that covers the canvas while the pointer is
  * not locked (D-017). Pointer lock can only be requested from a user gesture, and a re-lock can be
- * refused, so the player needs a visible, clickable target and feedback. Deliberately minimal:
- * the real pause menu replaces it with the UI systems (plan §22).
+ * refused, so the player needs a visible, clickable target and feedback. It also ends a run that
+ * the player lost ("You died": a click starts a new one). Deliberately minimal: the real pause
+ * menu and game-over screen replace it with the UI systems (plan §22).
  */
 
-export type LockPromptMode = 'start' | 'paused' | 'refused' | 'hidden';
+export type LockPromptMode = 'start' | 'paused' | 'refused' | 'game-over' | 'hidden';
 
 const MESSAGES: Readonly<
   Record<Exclude<LockPromptMode, 'hidden'>, { title: string; hint: string }>
@@ -15,6 +16,7 @@ const MESSAGES: Readonly<
     hint: 'WASD move · Mouse look · Shift sprint · C crouch · Space jump · Esc pause',
   },
   paused: { title: 'Paused', hint: 'Click to resume' },
+  'game-over': { title: 'You died', hint: 'Click to start a new run' },
   refused: {
     title: 'Mouse not captured',
     hint: 'The browser refused to capture the mouse. Click again to continue.',

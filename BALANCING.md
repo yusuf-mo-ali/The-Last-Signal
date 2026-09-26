@@ -2,7 +2,7 @@
 
 The tuning log (plan §32, §36): every gameplay number that affects feel or difficulty, where it lives, why it has its value, and how it changed. Values live in `src/config/` only (plan §31); logic never hard-codes them.
 
-> **Status (Phase 3):** Pass 1 (functional). Player movement, the first weapons (Pistol, Bare Hands) and the combat rules have starting values. Nothing has been play-tested by hand yet; the only targets are temporary training dummies, so enemy numbers are placeholders.
+> **Status (Phase 4):** Pass 1 (functional). Player movement, the first weapons (Pistol, Bare Hands), the combat rules, the first zombie (the Walker) and the player's health have starting values. Nothing has been play-tested by hand yet, and there are no waves, so how many Walkers a player can handle is unknown until Pass 2.
 
 ---
 
@@ -110,8 +110,9 @@ Balance is never tuned from assumptions alone. Three passes:
 | Pickup lifetime | 30 s | Rewards moving to collect, without clutter |
 | Pickups on the ground at once | 16 (oldest removed) | Bounded cost |
 | Training dummy drop table | ammo, 50 % | Test value, not an enemy drop rate |
+| Walker drop table | ammo, 20 % | Phase 4 placeholder: a trickle, not an economy. The starter Pistol's reserve is unlimited, so it only matters once a limited-reserve weapon exists |
 
-Enemy drop rates, the Scavenger bonus and the ammo economy are Pass-2 work (waves and progression phases).
+The Scavenger bonus and the ammo economy are Pass-2 work (waves and progression phases).
 
 ### 2.5 Training dummies (`src/config/training.ts`, Phase 3, temporary)
 
@@ -121,6 +122,52 @@ Enemy drop rates, the Scavenger bonus and the ammo economy are Pass-2 work (wave
 | zoned | 400 | 60 | 3 s | none | Zones painted; tough enough to place many hits |
 
 These are validation values, not balance: dummies are removed from normal play when waves arrive.
+
+### 2.6 The Walker (`src/config/enemies.ts`, Phase 4, D-042)
+
+The baseline zombie (GAME_DESIGN §7.1): slow, durable, melee only. Every other archetype will be tuned relative to it.
+
+| Value | Setting | Why |
+|---|---|---|
+| Health | 120 | More durable than the basic target (the 100-health standard dummy) without losing the skill reward: still 2 Pistol headshots, but 5 body shots instead of 4 (intent "4–5 body shots", tested). 8 arm or 10 leg shots |
+| Move speed | 1.6 m/s | About a third of the player's walk (5 m/s): a lone Walker never catches a moving player; it threatens by numbers and corners |
+| Turn rate / acceleration | 3.5 rad/s / 6 m/s² | Turning round takes ~0.9 s, so circling one at close range works (a skill, not an exploit, while hordes are small); it reaches full speed in ~0.3 s |
+| Detection range | 12 m | About a third of the yard: the player sees it before it notices them. Needs line of sight |
+| Lose range / memory | 24 m / 5 s | Twice the detection range, so a chase is not dropped at the edge; after losing sight it keeps coming for 5 s to where the player was. A hit tells it where the shooter is for the same 5 s, at any range |
+| Reaction (DETECT) | 0.6 s | The readable "noticed you" tell before it moves |
+| Attack damage | 15 | 7 hits kill a player at full health (100) |
+| Attack range / reach | 1.5 m / 1.9 m | It stops at 1.3 m (0.85 × range) and starts the wind-up within 1.5 m; the strike still lands within 1.9 m, so stepping back about half a metre during the wind-up dodges it |
+| Wind-up / recovery | 0.7 s / 0.5 s | The telegraph (arms up, orange glow): enough to react (~0.25 s) and step out of reach (~0.2 s at walking speed). Recovery is the window to punish |
+| Cooldown | 1.6 s (from the start of an attack) | At most 9.4 damage per second per Walker: a lone Walker kills a player who stands still in ~10 s, two in ~5 s |
+| Arc / vertical reach | 120° / 1.2 m | Committed: a player who gets behind it during the wind-up is missed. Reaches a player on a crate or the dock edge, not on the catwalk |
+| Stagger threshold / duration | 35 in 1 s / 0.7 s | Any headshot (65) staggers; two quick body shots (52) do. The stagger lasts as long as a wind-up and cancels one in progress: a well-timed headshot stops an attack |
+| Armor / resistance | 0 / 0 | Armored enemies are Phase 5 modifiers |
+| Patrol | 4 m around its post, pauses 2–4 s, at 0.45 × speed | Only when placed with patrol on; ambience, not threat |
+| Corpse time | 5 s, then sinks | Readable kills without clutter |
+| Threat cost | 1 | The unit of the wave budget (Phase 6); other archetypes cost relative to it |
+
+### 2.7 Player health (`src/config/player.ts`, Phase 4)
+
+| Value | Setting | Why |
+|---|---|---|
+| Maximum health | 100 | GAME_DESIGN §4.2 |
+| Damage window | `WAVE_ACTIVE` and `BOSS` only | D-029; a run is one open-ended wave until the wave system (Phase 6) |
+| Regeneration | none | GAME_DESIGN §4.2 [Proposed]; healing arrives with upgrades and pickups |
+
+### 2.8 Shared enemy rules (`ENEMY_RULES`, Phase 4)
+
+| Value | Setting | Why |
+|---|---|---|
+| Think interval | 0.1 s (10 Hz), spread over the steps | Decisions within the plan's 5–10 Hz; timing stays exact every step |
+| Living enemies, hard cap | 64 | Above the planned wave default (24) and the stress test (60); waves set their own lower cap |
+| Separation | within 0.8 m, up to 2.5 m/s of push | A little more than two body radii (0.7 m): a crowd spreads out instead of stacking |
+| Route: arrival / re-plan | 0.6 m / every 1 s (or when the goal changes) | Smooth corners without overshooting doorways |
+| Stuck | < 0.2 m of progress in 0.8 s | Short enough to recover before it looks broken |
+| Straight-line test | within 0.5 m of height; rays at 0.4 m (knee) and 1.3 m (chest) | Crates, walls, jambs and low ducts block it; steps and ramps do not |
+
+### 2.9 Test encounter (`src/config/training.ts`, Phase 4, temporary)
+
+Three Walkers (two sentries 14–15 m from the spawn, beyond detection; one patrolling the north-east yard), each back 10 s after its body is removed. Validation values, not balance: the wave system replaces them.
 
 ---
 
@@ -132,3 +179,4 @@ These are validation values, not balance: dummies are removed from normal play w
 | 2026-09-26 | Pistol, Bare Hands, weapon rules | Initial Pass-1 values | Phase 2 (D-040) |
 | 2026-09-26 | Pistol recoil recovery | 7 → 9 °/s (before release) | The design intent "the kick settles within one shot interval" failed at 7 °/s (0.19 s > 0.167 s) |
 | 2026-09-26 | Combat rules, zone multipliers in use, humanoid rig, drops, training dummies | Initial Pass-1 values | Phase 3 (D-041). Zone multipliers are the plan's example; HEAD follows each weapon's headshot multiplier |
+| 2026-09-26 | Walker, player health, shared enemy rules, Walker drops, test encounter | Initial Pass-1 values | Phase 4 (D-042). Verified by automated tests only (time-to-kill both ways, attack timing, dodging the wind-up, stagger); not play-tested by hand |

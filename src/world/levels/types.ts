@@ -41,6 +41,28 @@ export interface StairsBrush {
 
 export type Brush = BoxBrush | RampBrush | StairsBrush;
 
+/** A point enemies can route through (D-042), on walkable ground, at feet height. */
+export interface NavNode {
+  readonly id: string;
+  readonly position: Vec3;
+}
+
+/** Two nodes an enemy body can walk between in a straight line (both ways unless `oneWay`). */
+export interface NavLink {
+  readonly from: string;
+  readonly to: string;
+  readonly oneWay?: boolean;
+}
+
+/**
+ * Authored route data (D-013 "routes", D-042): enemies walk straight at their target when they
+ * can, and along this graph when walls, levels or obstacles are in the way.
+ */
+export interface NavGraphDefinition {
+  readonly nodes: readonly NavNode[];
+  readonly links: readonly NavLink[];
+}
+
 export interface LevelDefinition {
   readonly name: string;
   /** Where the player starts, standing on the ground, and the direction they face. */
@@ -48,4 +70,6 @@ export interface LevelDefinition {
   /** Anything below this is outside the level: the player is returned to the spawn. */
   readonly killPlaneY: number;
   readonly brushes: readonly Brush[];
+  /** Route graph for enemies; without one they can only walk straight at their target. */
+  readonly navigation?: NavGraphDefinition;
 }

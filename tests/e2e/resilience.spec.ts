@@ -95,7 +95,7 @@ test.describe('WebGL context loss', () => {
             Math.abs(beacon.angle - beacon.steps * game.time.fixedDt * (Math.PI / 2)) < 1e-9,
         };
       });
-      expect(resumed.state).toBe('WAVE_START');
+      expect(resumed.state).toBe('WAVE_ACTIVE');
       expect(resumed.programs).toBeGreaterThan(0);
       expect(resumed.invariant, 'simulation state intact').toBe(true);
     }

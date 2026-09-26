@@ -8,7 +8,7 @@
  * (`TRAINING_RANGE.enabled`), and the debug tools can still spawn dummies.
  */
 
-import type { DamageZone } from './enemies';
+import type { DamageZone, ImplementedEnemyId } from './enemies';
 import type { DropTableId } from './drops';
 
 export const TRAINING_DUMMY_KINDS = ['standard', 'zoned'] as const;
@@ -80,5 +80,38 @@ export const TRAINING_RANGE: {
     { kind: 'standard', position: [0, 0, 8], yaw: Math.PI },
     { kind: 'zoned', position: [-3.5, 0, 9], yaw: Math.PI },
     { kind: 'standard', position: [3.5, 0, 9], yaw: Math.PI },
+  ],
+};
+
+export interface TrainingEnemyPlacement {
+  readonly archetype: ImplementedEnemyId;
+  /** Feet position in the level. */
+  readonly position: readonly [number, number, number];
+  readonly yaw: number;
+  /** Whether it wanders around its spawn point while idle (its archetype's patrol radius). */
+  readonly patrol: boolean;
+}
+
+/**
+ * Phase 4 test encounter: Walkers placed in the yard so the enemy foundation can be played and
+ * verified in every build before waves exist (D-042). Temporary, like the dummy range: the wave
+ * system (Phase 6) replaces it (`enabled`).
+ *
+ * The two sentries stand 14–15 m from the spawn, beyond the Walker's 12 m detection range, so a
+ * player standing at the spawn is never engaged; walking about 6 m forward brings them in. The
+ * third patrols the north-east yard, away from the control room's south door.
+ */
+export const TRAINING_ENEMIES: {
+  readonly enabled: boolean;
+  /** Seconds after a placed enemy's body is removed before it appears again. */
+  readonly respawnDelay: number;
+  readonly placements: readonly TrainingEnemyPlacement[];
+} = {
+  enabled: true,
+  respawnDelay: 10,
+  placements: [
+    { archetype: 'walker', position: [8, 0, 2], yaw: Math.PI / 2, patrol: false },
+    { archetype: 'walker', position: [-8, 0, 1], yaw: -Math.PI / 2, patrol: false },
+    { archetype: 'walker', position: [12, 0, -3], yaw: Math.PI / 2, patrol: true },
   ],
 };

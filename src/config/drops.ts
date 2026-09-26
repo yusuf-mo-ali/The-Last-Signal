@@ -28,7 +28,7 @@ export const PICKUPS: Readonly<Record<PickupId, PickupDefinition>> = {
   ammo: { kind: 'ammo', id: 'ammo', magazines: 1, radius: 1.1, lifetime: 30 },
 };
 
-export const DROP_TABLE_IDS = ['trainingDummy'] as const;
+export const DROP_TABLE_IDS = ['trainingDummy', 'walker'] as const;
 export type DropTableId = (typeof DROP_TABLE_IDS)[number];
 
 /** Each entry is rolled independently; several can drop at once. */
@@ -40,6 +40,8 @@ export interface DropEntry {
 
 export const DROP_TABLES: Readonly<Record<DropTableId, readonly DropEntry[]>> = {
   trainingDummy: [{ pickup: 'ammo', chance: 0.5 }],
+  // Pass-1 placeholder (BALANCING §2.4): the ammo economy is tuned with waves (Phase 6).
+  walker: [{ pickup: 'ammo', chance: 0.2 }],
 };
 
 export const PICKUP_RULES = {

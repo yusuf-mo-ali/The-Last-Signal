@@ -29,7 +29,22 @@ import { computeDamage, type ZoneMultipliers } from './damage';
 import type { Health } from './Health';
 import type { HitboxRig } from './hitbox';
 
-export type HitSource = 'shot' | 'melee';
+/** Where damage came from: a bullet, a melee swing, or applied directly (no weapon). */
+export type HitSource = 'shot' | 'melee' | 'direct';
+
+/**
+ * Damage applied straight to a target, not worked out from a weapon hit: the debug tools now;
+ * hazards and area damage later. `amount` is final (no zone multiplier, armor or resistance).
+ */
+export interface DirectDamage {
+  readonly amount: number;
+  /** Reported zone (feedback only). Default TORSO. */
+  readonly zone?: DamageZone;
+  /** Default: the target's chest. */
+  readonly point?: Vec3Tuple;
+  /** Default: straight down (no push). */
+  readonly direction?: Vec3Tuple;
+}
 
 /** One hit that reached a target, before damage is worked out. */
 export interface HitInput {
@@ -50,7 +65,8 @@ export interface HitInput {
 
 export interface DamagedEvent {
   readonly targetId: string;
-  readonly weaponId: WeaponId;
+  /** Null for direct damage. */
+  readonly weaponId: WeaponId | null;
   readonly source: HitSource;
   readonly quick: boolean;
   readonly zone: DamageZone;
@@ -71,7 +87,7 @@ export interface DamagedEvent {
 
 export interface KilledEvent {
   readonly targetId: string;
-  readonly weaponId: WeaponId;
+  readonly weaponId: WeaponId | null;
   readonly source: HitSource;
   /** The zone of the killing hit. */
   readonly zone: DamageZone;
@@ -336,16 +352,55 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
       },
       this.rules,
     );
-    const outcome = record.health.damage(damage.amount);
+    return this.apply(record, damage.amount, damage.critical, hit);
+  }
+
+  /**
+   * Applies damage directly (see `DirectDamage`), through the same health, stagger, death and
+   * events as a hit. Returns what happened, or null when the target is unknown or already dead.
+   */
+  applyDamage(targetId: string, damage: DirectDamage): DamagedEvent | null {
+    const record = this.records.get(targetId);
+    if (!record || record.health.isDead) {
+      return null;
+    }
+    const p = record.rig.position;
+    const amount = Number.isNaN(damage.amount) ? 0 : Math.max(0, damage.amount);
+    return this.apply(record, amount, damage.zone === 'HEAD', {
+      zone: damage.zone ?? 'TORSO',
+      weaponId: null,
+      source: 'direct',
+      quick: false,
+      point: damage.point ?? [p.x, p.y + 1.2, p.z],
+      direction: damage.direction ?? [0, -1, 0],
+      distance: 0,
+    });
+  }
+
+  /** Kills a living target outright (debug tools), through the normal death path. */
+  kill(targetId: string): DamagedEvent | null {
+    const record = this.records.get(targetId);
+    return record ? this.applyDamage(targetId, { amount: record.health.current }) : null;
+  }
+
+  private apply(
+    record: TargetRecord,
+    amount: number,
+    critical: boolean,
+    hit: Pick<HitInput, 'zone' | 'source' | 'quick' | 'point' | 'direction' | 'distance'> & {
+      readonly weaponId: WeaponId | null;
+    },
+  ): DamagedEvent {
+    const outcome = record.health.damage(amount);
     const event: DamagedEvent = {
       targetId: record.id,
       weaponId: hit.weaponId,
       source: hit.source,
       quick: hit.quick,
       zone: hit.zone,
-      critical: damage.critical,
+      critical,
       amount: outcome.applied,
-      dealt: damage.amount,
+      dealt: amount,
       health: record.health.current,
       maxHealth: record.health.max,
       killed: outcome.killed,
@@ -363,7 +418,7 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
         weaponId: hit.weaponId,
         source: hit.source,
         zone: hit.zone,
-        critical: damage.critical,
+        critical,
         overkill: outcome.overkill,
         point: hit.point,
         direction: hit.direction,

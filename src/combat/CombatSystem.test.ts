@@ -306,6 +306,44 @@ describe('CombatSystem: weapon hit → hitbox → damage → health', () => {
     expect(t.combat.revive('missing')).toBe(false);
   });
 
+  it('direct damage and kill (no weapon) use the same Health, stagger and death', () => {
+    const t = setup();
+    t.addTarget('a', -5, { staggerThreshold: 35 });
+    expect(t.combat.applyDamage('a', { amount: 40 })).toMatchObject({
+      targetId: 'a',
+      weaponId: null,
+      source: 'direct',
+      zone: 'TORSO',
+      critical: false,
+      amount: 40,
+      health: 60,
+      killed: false,
+    });
+    expect(t.count('staggered')).toBe(1);
+    expect(t.combat.applyDamage('a', { amount: 10, zone: 'HEAD' })).toMatchObject({
+      zone: 'HEAD',
+      critical: true,
+      health: 50,
+    });
+    expect(t.combat.applyDamage('a', { amount: Number.NaN })).toMatchObject({ amount: 0 });
+    expect(t.combat.kill('a')).toMatchObject({ amount: 50, health: 0, killed: true });
+    expect(t.kills).toEqual(['a']);
+    expect(t.count('killed')).toBe(1);
+  });
+
+  it('direct damage and kill do nothing to a dead or unknown target: no event, no second death', () => {
+    const t = setup();
+    t.addTarget('a', -5);
+    t.combat.kill('a');
+    const before = t.events.length;
+    expect(t.combat.applyDamage('a', { amount: 10 })).toBeNull();
+    expect(t.combat.kill('a')).toBeNull();
+    expect(t.combat.applyDamage('missing', { amount: 10 })).toBeNull();
+    expect(t.combat.kill('missing')).toBeNull();
+    expect(t.events).toHaveLength(before);
+    expect(t.kills).toEqual(['a']);
+  });
+
   it('removed targets are no longer hit; ids are unique', () => {
     const t = setup();
     t.addTarget('a', -5);

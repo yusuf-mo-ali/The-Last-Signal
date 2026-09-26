@@ -9,6 +9,9 @@ import './style.css';
 import { CombatSystem } from './combat/CombatSystem';
 import { TrainingDummyView } from './combat/training/TrainingDummyView';
 import { TrainingRange } from './combat/training/TrainingRange';
+import { EnemyManager } from './enemies/EnemyManager';
+import { EnemyView } from './enemies/EnemyView';
+import { TrainingEncounter } from './enemies/TrainingEncounter';
 import { boundKeyCodes, DEFAULT_BINDINGS } from './config/input';
 import { ENGINE_CONFIG, parseGraphicsPreset, type ViewSettings } from './core/Config';
 import { ErrorHandler } from './core/ErrorHandler';
@@ -22,10 +25,13 @@ import { attachStepInput } from './input/stepInput';
 import { CameraController } from './player/CameraController';
 import { Player } from './player/Player';
 import { PlayerController } from './player/PlayerController';
+import { PlayerHealth } from './player/PlayerHealth';
+import { createPlayerTarget } from './player/PlayerTarget';
 import { createCamera } from './render/camera';
 import { Renderer } from './render/Renderer';
 import { detectWebGL2 } from './render/webglSupport';
 import { CombatFeedback } from './ui/CombatFeedback';
+import { HealthHud } from './ui/HealthHud';
 import { LockPrompt } from './ui/LockPrompt';
 import { StatusScreen } from './ui/StatusScreen';
 import { WeaponHud } from './ui/WeaponHud';
@@ -122,9 +128,11 @@ function boot(app: HTMLElement): () => void {
   const stepActions = new ActionMap(stepReader, DEFAULT_BINDINGS);
   const frameActions = new ActionMap(frameReader, DEFAULT_BINDINGS);
 
-  // ---- Player (D-038) and weapons (D-039, D-040) -------------------------------------------
-  // Movement runs in the fixed step, only while a run is being played. Look runs every frame.
-  // Weapons step after the player, so shots leave from this step's position.
+  // ---- Player (D-038), weapons (D-039, D-040), combat (D-041) and enemies (D-042) ----------
+  // Fixed-step order: world → player → enemies → test encounter → weapons → combat → dummies →
+  // pickups. Enemies move before the weapons fire, so shots meet this step's hit volumes; shots
+  // and swings reach combat through the weapon events, within the same step.
+  const playing = () => game.state.isIn('PLAYING');
   const weapons = new WeaponManager();
   const controller = new PlayerController(stepActions);
   const player = new Player({
@@ -135,31 +143,48 @@ function boot(app: HTMLElement): () => void {
       // Firing cancels sprint (GAME_DESIGN §4.2).
       return weapons.blocksSprint && intent.sprint ? { ...intent, sprint: false } : intent;
     },
-    active: () => game.state.isIn('PLAYING'),
+    active: playing,
   });
   game.addSystem(player);
-  const weaponController = new WeaponController(stepActions);
+  // D-029: the player can only be hurt during WAVE_ACTIVE and BOSS.
+  const playerHealth = new PlayerHealth({
+    canBeDamaged: () => game.state.isIn('WAVE_ACTIVE') || game.state.isIn('BOSS'),
+  });
+  const playerTarget = createPlayerTarget(player, playerHealth);
   const seed = Date.now(); // D-014: one seed per session, one stream per system
   const hitscan = new Hitscan(world.collision);
+  const combat = new CombatSystem({ hitscan, weaponEvents: weapons.events });
+  const pickups = new PickupManager({
+    collector: () => (playing() ? player.motor.position : null),
+    collect: (pickup) => weapons.addAmmo(pickup.definition.magazines) > 0,
+  });
+  const enemies = new EnemyManager({
+    world: world.collision,
+    level: FACILITY,
+    combat,
+    targets: () => [playerTarget],
+    rng: new Rng(`${seed}:enemies`), // patrols and enemy drops
+    active: playing,
+    pickups,
+    strict: import.meta.env.DEV,
+  });
+  game.addSystem(enemies);
+  // Phase 4 test encounter: Walkers placed in the yard until waves exist (Phase 6).
+  const encounter = new TrainingEncounter({ enemies, active: playing });
+  encounter.reset();
+  game.addSystem(encounter);
+  const weaponController = new WeaponController(stepActions);
   const weaponSystem = new WeaponSystem({
     manager: weapons,
     player,
     hitscan,
     rng: new Rng(seed), // spread and recoil
     input: () => weaponController.read(),
-    active: () => game.state.isIn('PLAYING'),
+    active: playing,
   });
   game.addSystem(weaponSystem);
-
-  // ---- Combat (D-041): hits → hitbox rigs → damage → health → death → events ----------------
-  // Shots and swings reach combat through the weapon events, within the same fixed step.
-  const combat = new CombatSystem({ hitscan, weaponEvents: weapons.events });
   game.addSystem(combat);
-  const pickups = new PickupManager({
-    collector: () => (game.state.isIn('PLAYING') ? player.motor.position : null),
-    collect: (pickup) => weapons.addAmmo(pickup.definition.magazines) > 0,
-  });
-  // Training dummies: temporary validation targets until zombies exist (Phase 4).
+  // Training dummies: temporary validation targets (D-041).
   const training = new TrainingRange({ combat, rng: new Rng(`${seed}:drops`), pickups });
   training.reset();
   game.addSystem(training);
@@ -170,8 +195,10 @@ function boot(app: HTMLElement): () => void {
   view.scene.add(camera); // the weapon view model is a child of the camera
   const weaponView = new WeaponView(view.scene, camera, weapons);
   const dummyView = new TrainingDummyView(view.scene, training, combat);
+  const enemyView = new EnemyView(view.scene, enemies, combat);
   const pickupView = new PickupView(view.scene, pickups);
   const hud = new WeaponHud(app);
+  const healthHud = new HealthHud(app, playerHealth);
   const feedback = new CombatFeedback(app, combat.events);
   view.prewarm(camera);
 
@@ -188,14 +215,28 @@ function boot(app: HTMLElement): () => void {
 
   cleanups.push(
     game.state.onEnter('PLAYING', () => {
-      // A new run (not a resume): back to the spawn point, with the starting loadout, and a
-      // fresh training range.
+      // A new run (not a resume): back to the spawn point at full health, with the starting
+      // loadout, a fresh training range and the test encounter's enemies.
       player.respawn();
+      playerHealth.reset();
       weapons.reset();
+      enemies.clear();
+      encounter.reset();
       training.reset();
       pickups.clear();
       feedback.reset();
       cameraController.bob.reset();
+    }),
+  );
+  // Placeholder run flow until the wave system (Phase 6): a run opens straight into one
+  // open-ended wave, so D-029's damage window already applies. Dying ends the run (GAME_OVER).
+  cleanups.push(
+    game.state.onEnter('WAVE_START', () => {
+      game.state.transition('WAVE_ACTIVE');
+    }),
+    playerHealth.events.on('died', () => {
+      game.state.transition('GAME_OVER');
+      pointerLock.exit(); // the cursor back, and the "You died" prompt
     }),
   );
   cleanups.push(
@@ -228,7 +269,8 @@ function boot(app: HTMLElement): () => void {
     void pointerLock.request().then((result) => {
       if (!result.locked) {
         prompt.show('refused');
-      } else if (game.state.current === 'MAIN_MENU') {
+      } else if (game.state.current === 'MAIN_MENU' || game.state.current === 'GAME_OVER') {
+        // A new run (from the menu, or after dying).
         game.state.transition('LOADING');
         game.state.transition('PLAYING');
       } else {
@@ -238,7 +280,15 @@ function boot(app: HTMLElement): () => void {
   });
   cleanups.push(
     pointerLock.onLockChange((locked) => {
-      prompt.show(locked ? 'hidden' : game.state.isRunActive ? 'paused' : 'start');
+      prompt.show(
+        locked
+          ? 'hidden'
+          : game.state.current === 'GAME_OVER'
+            ? 'game-over'
+            : game.state.isRunActive
+              ? 'paused'
+              : 'start',
+      );
     }),
   );
 
@@ -271,6 +321,7 @@ function boot(app: HTMLElement): () => void {
       cameraController.update(alpha, simDt);
       weaponView.update(simDt);
       dummyView.update(simDt);
+      enemyView.update(alpha, simDt);
       pickupView.update(simDt);
       const held = weapons.activeWeapon;
       const hudVisible = pointerLock.isLocked && game.state.isIn('PLAYING');
@@ -280,6 +331,7 @@ function boot(app: HTMLElement): () => void {
         status: held.getState(),
       });
       feedback.update(simDt, camera, hudVisible);
+      healthHud.update(simDt, hudVisible);
       view.render(alpha, camera);
     },
   });
@@ -306,6 +358,10 @@ function boot(app: HTMLElement): () => void {
         training,
         pickups,
         feedback,
+        enemies,
+        encounter,
+        playerHealth,
+        playerTarget,
         scene: view.scene,
         applyView,
         getView: () => cameraController.getSettings(),
@@ -323,6 +379,8 @@ function boot(app: HTMLElement): () => void {
           hud,
           dummyView,
           pickupView,
+          enemyView,
+          healthHud,
         },
       }).dispose;
     });
@@ -340,8 +398,12 @@ function boot(app: HTMLElement): () => void {
     pointerLock.dispose();
     weaponSystem.dispose();
     weaponView.dispose();
+    enemies.dispose();
+    encounter.dispose();
     combat.dispose();
     dummyView.dispose();
+    enemyView.dispose();
+    healthHud.dispose();
     pickupView.dispose();
     hud.dispose();
     feedback.dispose();

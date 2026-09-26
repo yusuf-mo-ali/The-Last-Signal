@@ -18,3 +18,45 @@
 .debug-overlay[hidden] {
   display: none;
 }
+
+/* AI visualiser labels (debug/EnemyDebugView.ts). */
+.enemy-debug {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.enemy-debug__label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0.05rem 0.3rem;
+  background: rgb(0 0 0 / 55%);
+  color: #e8ecf0;
+  font:
+    11px/1.3 ui-monospace,
+    monospace;
+  white-space: nowrap;
+}
+
+.enemy-debug__label[hidden] {
+  display: none;
+}
+
+.enemy-debug__label[data-state='CHASE'],
+.enemy-debug__label[data-state='DETECT'] {
+  color: #ffd23c;
+}
+
+.enemy-debug__label[data-state='ATTACK'] {
+  color: #ff8c1a;
+}
+
+.enemy-debug__label[data-state='STAGGER'] {
+  color: #3fe0e0;
+}
+
+.enemy-debug__label[data-state='DEAD'] {
+  color: #9aa0a6;
+}

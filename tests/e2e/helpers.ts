@@ -22,6 +22,11 @@ import type { TrainingDummyView } from '../../src/combat/training/TrainingDummyV
 import type { PickupManager } from '../../src/world/PickupManager';
 import type { PickupView } from '../../src/world/PickupView';
 import type { CombatFeedback } from '../../src/ui/CombatFeedback';
+import type { EnemyManager } from '../../src/enemies/EnemyManager';
+import type { TrainingEncounter } from '../../src/enemies/TrainingEncounter';
+import type { EnemyView } from '../../src/enemies/EnemyView';
+import type { PlayerHealth } from '../../src/player/PlayerHealth';
+import type { HealthHud } from '../../src/ui/HealthHud';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -42,6 +47,11 @@ export interface DevHandles {
   readonly feedback: CombatFeedback;
   readonly dummyView: TrainingDummyView;
   readonly pickupView: PickupView;
+  readonly enemies: EnemyManager;
+  readonly encounter: TrainingEncounter;
+  readonly playerHealth: PlayerHealth;
+  readonly enemyView: EnemyView;
+  readonly healthHud: HealthHud;
 }
 
 /** One entry of `tls.dummies()`. */
@@ -97,6 +107,31 @@ export interface WeaponsSnapshot {
   readonly infiniteAmmo: boolean;
 }
 
+/** One entry of `tls.enemies()`. */
+export interface EnemySnapshot {
+  readonly id: string;
+  readonly archetype: string;
+  readonly state: 'IDLE' | 'PATROL' | 'DETECT' | 'CHASE' | 'ATTACK' | 'STAGGER' | 'DEAD';
+  readonly health: number;
+  readonly maxHealth: number;
+  readonly position: [number, number, number];
+  readonly target: string | null;
+  readonly targetDistance: number | null;
+  readonly canSeeTarget: boolean;
+  readonly nav: 'none' | 'direct' | 'route';
+  readonly attack: 'none' | 'windup' | 'recovery';
+  readonly attacks: number;
+}
+
+/** What `tls.playerHealth()` (and the other player-health commands) return. */
+export interface PlayerHealthSnapshot {
+  readonly health: number;
+  readonly max: number;
+  readonly dead: boolean;
+  readonly vulnerable: boolean;
+  readonly godMode: boolean;
+}
+
 /** What `tls.player()` returns. */
 export interface PlayerSnapshot {
   readonly position: [number, number, number];
@@ -119,7 +154,7 @@ export interface TlsApi {
   state(): unknown;
   stats(): { overlayVisible: boolean };
   giveAmmo(): WeaponsSnapshot;
-  healPlayer(): unknown;
+  startWave(): unknown;
   setInfiniteAmmo(enabled?: boolean): boolean;
   weapons(): WeaponsSnapshot;
   giveWeapon(id: string, category?: string): unknown;
@@ -143,6 +178,23 @@ export interface TlsApi {
   loseContext(): unknown;
   restoreContext(): unknown;
   throwError(kind?: 'frame' | 'async' | 'rejection'): unknown;
+  playerHealth(): PlayerHealthSnapshot;
+  healPlayer(amount?: number): PlayerHealthSnapshot;
+  setGodMode(enabled?: boolean): boolean;
+  damagePlayer(amount?: number): PlayerHealthSnapshot;
+  killPlayer(): PlayerHealthSnapshot;
+  enemies(): EnemySnapshot[];
+  enemy(id: string): EnemySnapshot & Record<string, unknown>;
+  spawnEnemy(type?: string, distance?: number): string;
+  spawnWalkers(count?: number, distance?: number): string[];
+  killEnemy(id: string): boolean;
+  killAll(): number;
+  damageEnemy(id: string, amount?: number): { health: number; killed: boolean } | null;
+  setEnemyState(id: string, state: string): boolean;
+  alertEnemies(): number;
+  clearEnemies(): number;
+  freezeEnemies(frozen?: boolean): boolean;
+  showAI(visible?: boolean): boolean;
 }
 
 declare global {
@@ -316,7 +368,7 @@ export async function holdKeys(page: Page, keys: readonly string[], ms: number):
   }
 }
 
-/** Puts the dev build into a run (WAVE_START) without capturing the mouse. */
+/** Puts the dev build into a run (WAVE_ACTIVE, D-029 placeholder flow) without capturing the mouse. */
 export async function enterRun(page: Page): Promise<void> {
   await page.evaluate(() => {
     const { game } = window.tls!.inspect();

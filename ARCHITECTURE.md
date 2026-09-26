@@ -1,8 +1,8 @@
 # Architecture — THE LAST SIGNAL
 
-> **Status:** Phases 0–3 implemented (foundation, first-person controller, weapon framework,
-> combat). Sections describe the target architecture; "Phase N implementation" notes record what
-> exists in code.
+> **Status:** Phases 0–4 implemented (foundation, first-person controller, weapon framework,
+> combat, zombie foundation). Sections describe the target architecture; "Phase N implementation"
+> notes record what exists in code.
 >
 > - Scope and requirements: `IMPLEMENTATION_PLAN.md` (source of truth)
 > - Rationale for each choice: `DECISIONS.md` (IDs such as `D-003` are referenced inline)
@@ -207,6 +207,7 @@ stateDiagram-v2
 - **Each state has `onEnter` and `onExit` hooks.** Parents enter before children and exit after them. Leaving `PAUSED` by restart or quit exits `PAUSED`, then the suspended phase, then `PLAYING`.
 - **Timers and subscriptions created inside a state will be state-scoped** and cancelled on exit. This handles boss death during a special event and restart while paused. The hooks exist now (Phase 0.2); the scoped timers arrive with the first system that needs them.
 - **Implementation:** a small hand-written typed FSM. State IDs are an `as const` object plus a union type, with no TS `enum` (D-027).
+- **Phase 4 run flow (D-042, placeholder until the wave system):** entering `WAVE_START` moves straight on to `WAVE_ACTIVE`, one open-ended wave in which the player can be hurt (D-029). The player's death (`PlayerHealth` `died`) requests `GAME_OVER` and releases the mouse; clicking the "You died" prompt goes `GAME_OVER → LOADING → PLAYING`, a new run that resets the player, the enemies, the dummies, the pickups and the weapons. Nothing moves in `GAME_OVER`: enemies only step while a run is being played.
 
 ---
 
@@ -265,9 +266,12 @@ src/
 │ + assets/                     AssetManager, asset manifest, placeholder fallbacks
 │ + physics/                    CollisionWorld (Octree + Capsule), SpatialHash, ray queries
 │ + navigation/                 NavGrid, FlowField, climb links
+│                               (Phase 4, D-042: RouteGraph (A* over the level's authored routes),
+│                               LineTester (walkable straight lines, sight, ground), clearance)
 │ + modifiers/                  Stat, StatBlock, modifier stacks, TriggerRegistry
 ├── player/                     Player, PlayerController, CameraController, PlayerHealth, PlayerMovement
-│                               (Phase 1: PlayerMotor is the plan's PlayerMovement; + PlayerLook, HeadBob)
+│                               (Phase 1: PlayerMotor is the plan's PlayerMovement; + PlayerLook, HeadBob;
+│                               Phase 4: PlayerHealth, + PlayerTarget (the player as an enemy target))
 ├── weapons/                    Weapon, WeaponManager, hitscan/, projectile/, recoil/, ammo/, + melee/, + Loadout (D-039)
 │                               (Phase 2: types, Firearm, melee/MeleeWeapon, timing, hitscan, WeaponManager,
 │                               WeaponController, WeaponSystem, WeaponView; recoil lives in PlayerLook)
@@ -275,6 +279,9 @@ src/
 │                               + training/: TrainingRange, TrainingDummyView (temporary test targets)
 ├── enemies/                    Enemy, EnemyManager, EnemySpawner, zombie/, ai/, damage/, + modifiers/
 │                               (damage/ is served by combat/: enemies register rigs and Health there)
+│                               (Phase 4, D-042: Enemy, EnemyManager, body, events, types, EnemyView,
+│                               TrainingEncounter (temporary); ai/: EnemyStateMachine, brain, meleeBrain,
+│                               brains. zombie/ is not needed: archetypes are config)
 ├── waves/                      WaveManager, WaveGenerator, WaveDifficulty, WaveMutation
 │ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
 ├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild, + SupplyTerminal (D-039)
@@ -284,14 +291,16 @@ src/
 │                               + drops, PickupManager, PickupView (Phase 3: ammo drop foundation)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
 ├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen, + LockPrompt (Phase 0.4, temporary),
-│                               + WeaponHud (Phase 2), CombatFeedback (Phase 3): placeholders until the UI phase,
+│                               + WeaponHud (Phase 2), CombatFeedback (Phase 3), HealthHud (Phase 4):
+│                               placeholders until the UI phase,
 │                               + StatusScreen (WebGL2 missing, fatal error, context lost / not recovered),
 │                               + UIManager, SettingsMenu, LoadingScreen, VictoryScreen, styles/
 ├── audio/                      AudioManager, MusicManager, SoundLibrary
 ├── effects/                    VFXManager, HitEffects, MuzzleFlash, ScreenEffects (visual only)
 ├── save/                       SaveManager, SettingsManager, + migrations/
 │ + debug/                      DEV-only, dynamically imported: installDebug (window.tls), DebugCommands,
-│                               FrameStats (probe), DebugOverlay, debug.css, HitboxDebugView (Phase 3)
+│                               FrameStats (probe), DebugOverlay, debug.css, HitboxDebugView (Phase 3),
+│                               EnemyDebugView (Phase 4)
 │ + analytics/                  Analytics interface, NullProvider, ConsoleProvider
 │ + utils/                      Pool, Rng (seeded), math helpers, assert
 tests/
@@ -459,6 +468,52 @@ presentation (every frame): TrainingDummyView (one merged mesh per dummy; flash,
 - **Instances are pooled.** The wave config sets a `maxAlive` cap; the rest of the budget waits in the spawn queue.
 - **A `SpatialHash` (2 m cells)** handles separation between enemies and alert-radius queries (Screamer, SCREAM).
 
+**Phase 4 implementation (D-042).** A generic enemy framework and one archetype, the Walker. Nothing generic names an archetype: an archetype is `EnemyArchetypeConfig` data plus the brain its `behavior` selects.
+
+```text
+fixed step (only while a run is being played; nothing while frozen):
+  EnemyManager.fixedUpdate(dt), after Player, before weapons:
+    per living enemy:
+      fsm.advance(dt); cooldown, re-plan and idle timers
+      think(), if (stepCount + spawnNumber) % thinkSteps == 0      [10 Hz, spread over the steps]
+        perceive: keep / lose / acquire a target (sight = one ray, eye to eye)
+        CHASE: planChase → direct (walkable straight line) or route (A* on the level's graph)
+        PATROL / CHASE: progress check (stuck → take the route to its end)
+      update(), every step                                          [exact timing]
+        reaction (DETECT), wind-up → strike → recovery (ATTACK), stagger countdown,
+        steering outputs: moveGoal, moveSpeed, faceYaw
+    per body: corpse timer → despawn (exactly once)
+    separation: pairwise push between living enemies, and off the targets' bodies (velocity)
+    per living enemy: turn toward the wish at turnSpeed → PlayerMotor.step (capsule vs level)
+                      → rig follows (position, yaw); below the kill plane → despawn
+  combat events, same step: damaged → brain.onDamaged (alert); staggered → brain.onStaggered
+                            onKilled → DEAD, drops, corpse timer
+  strike → target.receiveHit → PlayerHealth.damage (only in WAVE_ACTIVE / BOSS) → died → GAME_OVER
+presentation (every frame): EnemyView (one skinned mesh per enemy, interpolated), HealthHud
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `config/enemies.ts` | data | `EnemyArchetypeConfig` (plan base fields + body, rig, attack pose, perception, attack, patrol, combat, drops, `behavior`), `ENEMY_STATS.walker`, `ENEMY_RULES` (think interval, living cap, separation, route and stuck tuning, straight-line ray heights), `enemyConfig(id)` |
+| `config/player.ts`, `config/training.ts` | data | `PLAYER_HEALTH`; the test encounter's placements |
+| `enemies/Enemy.ts` | sim | One pooled enemy: body (`PlayerMotor`), `HitboxRig`, `Health`, `EnemyStateMachine`, AI working state; `prepare` resets it |
+| `enemies/EnemyManager.ts` | sim | Spawn (cap, pools, ids), combat registration, think scheduling, separation, movement, death, despawn once, `canStand`, debug controls |
+| `enemies/ai/EnemyStateMachine.ts` | sim | The seven states and the legal-transition table |
+| `enemies/ai/brain.ts`, `brains.ts`, `meleeBrain.ts` | sim | The behaviour interface; behaviour id → brain; the melee chaser (the Walker's behaviour) |
+| `enemies/body.ts`, `types.ts`, `events.ts` | sim | Enemy movement config from archetype data; `EnemyTarget`, `EnemyHit`; `EnemyEvents` |
+| `enemies/TrainingEncounter.ts` | sim | Temporary: places the configured Walkers each run and brings them back |
+| `navigation/RouteGraph.ts`, `LineTester.ts`, `clearance.ts` | sim | §7.5 |
+| `player/PlayerHealth.ts`, `PlayerTarget.ts` | sim | Player health (D-029 window, death once, reset); the player as an `EnemyTarget` |
+| `combat/CombatSystem.ts` | sim | Unchanged pipeline; + `applyDamage` and `kill` (direct damage without a weapon) |
+| `enemies/EnemyView.ts`, `ui/HealthHud.ts` | presentation | Placeholder zombie visuals; health readout and damage flash |
+| `debug/EnemyDebugView.ts` | debug | AI labels, detection and attack rings, target line, route (`tls.showAI()`) |
+
+- **Two rates, as planned, without a separate scheduler:** the manager's step counter spreads `think` over the steps (the `AIScheduler` sketched above is not needed yet). Distance-based thinking rates ("distant enemies think less often") are not implemented: at 64 Walkers decisions cost ~0.1 ms per step.
+- **Order in the step:** world → player → enemies → test encounter → weapons (combat resolves inside the weapon events) → combat timers → training range → pickups.
+- **Determinism.** Fixed steps, step-counted think turns and a seeded `Rng` stream (`<seed>:enemies`: patrols, idle pauses and enemy drops): the same fight gives the same result at any render rate (tested at 30, 60 and 144 Hz).
+- **Enemy targets are generic** (`EnemyTarget`): the player now; decoys or allies later implement the same interface.
+- **Not yet:** modifiers and elites (Phase 5 with the other archetypes), the spawner (Phase 6), the `SpatialHash` (pairwise separation measured ~0.08 ms per step at 64), body blocking of the player.
+
 ### 7.5 Navigation (D-008)
 
 - **Flow fields.** Every zombie chases the same target, so one Dijkstra pass over the nav grid from the player's cell steers all of them. Cost scales with map size, not enemy count.
@@ -468,6 +523,15 @@ presentation (every frame): TrainingDummyView (one merged mesh per dummy; flash,
   - **Climb links** are vertical edges that only Climbers may use, so there are two fields: ground and climber.
 - **Enemies stay on walkable cells.** They need no capsule-vs-world collision, which is cheap and means they cannot fall through the map.
 - **Fallback:** if the map outgrows grids, `recast-navigation` (a WASM navmesh) can replace it behind the same `NavigationService` interface.
+
+**Phase 4 implementation (D-042, refines D-008 for the blockout).** The flow field is not built yet: the facility needs routing (a catwalk, a dock, a roofed control room with doorways), not a horde-scale field, and the brief asked for simple route data first.
+- **Direct pursuit** when a body can walk the straight line: `LineTester.walkable` (ends within `maxRise` in height; knee-height rays along the centre and both sides of the body; one chest-height ray). One ray for sight (`lineOfSight`), one for ground (`hasGround`). All against the level octree; no allocation.
+- **Route graph otherwise:** `LevelDefinition.navigation` (nodes at feet height and links a body can walk; the facility has 37 nodes and 48 links) → `RouteGraph` (A* on typed arrays, ties to the lower index, `nearest` preferring the same level). A route starts at the nearest node the enemy can walk to and ends at the target's goal node (nearest to the target with a straight walk to it; one per target per step, shared); re-plans start from the node being walked to; corners are cut when a later node is walkable.
+- **Stuck detection** (no progress for `stuckTime`): a failed straight walk means something the rays cannot see (a kerb below knee height, a beam above the chest), so the enemy follows the route link by link, without cutting corners, until the route ends or it reaches the target; a failed route is re-planned.
+- **Enemies collide like the player:** they move through `PlayerMotor` against the level octree, so walls and floors hold them even where navigation is wrong (the plan's nav-grid binding is not needed).
+- **Validation:** tests walk every link of the facility both ways with a Walker body through the real collision, and chase a target into every area.
+- **Spawn validation:** `bodyFits` (level brush data: a body inside a brush counts as blocked even though it touches none of its faces) and `hasGround`, combined in `EnemyManager.canStand`, used by the debug spawn commands; the wave spawner will use it for its spawn points.
+- **The seam for later:** the brain only reads `lines`, `routes` and `goalNodeFor` from its context, so a flow field (D-008) or a navmesh can replace the route graph without touching behaviour.
 
 ### 7.6 Physics and collision (D-006)
 
@@ -568,9 +632,9 @@ Three sources change the world. They are layered rather than competing:
 
 - **`debug/` is dynamically imported behind `import.meta.env.DEV`,** so it is excluded from production bundles (Phase 0.5, verified: no debug chunk, code or CSS in `dist/`).
 - **`window.tls` is a structured command interface.** `tls.help()` lists every command.
-  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`; player and view commands (Phase 1); weapon commands (Phase 2); combat commands (Phase 3): `combat`, `dummies`, `spawnDummy`, `resetDummies`, `clearDummies`, `reviveDummies`, `aimAt`, `aimAtTarget`, `showHitboxes` (the hitbox visualiser), `damageNumbers`, `pickups`, `spawnPickup`.
-  - The plan §29 commands are registered as stubs that name the phase implementing them.
-- **The overlay** shows FPS, frame interval, our per-frame cost (avg/p95/max), steps per frame, dropped time, draw calls, triangles, programs, viewport, context status, game state and pointer-lock state. It is toggled with Backquote or `tls.overlay()`. While it is hidden, the frame probe is detached. Since Phase 2 and 3 it also shows the held weapon and the combat targets alive with the last hit; enemy counts are added with enemies.
+  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`; player and view commands (Phase 1); weapon commands (Phase 2); combat commands (Phase 3): `combat`, `dummies`, `spawnDummy`, `resetDummies`, `clearDummies`, `reviveDummies`, `aimAt`, `aimAtTarget`, `showHitboxes` (the hitbox visualiser), `damageNumbers`, `pickups`, `spawnPickup`; enemy and player-health commands (Phase 4): `playerHealth`, `healPlayer`, `setGodMode`, `damagePlayer`, `killPlayer`, `enemies`, `enemy`, `spawnEnemy`, `spawnWalkers` (the stress test: spots where a body fits, in rows in front of the player), `killEnemy`, `killAll`, `damageEnemy`, `setEnemyState`, `alertEnemies`, `clearEnemies`, `freezeEnemies`, `showAI` (the AI visualiser).
+  - The plan §29 commands not built yet (`startWave`, `triggerMutation`, `spawnBoss`) are registered as stubs that name the phase implementing them.
+- **The overlay** shows FPS, frame interval, our per-frame cost (avg/p95/max), steps per frame, dropped time, draw calls, triangles, programs, viewport, context status, game state and pointer-lock state. It is toggled with Backquote or `tls.overlay()`. While it is hidden, the frame probe is detached. Since Phases 2–4 it also shows the held weapon, the combat targets alive with the last hit, and the enemies alive by AI state with the player's health.
 - **`analytics/`** provides an `Analytics.track(event, props)` interface. Production uses the `NullProvider` until a provider is chosen; dev uses `ConsoleProvider`. Event names come from plan §30, and no personal data is collected.
 
 ### 7.17 Error handling and browser hardening (D-017)
@@ -669,10 +733,16 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 - our CPU cost per frame ~2–2.6 ms firing ~6 shots/s at 24 dummies (p95 ≤ 6 ms), of which SwiftShader's CPU rendering is most;
 - the first shot of a session no longer hitches: hidden pooled objects are included in the shader prewarm (it had cost ~200 ms since Phase 2).
 
+**Phase 4 baseline** (Walkers chasing the player; same container; TESTING.md §7.4):
+- simulation per fixed step: 0.09 ms with 8 Walkers, ~0.2 ms with 24 (the planned wave default), 0.63 ms with 64 (16 % of the 4 ms budget); movement and collision ~4 µs per Walker, one decision ~9 µs (every 6th step per Walker, never more than ⌈N ÷ 6⌉ in a step), exact timing ~0.2 µs; pairwise separation is the only quadratic part (0.08 ms at 64);
+- each enemy is **one skinned mesh: one draw call plus one shadow draw**: 64 Walkers ~144 draw calls in total (a separate arms mesh had measured 272 at 64, over the Low budget of 250; D-042); ~2,450 triangles per Walker with its shadow;
+- our CPU cost per frame ~1.6 ms with 4 Walkers, ~2.7 ms with 16, ~7 ms with 64 at software-rendering frame rates (up to 5 simulation steps per frame);
+- JS heap 29–35 MB from 0 to 64 Walkers (no growth).
+
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);
 - Chrome's Rendering → *Frame Rendering Stats* and the Performance panel, which also work on production builds;
-- a stress-test debug command that spawns N enemies (arrives with enemies); until then, `tls.inspect().training.spawn()` places any number of dummies.
+- the stress-test debug command `tls.spawnWalkers(n)` (with `tls.setGodMode(true)` and `tls.alertEnemies()`), and `src/enemies/performance.test.ts` for the simulation alone (`PERF_REPORT=1`).
 
 ---
 

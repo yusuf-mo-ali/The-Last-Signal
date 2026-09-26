@@ -21,7 +21,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-005 | Hierarchical reading of the plan's state list | Proposed |
 | D-006 | No physics engine: kinematic capsule + octree | Accepted |
 | D-007 | Combat uses hitbox rigs, not render-mesh raycasts | Accepted |
-| D-008 | Flow-field navigation on a nav grid | Accepted |
+| D-008 | Flow-field navigation on a nav grid | Accepted (for hordes; the blockout's navigation is D-042) |
 | D-009 | One data-driven modifier/trigger system | Accepted |
 | D-010 | Engine config vs gameplay config | Accepted |
 | D-011 | One weapon framework, weapons as data | Accepted (loadout by D-039) |
@@ -42,7 +42,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-026 | Adaptive system guardrails | Proposed |
 | D-027 | Erasable TypeScript syntax only (no `enum`) | Accepted |
 | D-028 | Layering of world changes | Accepted |
-| D-029 | Player can only be damaged during WAVE_ACTIVE / BOSS | Proposed |
+| D-029 | Player can only be damaged during WAVE_ACTIVE / BOSS | Proposed (implemented by D-042) |
 | D-030 | Blockout-first visuals, swappable art | Accepted |
 | D-031 | Phase 0.1 tooling configuration details | Accepted |
 | D-032 | Phase 0.2 core primitive semantics | Accepted |
@@ -55,6 +55,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-039 | Loadout of Melee, Primary and Secondary; weapons bought with Scrap at the Supply Terminal (resolves O-2) | Accepted |
 | D-040 | Phase 2 weapon framework: timing, trigger, reload, hitscan, recoil, melee placeholder, events | Accepted |
 | D-041 | Phase 3 combat: hitbox rigs, pure damage, reusable Health, one-time death, feedback, drops, training dummies | Accepted |
+| D-042 | Phase 4 zombie foundation: generic enemy framework, the Walker, AI state machine, limited-rate decisions, route-graph navigation, melee, player health | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -824,6 +825,62 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 - Combat values (zone multipliers, headshot rule, stagger, drops, dummy health) are logged in BALANCING.md.
 - Player health and damage to the player are not in this phase; `Health` is ready for them (Phase 4, D-029).
 - Open for later: boss weak points (a flag on shapes), helmets (per-zone armor that breaks), pose presets per AI state, hit reactions in the AI, a settings toggle for damage numbers, real blood and impact VFX, enemy collision with the player.
+
+---
+
+## D-042 — Phase 4 zombie foundation: generic enemy framework, the Walker, AI state machine, limited-rate decisions, route-graph navigation, melee, player health
+**Status:** Accepted · **Date:** 2026-09-26 · **Implements:** plan §11 (Phase 4), D-012, D-029, D-041 · **Refines:** D-008 (navigation for the current blockout)
+
+**Context.** Phase 4 builds the enemy foundation: a reusable framework, the first archetype (the Walker), the plan's seven AI states with decisions at a limited rate, and the first damage to the player. Combat (D-041) is reused as it is. There is no wave system yet (Phase 6), and no other archetype (Phase 5).
+
+**Decision.**
+
+1. **An enemy is archetype data, a behaviour and the generic framework; nothing generic names an archetype.**
+   - `config/enemies.ts`: `EnemyArchetypeConfig` holds the plan's base fields (health, move speed, attack damage, attack range, detection range, attack cooldown) plus body size, hitbox rig and attack pose, turn rate and acceleration, combat overrides (zones, armor, resistance, stagger threshold and duration), perception (lose range, memory, reaction time), the attack's shape (wind-up, recovery, reach, arc, vertical reach), patrol, corpse time, threat cost, drop table, and `behavior`: which brain drives it. Only the Walker has data; `enemyConfig(id)` refuses archetypes without any. `ENEMY_RULES` holds what is shared (think interval, living cap, separation, route and stuck tuning, walkable-line heights).
+   - `enemies/Enemy.ts`: one pooled instance: a body (the player's `PlayerMotor` with the archetype's size and speeds), a `HitboxRig`, a `Health`, an `EnemyStateMachine`, and the AI's working state (target, perception, attack phase and timers, route, steering). `prepare` resets all of it for reuse.
+   - `enemies/EnemyManager.ts`: the fixed-step system: spawning (living cap, pools per archetype, unique ids `walker-1`, `walker-2`…), registration with combat exactly like a training dummy, decision scheduling, separation, movement, death, removal exactly once, `clear` for a new run, `canStand` (spawn validation), and the debug controls.
+   - `enemies/ai/`: `EnemyStateMachine` (the transition table), `brain.ts` (the behaviour interface: `think`, `update`, `onDamaged`, `onStaggered`, `alert`), `meleeBrain.ts` (walk up to the target and hit it: the Walker's behaviour, driven only by its config) and `brains.ts` (behaviour id → brain). A Runner or a Tank is new data; a Screamer or a Climber adds a brain (or a brain option) next to the melee one.
+2. **AI state machine (plan §11).** The seven plan states with one table of legal transitions: IDLE → PATROL, DETECT, STAGGER, DEAD; PATROL → IDLE, DETECT, STAGGER, DEAD; DETECT → CHASE, ATTACK, IDLE, STAGGER, DEAD; CHASE → ATTACK, IDLE, STAGGER, DEAD; ATTACK → CHASE, IDLE, STAGGER, DEAD; STAGGER → IDLE, CHASE, ATTACK, DEAD; DEAD is terminal. No self-transitions (a second stagger or a new attack is handled inside the state). Anything else is refused, and throws in strict mode (development builds and tests). All 49 pairs are tested against an independent table.
+3. **Decisions at a limited rate (plan §11 "no expensive logic every render frame").**
+   - `think` (sight rays, target choice, route planning, patrol choice) runs every `thinkInterval` (0.1 s = every 6th fixed step). Each enemy's turn is offset by its spawn number, so decisions are spread evenly over the steps and never pile up on one (measured at 64 Walkers: at most 11 decisions in any step).
+   - `update` runs every fixed step and holds everything that must be exact: reaction time, wind-up, strike, recovery, stagger, cooldown. Movement runs every fixed step.
+   - All of it is fixed-step simulation: nothing depends on the render frame rate (the same fight gives the same timeline at 30, 60 and 144 Hz, tested). This replaces the separate `AIScheduler` sketched in ARCHITECTURE §7.4: the manager's step counter is the scheduler.
+4. **Perception and targeting, generic.** Targets are `EnemyTarget`s (id, position, eye height, radius, alive, `receiveHit`): the player today, anything later. An enemy acquires the nearest living target within detection range that it can see (one ray, eye to eye). It keeps a target while it sees it, or for its memory time after, within its lose range. Being told where the target is overrides range and sight: a hit tells it for its memory time; the game's `alert` (the horde now, a Screamer later) tells it for good. It loses a target that dies, gets too far away or stays unseen too long.
+5. **Navigation fits the blockout (refines D-008 for now).** The facility has a raised catwalk, a dock, a roofed control room reached through doorways and a crawl duct, so walking straight at the player is not enough. A nav grid with flow fields is more than it needs yet, and the brief asked for simple route data first. So:
+   - **Direct pursuit** whenever a body can walk the straight line (`LineTester.walkable`: ends within a step of each other in height, knee-height rays along the centre and both sides of the body, one chest-height ray).
+   - Otherwise **an authored route graph** in the level data (`LevelDefinition.navigation`; the facility has 37 nodes and 48 links), searched with A* (ties resolve to the lower node index, so routes are deterministic). A route starts at the nearest node the body can walk to and ends at the node nearest the target with a straight walk to it (one goal per target per step, shared by all enemies). Re-plans start from the node being walked to, so a re-plan half-way up the stairs never sends it back down. Corners are cut when a later node is already walkable.
+   - **Stuck detection:** no progress for 0.8 s on a straight walk means something the rays cannot see is in the way (a kerb below knee height, a beam above the chest): the enemy then follows the route link by link, without cutting corners (every link is walkable by a body), until the route ends or it reaches its target. A stuck route is re-planned. (A first version retried the straight line after 2 s and cut corners on the route with the same rays; the planted-bug tests showed it could never get round such an obstacle.)
+   - Tests walk every link both ways with a Walker body through the real collision, and chase a target into every area of the map.
+   - **D-008 stays the plan for hordes.** The brain only sees `lines`, `routes` and `goalNodeFor` in its context, so a flow field can replace the route graph behind the same context when a measurement asks for it. At 64 Walkers, decisions (sight, walkable lines and routes together) cost about 0.1 ms per step.
+6. **Movement.** Enemies move through the player's capsule motor (walls, steps, ramps, stairs, gravity against the level octree), so they cannot walk through walls or fall through floors, and they move identically at any frame rate. The heading turns at the archetype's turn rate; the body walks along its facing and slows while still turning (no sliding sideways). Enemies push apart, and away from a target's body, through their velocity, never by moving their position. One that falls below the kill plane is removed (a safety net; the blockout is closed).
+7. **Melee attack.** In range (horizontal distance ≤ attack range, height difference within vertical reach), in sight and with the cooldown ready, it enters ATTACK:
+   - **Wind-up** (the telegraph): it stops, its facing is locked, and its rig switches to the arms-forward reach pose.
+   - **One strike** at the end of the wind-up. It lands only if the target is still within reach, inside the committed arc, at a reachable height and not behind a wall; otherwise it misses (the attack can be dodged).
+   - **Recovery**, then it attacks again when the cooldown (counted from the start of the attack) allows, or chases.
+   - One damage per attack. A stagger or death during the wind-up cancels it. Damage goes to the target's `receiveHit`: for the player, `PlayerHealth`.
+8. **Player health (implements D-029).** `PlayerHealth` wraps a `Health`: maximum from `config/player.ts` (100); damage only while `canBeDamaged` (the game is in `WAVE_ACTIVE` or `BOSS`); god mode (debug); death once (`died`); healing never while dead; `reset` for a new run. Events: `damaged` (amount applied, health, source, direction, killed), `died`, `healed`, `reset`. `main.ts` turns `died` into `GAME_OVER` and releases the mouse; clicking the game-over prompt starts a new run (`LOADING` → `PLAYING`), which resets the player, the enemies, the dummies, the pickups and the weapons.
+9. **Run flow placeholder.** There is no wave system, so entering `WAVE_START` moves straight to `WAVE_ACTIVE`: one open-ended wave, in which the player can be hurt. Phase 6's `WaveManager` replaces this.
+10. **Combat integration, no redesign.** Enemies register with the `CombatSystem` exactly like dummies (rig, health, zone overrides, armor, resistance, stagger threshold, `onKilled`). Combat's `damaged` event alerts the brain; `staggered` puts the enemy in STAGGER; death uses `onKilled`. Two small additions to `CombatSystem`: `applyDamage(id, {amount, zone?})` (direct damage without a weapon: debug commands now, hazards later; `weaponId: null`, source `direct`) and `kill(id)`. Both do nothing to dead or unknown targets.
+11. **Stagger.** The Phase 3 stagger event (for the Walker: 35 damage within 1 s) cancels a wind-up and stops the enemy for its stagger duration (0.7 s); then it attacks, chases or idles, whichever fits. A stagger during a stagger restarts it.
+12. **Death and cleanup.** The killing hit runs `onKilled`: the attack is cancelled, the pose reset, the state set to DEAD, the target dropped, the drop table rolled (Walker: ammo, 20%), the corpse timer started (5 s). Then the enemy is removed exactly once: unregistered from combat and returned to the pool. A dead enemy takes no damage, and shots pass through its body.
+13. **Presentation (placeholders).**
+    - `EnemyView` draws each enemy from its own rig: head, torso, legs and arms in zone colours with yellow eyes, as **one skinned mesh with two bones** (the body at the feet, the arms at the shoulders). It shows a walking bob and sway, turning, a wind-up (arms rising to reach forward, an orange glow growing until the strike), a hit flash and push, a stagger rock, and a fall and sink on death.
+    - One mesh per enemy follows D-041's rule (one draw call plus one shadow draw). A separate mesh for the arms had measured **272 draw calls at 64 Walkers**, over the Low budget of 250; the skinned mesh measures **144**. One hidden, pooled visual per archetype exists from the start, so the start-up shader prewarm compiles the enemy materials before the first spawn.
+    - `HealthHud`: the health number and a bar in the bottom-left corner, and a red flash on damage. The lock prompt gains a game-over mode ("You died / Click to start a new run").
+14. **Test encounter (temporary, like the training range).** `TrainingEncounter` places three Walkers from `config/training.ts` at every new run: two sentries 14–15 m from the spawn (beyond detection range, so a player standing at the spawn is never engaged) and a patroller in the north-east yard. Each comes back 10 s after its body is removed. It is on in every build until the wave system arrives, so the Walker can be played in production.
+15. **Debug (development only).** `tls.playerHealth()`, `healPlayer(amount?)`, `setGodMode()`, `damagePlayer(amount?)`, `killPlayer()`, `enemies()`, `enemy(id)`, `spawnEnemy(type?, distance?)` and `spawnWalkers(count?, distance?)` (both only on spots where a body fits), `killEnemy(id)`, `killAll()`, `damageEnemy(id, amount?)`, `setEnemyState(id, state)`, `alertEnemies()`, `clearEnemies()`, `freezeEnemies()`, `showAI()` (per enemy: a label with id, state and health, the detection and attack ranges as rings, a line to its target and the route it follows). An overlay line counts enemies by state and shows the player's health. The plan §29 stubs left are `startWave` (Phase 6), `triggerMutation` (Phase 7) and `spawnBoss` (Phase 13).
+
+**Why.**
+- Data plus a small set of brains keeps archetypes cheap: the Runner and the Tank are mostly numbers, and the rules that make an attack fair (telegraph, commitment, one hit, walls block) are written once.
+- An explicit transition table makes illegal behaviour impossible rather than unlikely, and testable.
+- Exact timing every step and expensive decisions at 10 Hz give fair, deterministic fights with a flat cost per step.
+- Reusing the player's motor and the combat pipeline means enemies obey the same world and the same damage rules as everything else, with no second physics or hit model to keep consistent.
+- The route graph is the least navigation the blockout needs; it is data in the level, validated by tests, and replaceable.
+
+**Consequences.**
+- Walker numbers, player health, the enemy rules and the Walker's drop are logged in BALANCING.md.
+- The player can walk through enemies (enemies stop short of the player and push away from their body, but the player's motor does not collide with them). Body blocking comes with the horde work if play needs it.
+- Open for later: the wave spawner and spawn points (Phase 6), the other archetypes and elite traits (Phase 5), a flow field if hordes outgrow the route graph (D-008), per-state rig poses beyond the reach pose, final models and animation (D-030), a proper HUD (health vignette, damage direction).
 
 ---
 

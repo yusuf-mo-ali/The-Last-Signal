@@ -4,15 +4,8 @@
 
 import { expect, isDev, openGame, test } from './helpers';
 
-const PLAN_29_COMMANDS = [
-  'healPlayer',
-  'killAll',
-  'spawnEnemy',
-  'startWave',
-  'triggerMutation',
-  'spawnBoss',
-  'setGodMode',
-];
+/** Plan §29 commands whose systems arrive in later phases (registered as stubs until then). */
+const PLAN_29_STUBS = ['startWave', 'triggerMutation', 'spawnBoss'];
 
 test('development build: tls commands, plan §29 stubs and the stats overlay', async ({
   page,
@@ -23,7 +16,7 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
 
   const help = await page.evaluate(() => window.tls!.help().map((c) => [c.name, c.available]));
   const commands = new Map(help as [string, boolean][]);
-  for (const name of PLAN_29_COMMANDS) {
+  for (const name of PLAN_29_STUBS) {
     expect(commands.get(name), name).toBe(false); // registered as stubs until their phases
   }
   for (const name of [
@@ -52,12 +45,31 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'damageNumbers',
     'pickups',
     'spawnPickup',
+    // Plan §29 commands delivered by Phase 4 (enemies and player health).
+    'healPlayer',
+    'setGodMode',
+    'spawnEnemy',
+    'killAll',
+    // Phase 4 enemy and player-health tools.
+    'playerHealth',
+    'damagePlayer',
+    'killPlayer',
+    'enemies',
+    'enemy',
+    'spawnWalkers',
+    'killEnemy',
+    'damageEnemy',
+    'setEnemyState',
+    'alertEnemies',
+    'clearEnemies',
+    'freezeEnemies',
+    'showAI',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
-  expect(await page.evaluate(() => window.tls!.healPlayer())).toMatchObject({
+  expect(await page.evaluate(() => window.tls!.startWave())).toMatchObject({
     ok: false,
-    reason: expect.stringContaining('Phase 4') as unknown as string,
+    reason: expect.stringContaining('Phase 6') as unknown as string,
   });
   expect(
     await page.evaluate(() => typeof (window as unknown as Record<string, unknown>).__TLS_DEV__),
@@ -70,7 +82,11 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
   expect(text).toMatch(/draws \d+/);
   expect(text).toMatch(/state MAIN_MENU/);
   expect(text).toMatch(/weapon primary:pistol 12\/∞ ready {2}secondary locked/);
-  expect(text).toMatch(/combat targets 3\/3 alive/);
+  // Three training dummies and the three Walkers of the test encounter.
+  expect(text).toMatch(/combat targets 6\/6 alive/);
+  expect(text).toMatch(
+    /enemies 3 alive \((IDLE|PATROL) \d(, (IDLE|PATROL) \d)?\) {2}player 100\/100/,
+  );
 
   await page.keyboard.press('Backquote');
   await expect(page.locator('.debug-overlay')).toBeHidden();

@@ -1,5 +1,5 @@
 /**
- * Player movement tuning (plan §8, GAME_DESIGN §4.2). Gameplay data only: changing a value here
+ * Player tuning: movement (plan §8, GAME_DESIGN §4.2) and health (Phase 4). Gameplay data only: changing a value here
  * never requires editing movement code (plan §31). Values are Pass-1 starting points for feel;
  * tuning changes are logged in BALANCING.md.
  *
@@ -72,3 +72,12 @@ export const PLAYER_MOVEMENT: PlayerMovementConfig = {
 export function jumpSpeed(config: PlayerMovementConfig): number {
   return Math.sqrt(2 * config.gravity * config.jumpHeight);
 }
+
+/** Player health (GAME_DESIGN §4.2): 100, no armor, no passive regeneration. */
+export interface PlayerHealthConfig {
+  readonly max: number;
+}
+
+export const PLAYER_HEALTH: PlayerHealthConfig = {
+  max: 100,
+};

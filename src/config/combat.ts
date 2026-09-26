@@ -59,6 +59,22 @@ export const HUMANOID_RIG: HitboxRigDefinition = {
   ],
 };
 
+/**
+ * The humanoid with both arms reaching forward at shoulder height: the pose a melee enemy takes
+ * while it winds up and strikes (D-007 pose presets; D-042). Same head, torso and legs as
+ * `HUMANOID_RIG`, so only the arms move.
+ */
+export const HUMANOID_REACH_POSE: HitboxRigDefinition = {
+  id: 'humanoid-reach',
+  shapes: HUMANOID_RIG.shapes.map((shape) => {
+    if (shape.kind !== 'capsule' || (shape.zone !== 'ARM_LEFT' && shape.zone !== 'ARM_RIGHT')) {
+      return shape;
+    }
+    const side = shape.zone === 'ARM_LEFT' ? -1 : 1;
+    return { ...shape, b: [side * 0.31, 1.36, -0.55] as const };
+  }),
+};
+
 export interface CombatRules {
   /**
    * The least damage a hit can do once armor has reduced it (GAME_DESIGN §6: flat armor with a

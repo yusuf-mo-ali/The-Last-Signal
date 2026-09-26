@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FACILITY } from '../world/levels/facility';
 import { ADAPTATION_GUARDRAILS, ADAPTIVE_METRICS } from './adaptation';
 import { BOSS_IDS, BOSSES } from './bosses';
-import { COMBAT_FEEDBACK, COMBAT_RULES, HUMANOID_RIG } from './combat';
+import { COMBAT_FEEDBACK, COMBAT_RULES, HUMANOID_REACH_POSE, HUMANOID_RIG } from './combat';
 import { DROP_TABLE_IDS, DROP_TABLES, PICKUP_IDS, PICKUP_RULES, PICKUPS } from './drops';
 import { CURRENCIES, REWARD_SOURCES } from './economy';
 import { EFFECT_KINDS } from './effects';
@@ -12,12 +12,22 @@ import {
   DEFAULT_ZONE_MULTIPLIERS,
   ENEMY_ARCHETYPE_IDS,
   ENEMY_ARCHETYPES,
+  ENEMY_BEHAVIOR_IDS,
   ENEMY_MODIFIER_IDS,
+  ENEMY_RULES,
+  ENEMY_STATS,
+  IMPLEMENTED_ENEMY_IDS,
 } from './enemies';
+import { PLAYER_HEALTH, PLAYER_MOVEMENT } from './player';
 import { MUTATION_IDS, MUTATIONS } from './mutations';
 import { ENVIRONMENT_STATES, SIGNAL_PHASES } from './signal';
 import { UPGRADE_CHOICES_PER_OFFER, UPGRADE_IDS, UPGRADE_TAGS, UPGRADES } from './upgrades';
-import { TRAINING_DUMMIES, TRAINING_DUMMY_KINDS, TRAINING_RANGE } from './training';
+import {
+  TRAINING_DUMMIES,
+  TRAINING_DUMMY_KINDS,
+  TRAINING_ENEMIES,
+  TRAINING_RANGE,
+} from './training';
 import { DIFFICULTY_TIERS, FINAL_WAVE, MUTATION_FREE_WAVES } from './waves';
 import {
   LOADOUT_CATEGORIES,
@@ -266,6 +276,78 @@ describe('combat data (Phase 3, D-041)', () => {
       expect(d.yaw).toBeCloseTo(Math.PI, 12);
       expect(Math.abs(d.position[0])).toBeLessThan(20);
       expect(d.position[2]).toBeLessThan(FACILITY.spawn.position[2]);
+    }
+  });
+});
+
+describe('enemy data (Phase 4, D-042)', () => {
+  const walker = ENEMY_STATS.walker;
+  const pistol = WEAPONS.pistol;
+
+  it('every implemented archetype has a complete, consistent definition', () => {
+    for (const id of IMPLEMENTED_ENEMY_IDS) {
+      const c = ENEMY_STATS[id];
+      expect(c.id).toBe(id);
+      expect(ENEMY_ARCHETYPE_IDS).toContain(id);
+      expect(ENEMY_BEHAVIOR_IDS).toContain(c.behavior);
+      expect(c.drops === null || DROP_TABLE_IDS.includes(c.drops)).toBe(true);
+      expect(c.attack.reach).toBeGreaterThanOrEqual(c.attackRange);
+      expect(c.attack.windup + c.attack.recovery).toBeLessThanOrEqual(c.attackCooldown);
+      expect(c.perception.loseTargetRange).toBeGreaterThan(c.detectionRange);
+      expect(c.body.eyeHeight).toBeLessThan(c.body.height);
+      expect(c.patrol.pauseMin).toBeLessThanOrEqual(c.patrol.pauseMax);
+    }
+  });
+
+  it('Walker: slow, tougher than a training dummy, melee only', () => {
+    expect(walker.moveSpeed).toBeLessThan(PLAYER_MOVEMENT.walkSpeed / 2);
+    expect(walker.health).toBeGreaterThan(TRAINING_DUMMIES.standard.health);
+    expect(walker.behavior).toBe('melee');
+  });
+
+  it('Walker vs the Pistol: 5 body shots or 2 headshots (GAME_DESIGN §5.2: 4–5 / 1–2)', () => {
+    expect(Math.ceil(walker.health / pistol.damage)).toBe(5);
+    expect(Math.ceil(walker.health / (pistol.damage * pistol.headshotMultiplier))).toBe(2);
+  });
+
+  it('Walker stagger: a headshot staggers, one body shot does not, two quick ones do', () => {
+    expect(pistol.damage * pistol.headshotMultiplier).toBeGreaterThanOrEqual(
+      walker.staggerThreshold,
+    );
+    expect(pistol.damage).toBeLessThan(walker.staggerThreshold);
+    expect(pistol.damage * 2).toBeGreaterThanOrEqual(walker.staggerThreshold);
+  });
+
+  it('Walker vs the player: 7 hits to kill from full health; the wind-up can be dodged', () => {
+    expect(Math.ceil(PLAYER_HEALTH.max / walker.attackDamage)).toBe(7);
+    // Backing off at walking speed for the wind-up leaves its reach.
+    expect(walker.attackRange + PLAYER_MOVEMENT.walkSpeed * walker.attack.windup).toBeGreaterThan(
+      walker.attack.reach,
+    );
+  });
+
+  it('AI decisions run at 5–10 Hz (ARCHITECTURE §7.4)', () => {
+    expect(1 / ENEMY_RULES.thinkInterval).toBeGreaterThanOrEqual(5);
+    expect(1 / ENEMY_RULES.thinkInterval).toBeLessThanOrEqual(10);
+  });
+
+  it('the reach pose moves only the arms, forward', () => {
+    const zones = (rig: typeof HUMANOID_RIG) => rig.shapes.map((s) => s.zone);
+    expect(zones(HUMANOID_REACH_POSE)).toEqual(zones(HUMANOID_RIG));
+    HUMANOID_REACH_POSE.shapes.forEach((shape, i) => {
+      const upright = HUMANOID_RIG.shapes[i];
+      if (shape.zone === 'ARM_LEFT' || shape.zone === 'ARM_RIGHT') {
+        expect(shape.kind === 'capsule' && shape.b[2]).toBeLessThan(-0.4);
+      } else {
+        expect(shape).toEqual(upright);
+      }
+    });
+  });
+
+  it('the Phase 4 test encounter places implemented enemies on the level floor', () => {
+    for (const p of TRAINING_ENEMIES.placements) {
+      expect(IMPLEMENTED_ENEMY_IDS).toContain(p.archetype);
+      expect(p.position[1]).toBe(0);
     }
   });
 });
