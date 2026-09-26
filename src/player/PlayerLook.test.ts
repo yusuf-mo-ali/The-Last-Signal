@@ -87,4 +87,64 @@ describe('PlayerLook', () => {
     expect(pixelsPerTurn).toBeGreaterThan(1500);
     expect(pixelsPerTurn).toBeLessThan(5000);
   });
+
+  describe('recoil (D-040)', () => {
+    const DEG = Math.PI / 180;
+
+    it('kicks the view up and sideways, remembering only the upward kick', () => {
+      const look = new PlayerLook(SETTINGS);
+      look.addRecoil(1 * DEG, 0.5 * DEG);
+      expect(look.pitch).toBeCloseTo(1 * DEG);
+      expect(look.yaw).toBeCloseTo(0.5 * DEG);
+      expect(look.recoilPitch).toBeCloseTo(1 * DEG);
+    });
+
+    it('settles the kick back down at the given rate, never past where the player aimed', () => {
+      const look = new PlayerLook(SETTINGS);
+      look.setAngles(0, 0.2);
+      look.addRecoil(1 * DEG, 0);
+      look.recoverRecoil(0.4 * DEG);
+      expect(look.pitch).toBeCloseTo(0.2 + 0.6 * DEG);
+      look.recoverRecoil(10 * DEG);
+      expect(look.pitch).toBeCloseTo(0.2);
+      expect(look.recoilPitch).toBe(0);
+      look.recoverRecoil(10 * DEG);
+      expect(look.pitch).toBeCloseTo(0.2); // nothing left to recover
+    });
+
+    it('counts the player pulling down against the kick as recovery', () => {
+      const look = new PlayerLook(SETTINGS);
+      look.addRecoil(0.1, 0);
+      look.applyMouseDelta(0, 30); // pull down 0.06 rad
+      expect(look.recoilPitch).toBeCloseTo(0.04);
+      look.applyMouseDelta(0, 100); // pull further down than the kick
+      expect(look.recoilPitch).toBe(0);
+      const pitch = look.pitch;
+      look.recoverRecoil(1);
+      expect(look.pitch).toBe(pitch); // the player's own aim is never undone
+    });
+
+    it('does not count looking up as recovery', () => {
+      const look = new PlayerLook(SETTINGS);
+      look.addRecoil(0.1, 0);
+      look.applyMouseDelta(0, -50);
+      expect(look.recoilPitch).toBeCloseTo(0.1);
+    });
+
+    it('respects the pitch clamp: a kick at the limit adds nothing to recover', () => {
+      const look = new PlayerLook(SETTINGS);
+      look.setAngles(0, 2); // clamped to the limit
+      look.addRecoil(0.1, 0);
+      expect(look.pitch).toBeCloseTo(LIMIT);
+      expect(look.recoilPitch).toBe(0);
+    });
+
+    it('forgets outstanding recoil on reset (spawn, teleport)', () => {
+      const look = new PlayerLook(SETTINGS);
+      look.addRecoil(0.1, 0);
+      look.resetRecoil();
+      look.recoverRecoil(1);
+      expect(look.pitch).toBeCloseTo(0.1);
+    });
+  });
 });

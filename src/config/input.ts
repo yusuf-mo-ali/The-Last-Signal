@@ -33,9 +33,10 @@ export const INPUT_ACTIONS = [
   'fire',
   'aim',
   'reload',
-  'weapon1',
-  'weapon2',
-  'weapon3',
+  // Loadout categories (D-039), never weapon numbers.
+  'equipPrimary',
+  'equipSecondary',
+  'equipMelee',
   'weaponNext',
   'weaponPrevious',
   'interact',
@@ -63,13 +64,13 @@ export const DEFAULT_BINDINGS: InputBindings = {
   fire: [mouse(MouseButton.LEFT)],
   aim: [mouse(MouseButton.RIGHT)],
   reload: [key('KeyR')],
-  weapon1: [key('Digit1')],
-  weapon2: [key('Digit2')],
-  weapon3: [key('Digit3')],
+  equipPrimary: [key('Digit1')],
+  equipSecondary: [key('Digit2')],
+  equipMelee: [key('Digit3')],
   weaponNext: [wheel('down')],
   weaponPrevious: [wheel('up')],
   interact: [key('KeyE')], // [Proposed, O-6]
-  melee: [key('KeyV')], // [Proposed, O-6]
+  melee: [key('KeyV')], // quick melee, always available (D-039)
   // While the pointer is locked the browser consumes Esc to release the lock; the game then pauses
   // on the lock loss (D-017). This binding covers Esc presses while the pointer is free.
   pause: [key('Escape')],

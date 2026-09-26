@@ -42,9 +42,9 @@ describe('default input bindings (GAME_DESIGN §4.1)', () => {
     expect(ids('reload')).toEqual(['key:KeyR']);
     expect(ids('sprint')).toEqual(['key:ShiftLeft', 'key:ShiftRight']);
     expect(ids('jump')).toEqual(['key:Space']);
-    expect(ids('weapon1')).toEqual(['key:Digit1']);
-    expect(ids('weapon2')).toEqual(['key:Digit2']);
-    expect(ids('weapon3')).toEqual(['key:Digit3']);
+    expect(ids('equipPrimary')).toEqual(['key:Digit1']);
+    expect(ids('equipSecondary')).toEqual(['key:Digit2']);
+    expect(ids('equipMelee')).toEqual(['key:Digit3']);
     expect(ids('weaponNext')).toEqual(['wheel:down']);
     expect(ids('weaponPrevious')).toEqual(['wheel:up']);
     expect(ids('interact')).toEqual(['key:KeyE']);

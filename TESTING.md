@@ -2,7 +2,7 @@
 
 How the project is tested, how to run each level, what is covered, and what still needs a human in a real browser. Required by plan §36; strategy from plan §27 and ARCHITECTURE.md §9 (D-021, D-036).
 
-> **Status (end of Phase 1):** 525 unit and integration tests; 64 end-to-end tests (32 tests × `dev` and `prod`: 49 run, 15 skipped by design); manual QA checklist not yet run in a real browser (see §6).
+> **Status (end of Phase 2):** 623 unit and integration tests; 82 end-to-end tests (41 tests × `dev` and `prod`: 59 run, 23 skipped by design); manual QA checklist not yet run in a real browser (see §6).
 
 ---
 
@@ -50,7 +50,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 
 ---
 
-## 3. What is covered (Phases 0–1)
+## 3. What is covered (Phases 0–2)
 
 | Area | Unit / integration | End-to-end |
 |---|---|---|
@@ -73,6 +73,13 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Movement** | `player/PlayerMotor.test.ts` (37 tests): direction per key and yaw, acceleration, braking without backslide, diagonal speed, sprint rules, crouch speed / eye ease / headroom / tunnel, jump apex and air time, no repeat, no air jump, jump buffer on/off, coyote time on/off, gravity and terminal speed, ledges, ramp up / sprint down (snap), no sliding standing or landing on a ramp, steep slopes, wall stop and slide, no tunnelling through thin floors and walls, never below the floor, kill-plane respawn | `player.spec`: WASD, turned-view movement, sprint 1.5×, crouch, jump height, no bunny-hop, never below the floor |
 | **Look and camera** | `player/PlayerLook.test.ts`: direction, invert-Y, sensitivity scaling, pitch clamp and recovery, yaw wrap, validation. `player/HeadBob.test.ts`: none when still, subtle amplitude, sprint cap, distance-based rhythm, eased fade, paused, disabled | `player.spec`: real mouse → yaw/pitch, sensitivity 2×, clamp at ±89°, invert-Y, FOV, camera follows look; head bob visible when walking, none when still or disabled |
 | **Controller and loop** | `player/PlayerController.test.ts` (with the real `InputState`/`ActionMap`); `core/Game.test.ts`: frame systems before steps, while frozen, removal; `player/traversal.test.ts`: player only moves while playing, respawn per run, **identical positions at 30/60/75/144/240 Hz**, **headless walk of the whole map** | `player.spec`: click to play starts the run; **walk of the whole map with real keys** (W/Shift held, C through the duct, Space at the dock); `prod`: strafing and turning move the beacon on screen |
+| **Weapon data** (Phase 2) | `config/gameplayConfig.test.ts`: implemented and planned weapons, definitions match ids, kinds and categories, starting loadout, Pistol Pass-1 intents (unlimited reserve, spread and recoil ordering, kick settles within a shot interval, 4 body shots / 2 headshots vs 100 health) | — |
+| **Firearm** | `weapons/Firearm.test.ts`: exact fire interval, fractional remainder (4.5 steps per shot averages exactly), no burst after idle, magazine, reload timing, unlimited and finite reserve, reload refusals, no firing while reloading, cancel, refill, infinite ammo, level hits as plain data, misses to range, falloff, pellets split damage, spread cone and stance multipliers, recoil ranges, seed reproducibility | `weapons.spec`: magazine counts down, reload, dry fire + auto reload (dev); HUD ammo (dev and prod) |
+| **Hitscan** | `weapons/hitscan.test.ts`: wall and floor hits (distance, point, normal), range, sky, the blockout desk, targets (nearest wins, walls block, removal), spread sampling (inside the cone, fills it, straight up, reproducible), aim conventions | `weapons.spec`: shots hit the desk face |
+| **Bare Hands** | `weapons/melee/MeleeWeapon.test.ts`: no ammo, no reload, reach, cooldown | `weapons.spec`: V quick melee, Fire with melee held |
+| **Loadout and rules** | `weapons/WeaponManager.test.ts` (42 tests): starting loadout, reset, equip 1/2/3, locked and empty Secondary refused, raise time blocks firing, switching cancels reload, wheel cycles firearms only, semi trigger (one per press, rate cap, buffer, stale press), auto trigger, dry fire and auto reload, no fire during reload, unlimited reserve over many reloads, quick melee (stays on the Pistol, blocks firing, cooldown, cancels reload, always available), melee held + Fire, sprint lockout, acquire (locked, replace with no refund, empty category first, does not fit, melee never empty, future Knife as data, unknown ids), unlock once, determinism | `weapons.spec`: start loadout, 1/3, 2 refused while locked, wheel, V, pointer lock and resume click |
+| **Recoil** | `player/PlayerLook.test.ts`: kick, recovery never past the aim, pulling down counts, looking up does not, pitch clamp, reset | `weapons.spec`: recoil settles after firing |
+| **Weapons in the loop** | `weapons/WeaponController.test.ts`; `weapons/weapons.integration.test.ts`: nothing outside a run, shots from the eye hit the tower, recoil through the look, magazine/R/dry fire with real mouse and keys, 1/2/3/wheel/V, firing cancels sprint, fresh loadout per run, reproducible shots | `weapons.spec`: all of the above with real input; muzzle flash and impact markers |
 
 **Every end-to-end test also asserts a clean page:** no console errors or warnings, page errors, failed requests or HTTP errors. The only exceptions are ones a test deliberately provokes, and those are listed in the test.
 
@@ -89,6 +96,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 - **Tests must be able to fail.** For important behaviour, plant a realistic bug and confirm a test goes red.
   - Phases 0.2 and 0.4: 16 of 16 unit-level mutations were caught.
   - Phase 0.6: a planted e2e bug (refusal feedback removed) failed in both projects.
+  - Phase 2: 17 of 17 weapon mutations caught (shots not spending ammo, fire-rate remainder dropped, firing while reloading, reload ignoring a finite reserve, no falloff, crouch spread inverted, locked Secondary reported as empty, semi-auto firing while held, switching keeping the reload, quick melee switching to melee, wheel cycling into melee, acquiring into a locked Secondary, no auto reload, firing during quick melee, recoil never applied, recovery overshooting the aim, walls not blocking targets).
   - Phase 1: 9 of 9 movement mutations caught (no sub-steps, no headroom check, no diagonal normalisation, sprint in any direction, no coyote time, no jump buffer, sliding on slopes, no ground snap, no kill plane). The first run caught 5; the 4 survivors exposed weak test setups, which were fixed.
   - Mutations are always reverted.
 - **Naming.** Unit/integration files are `*.test.ts` (Vitest); end-to-end files are `*.spec.ts` (Playwright). They never overlap.
@@ -147,6 +155,16 @@ Record the date, browser version and results in PROGRESS.md.
 - [ ] **Head bob:** subtle while walking, a little stronger sprinting, none when standing still or in the air.
 - [ ] **Collision:** no wall, corner or doorway lets you through or snags you; sliding along walls is smooth; the stairs and ramps are smooth to walk up and down; you never fall through the floor (`tls.player().respawns` stays 0).
 - [ ] **Whole map:** walk the loop from the yard through the control room, crawl duct (crouch), service corridor, generator hall, west annex, stairs, catwalk (and drop through the railing gap), ramp, loading bay, dock and back.
+
+### Weapons (Phase 2)
+- [ ] **Start:** a run starts holding the Pistol (`12 / ∞`), with Bare Hands and a locked Secondary (dev: `tls.weapons()`).
+- [ ] **Pistol feel:** one shot per click, no faster than ~6/s however fast you click; a click just before the Pistol is ready still fires; the kick is visible but settles before the next aimed shot.
+- [ ] **Reload:** R reloads (≈1.3 s, the gun dips, the HUD says RELOADING); clicking during a reload does nothing; an empty magazine clicks and reloads by itself.
+- [ ] **Switching:** 3 holds the fists (left click punches), 1 returns to the Pistol, 2 does nothing (Secondary locked), the wheel returns from fists to the Pistol.
+- [ ] **Quick melee:** V punches without putting the Pistol away, from any state (also mid-reload, which cancels it).
+- [ ] **Shots:** impact marks appear where shots hit walls, floors and crates; the muzzle flash is visible at 60 Hz and above.
+- [ ] **Sprint:** shooting while sprinting stops the sprint briefly.
+- [ ] **Resume:** after Esc, the click that resumes does not fire.
 
 ### Resilience
 - [ ] **Context loss** (dev, real GPU): `tls.loseContext()` shows "Graphics paused"; `tls.restoreContext()` restores the scene and "Paused" → click resumes.
@@ -218,6 +236,19 @@ Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *r
 | 1366×768 | High | 12.0 | 0.93 / 2.0 / 3.3 | 4.4 | 11 | 1,124 | 4 |
 | 1280×720 | Ultra | 10.1 | 0.94 / 1.7 / 3.8 | 4.2 | 11 | 1,124 | 4 |
 
+**Phase 2 baseline (2026-09-26, weapons, no enemies):**
+
+| Resolution | Preset | Firing | FPS (SwiftShader) | Our frame cost avg / p95 / max (ms) | Draw calls | Triangles | Programs |
+|---|---|---|---|---|---|---|---|
+| 1920×1080 | High | no | 5.7 | 1.18 / 2.5 / 2.8 | 13 | 1,148 | 6 |
+| 1920×1080 | High | yes, ~6 shots/s, 27 impact markers | 5.6 | 1.31 / 3.3 / 4.6 | 41 | 1,204 | 6 |
+| 1920×1080 | Low | yes, 32 markers | 7.0 | 1.07 / 2.0 / 2.5 | 46 | 1,214 | 6 |
+| 1366×768 | High | yes, 32 markers | 10.2 | 0.98 / 1.5 / 3.7 | 46 | 1,214 | 6 |
+
+- **Weapon simulation (Node, headless):** 0.45 µs per step idle, 2.7 µs per step firing every step, 0.34 µs quick melee; one hitscan ray against the blockout ≈ 1 µs.
+- **Reading:** firing adds ~0.1 ms to our frame cost. The view model adds 2 draw calls; each impact marker adds one (32 at most). All far inside the budgets; nothing was optimised.
+
+**Phase 1 details:**
 - **Player simulation (Node, headless):** 5.0 µs per step standing, 6.0 µs sprinting in the open, 10.3 µs pushing into a wall. At 60 steps/s that is under 0.1 % of a frame. Level collision: 480 triangles; world build ≈ 50 ms once at startup (including JIT warm-up).
 - **Reading:** our CPU work is ~1 ms per frame. SwiftShader's CPU rasteriser is the entire bottleneck (7 FPS at 1080p), so these rates say nothing about the GTX 750. The blockout is far inside every budget (draw calls 11 of 250).
 - **Dropped time:** below ~12 FPS a frame needs more than 5 steps, so simulated time runs slower than real time by design (ARCHITECTURE §3). This is why e2e movement checks read simulated state instead of wall-clock distances.

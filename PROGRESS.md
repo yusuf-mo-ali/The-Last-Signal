@@ -10,9 +10,9 @@
 
 ## Current Phase
 
-**Phase 1: First Person Foundation. Complete** (plan §8). The player can enter the blockout map and walk, strafe, sprint, crouch, jump and look around, colliding correctly with the level; see "Phase 1 acceptance review" below. Phase 2 (weapon framework) has not started and is awaiting approval.
+**Phase 2: Weapon Framework. Complete** (plan §9, D-040). The player starts with Bare Hands, the Pistol and a locked Secondary; fires, reloads, switches (1 / 3; 2 refused while locked; wheel), quick-melees (V), and shots hit the level with recoil through the look. See "Phase 2 acceptance review" below. Phase 3 (combat) has not started and is awaiting approval.
 
-- Phase 0 (Project Foundation) is complete: see "Phase 0 acceptance review".
+- Phase 1 (First Person Foundation) and Phase 0 (Project Foundation) are complete: see their acceptance reviews.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -144,9 +144,28 @@
   - Also answers the melee part of O-6 (always-available quick melee, default key V) and part of O-1 (what Scrap buys). New open question O-13 (terminal presentation, Secondary unlock condition).
   - Documented in GAME_DESIGN (§4.1, §5, §11, §14), ARCHITECTURE (§5, §6, §7.3), DECISIONS (D-039, D-011, open questions) and README (controls). No code changes.
 
+- [x] **Phase 2: Weapon Framework** (plan §9, D-040, loadout per D-039).
+  - **Data** (`src/config/weapons.ts`): loadout categories, weapon definitions (firearm / melee, the categories each fits), Pistol and Bare Hands values, `STARTING_LOADOUT`, `WEAPON_RULES`, damage falloff. Values and reasoning in the new **BALANCING.md**.
+  - **Framework** (`src/weapons/`): the plan's `Weapon` interface; `Firearm` (fire timing with exact remainders, fire modes, magazine, reserve, reload, spread, recoil, pellets, falloff) and `MeleeWeapon` (Bare Hands placeholder), both driven by data; `timing.ts` for step-exact timers.
+  - **Loadout** (`WeaponManager`): named Melee / Primary / Secondary; `equip`, `cycle` (firearms only), `quickMelee`, `reload`, `acquire` (empty fitting category first, replacement without refund), `unlockSecondary`, `refillAmmo`, `setInfiniteAmmo`; trigger buffer, dry fire and auto reload, no firing while switching / reloading / quick-meleeing; sprint cancelled by attacks; typed events.
+  - **Hitscan** (`hitscan.ts`): level hits as plain data (distance, point, normal), pluggable `HitscanTarget`s for enemies (walls block them), seeded uniform spread, aim direction.
+  - **Recoil** through `PlayerLook` (`addRecoil`, `recoverRecoil`, `resetRecoil`): only the kick settles back; pulling down counts as recovery.
+  - **Input**: `weapon1/2/3` renamed to `equipPrimary` / `equipSecondary` / `equipMelee`; `WeaponController` maps actions to a `WeaponInput`; `WeaponSystem` runs after the player on the fixed step.
+  - **Presentation**: `WeaponView` (blockout pistol and fists, reload dip, kick, punch, muzzle flash, 32 reused impact markers) and a placeholder `WeaponHud` (crosshair, weapon name, `12 / ∞` / RELOADING).
+  - **Debug (dev only)**: `tls.weapons()`, `giveAmmo()` and `setInfiniteAmmo()` (no longer stubs), `giveWeapon(id, category?)`, `unlockSecondary()`; overlay weapon line.
+  - Verified:
+    - 98 new unit and integration tests (623 in the suite), including a headless run through the real loop and input stack, and reproducible shots from the seed.
+    - 17 of 17 planted weapon bugs caught (TESTING.md §4).
+    - Two real defects found and fixed while testing: an idle weapon's cooldown banked one step of readiness (7 shots/s instead of 6), and step-aligned timers kept a floating-point residue (one extra step). The E2E suite also caught the muzzle flash never being drawn at low frame rates (the flash was shorter than one slow frame).
+    - `npm run check` passes; `npm run build` has no warnings (game 66.6 kB, 22.0 kB gzipped); no debug code in `dist/`.
+    - `npm run test:e2e`: 59 passed, 23 skipped by design. New `weapons.spec`: start loadout, firing with the mouse (magazine, hits on the desk, muzzle flash, impact markers, recoil settles), R reload and no firing mid-reload, dry fire + auto reload, 1 / 3 / 2 (refused), wheel cycling, V quick melee, pointer lock and the resume click; the HUD test also runs in production. Phase 0 and Phase 1 specs all still pass.
+    - Browser screenshots of the Pistol, reload, fists and quick melee inspected; the view model was scaled down after the first look.
+    - Performance baseline (TESTING.md §7.4): weapon step ≤ 2.7 µs even firing every step; a hitscan ray ≈ 1 µs; frame cost +0.1 ms while firing; ≤ 46 draw calls with all impact markers.
+  - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
+
 ## Active Task
 
-None. Phase 1 is complete and O-2 is resolved; waiting for approval to start **Phase 2**.
+None. Phase 2 is complete; waiting for approval to start **Phase 3**.
 
 ## Known Bugs
 
@@ -154,19 +173,20 @@ None.
 
 ## Next Task
 
-**Phase 2: Weapon Framework (plan §9).** Suggested steps, each a small commit:
-1. **Weapon data and framework** (D-011): the `Weapon` interface and config for the Pistol (M1) from `src/config/weapons.ts`; fire modes, fire rate with fractional cooldown remainders (D-004), magazine and reload state machine, ammo. Weapon definitions declare their kind (firearm / melee) and the loadout categories they fit. Start `BALANCING.md`.
-2. **Loadout** (D-039): `Loadout` with named Melee, Primary and Secondary categories; `WeaponManager` with `equip`, `cycle`, `quickMelee`, `acquire` and `unlockSecondary`; `STARTING_LOADOUT` = Bare Hands, Pistol, Secondary locked. Bare Hands as a basic melee placeholder (a short-range swing against the level; damage against enemies arrives with combat). No Knife, no Secondary weapons, no shop.
-3. **Hitscan** against the level (`CollisionWorld.raycast`) with spread and a range; impact markers for debugging. Enemy hitbox rigs arrive with Phase 4 (D-007).
-4. **Recoil and view kick** applied through `PlayerLook` (so aim and camera stay one source of truth), plus sprint lowering the weapon and firing cancelling sprint (GAME_DESIGN §4.2).
-5. **Weapon view model** (blockout), fire/reload/switch input via the step `ActionMap`: `fire`, `aim`, `reload`, `equipPrimary` (1), `equipSecondary` (2, refused while locked), `equipMelee` (3), wheel cycling, quick `melee` (V). The `weapon1–3` actions are renamed accordingly.
-6. **Verify:** unit tests (fire timing at any frame rate, reload, ammo, spread determinism with `Rng`, loadout rules: locked Secondary, melee always available, replacement), headless integration, e2e firing and switching with real mouse buttons and keys; `giveAmmo` / `setInfiniteAmmo` debug commands.
+**Phase 3: Combat System (plan §10).** There are no enemies until Phase 4, so combat is built and tested against **training targets** that use the same hitbox-rig format zombies will (D-007). Suggested steps, each a small commit:
+1. **Hitbox rigs** (`combat/` or `enemies/`): analytic spheres/capsules per damage zone (HEAD, TORSO, ARM_LEFT/RIGHT, LEG_LEFT/RIGHT), registered as `HitscanTarget`s; zone multipliers from `config/enemies.ts` (plan §10: head 2.5×, torso 1.0×, arms 0.65×, legs 0.5×).
+2. **`computeDamage()`** (pure): base damage, falloff (already per pellet), zone multiplier (the weapon's headshot multiplier for HEAD), player modifiers (hook), armor and resistances (hooks); critical damage.
+3. **Health and death** for damageable things; events `enemy:damaged` / `enemy:killed`; melee damage for Bare Hands through the same path.
+4. **Feedback:** hit markers, damage numbers (presentation), a hit reaction hook, impact variants (level vs body).
+5. **Ammo drops** as a pickup placeholder, and the debug target dummy command.
+6. **Verify:** unit tests for damage (zones, falloff, headshots, melee), integration against dummies, e2e shooting a dummy.
 
 **Needed from you:**
-- Approval to start Phase 2.
-- Optionally, O-13 (Supply Terminal presentation, Secondary unlock condition). It is not needed for Phase 2; the defaults apply otherwise.
-- Run the Phase 1 performance measurement on the reference machine (TESTING.md §7.2, Phase 1 scenario, `?quality=low`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
-- A manual QA pass of TESTING.md §6 in real browsers, especially the new "Movement and camera" section: feel can only be judged by hand.
+- Approval to start Phase 3.
+- Confirm training dummies as the Phase 3 test target (the plan puts zombies in Phase 4).
+- A manual QA pass of TESTING.md §6 in real browsers, including the new "Weapons" section: feel can only be judged by hand.
+- Run the performance measurement on the reference machine (TESTING.md §7.2), and confirm the GTX 750's VRAM (1 GB or 2 GB).
+- Optionally, O-13 (Supply Terminal presentation, Secondary unlock condition); the defaults apply otherwise.
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -184,6 +204,12 @@ None.
   - Level tags, spawn points, objective nodes, nav grid and light fixtures (D-013) arrive with the phases that use them.
   - A graphics settings menu, persistence and auto-detection (D-037 §8).
   - Small per-step allocations in the octree query and intent object (ARCHITECTURE §8): revisit only with profiling evidence.
+- **From 2:**
+  - The Assault Rifle and Shotgun (Primary purchases, data only), the Knife and Secondary weapons (D-039, D-040).
+  - The Supply Terminal, prices and Scrap (progression / economy phases, O-13).
+  - The loadout strip in the HUD, aim down sights (right mouse), weapon lowering while sprinting, weapon audio.
+  - Bare Hands hit arcs and animation-timed impacts (combat).
+  - Impact markers as one `InstancedMesh` if draw calls ever matter (they do not now).
 
 ## Blocked Tasks
 
@@ -193,7 +219,7 @@ Nothing is blocked now. These later tasks need decisions (full list in `DECISION
 |---|---|---|
 | Supply Terminal presentation; Secondary unlock condition | O-13 | Phase 9 / Phase 14 |
 | Technician upgrade | O-6 (no utility/trap system defined) | Phase 9 |
-| Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU. The Phase 1 map and `?quality=low` are ready | Now (Phase 1 baseline), then each phase |
+| Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU. The map, weapons and `?quality=low` are ready | Now, then each phase |
 | v1 zombie roster | O-3 | Phase 5 |
 | v1 mutation set; intro waves without mutations | O-4, O-7 | Phase 7 |
 | XP/Scrap sinks (meta-progression screen) | O-1 | Phase 9 |
@@ -262,6 +288,28 @@ Reviewed 2026-09-25 against the code on this branch.
 
 ---
 
+## Phase 2 acceptance review (plan §9)
+
+Reviewed 2026-09-26 against the code on this branch, with the scope the project owner set for Phase 2 (Pistol only; loadout per D-039).
+
+| Plan §9 / Phase 2 requirement | Status | Evidence |
+|---|---|---|
+| Reusable weapon architecture, no duplicated weapon logic | Done | One `Firearm` and one `MeleeWeapon` class driven by definitions; automatic fire, pellets and a Knife-like melee work as data (tests with test definitions) |
+| Base properties: damage, fireRate, magazineSize, ammo, reloadTime, range, recoil, spread, headshotMultiplier | Done | `FirearmDefinition`; each tested (`Firearm.test.ts`, `gameplayConfig.test.ts`) |
+| Interface: fire, reload, canFire, getAmmo, getState | Done | `Weapon` in `weapons/types.ts`, implemented by both classes |
+| Pistol | Done | Semi-auto, 12 rounds, unlimited reserve, 1.3 s reload, spread, recoil, falloff; unit, integration and e2e tests |
+| Assault Rifle, Shotgun | Deferred by scope (D-040) | Future Primary purchases (D-039); the framework supports them as data |
+| Loadout: Melee / Primary / Secondary, equip, cycle, quickMelee, acquire, unlockSecondary | Done | `WeaponManager`; 42 unit tests; e2e with real keys, wheel and mouse |
+| Hitscan against the level, clean hit data | Done | `Hitscan`; plain-data results; pluggable targets for enemies |
+| Recoil through `PlayerLook`, data-driven, deterministic | Done | `PlayerLook` recoil methods; seeded `Rng`; tests |
+| Input renamed; 1 / 2 / 3 / wheel / V | Done | `config/input.ts`, `WeaponController`; tests |
+| Bare Hands placeholder | Done | `MeleeWeapon`; quick melee and held melee |
+| Ammo / reload rules | Done | Reload timing, magazine, reserve, dry fire, auto reload, no firing mid-reload |
+
+**Open items that do not block Phase 3:** manual feel check in real browsers; reference-machine measurement; Vercel preview blocked by the container's network policy; no CI yet.
+
+---
+
 ## Phase 1 acceptance review (plan §8)
 
 Reviewed 2026-09-25 against the code on this branch.
@@ -298,7 +346,7 @@ Reviewed 2026-09-25 against the code on this branch.
 
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
-| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–1 complete |
+| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–2 complete |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | Not started |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
@@ -317,4 +365,4 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
 | `TESTING.md` | Created (Phase 0.6), updated for Phase 1 |
-| `BALANCING.md` | Planned for Phase 2, when the first tunable values exist in `src/config/` |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log |

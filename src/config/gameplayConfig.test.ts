@@ -15,7 +15,15 @@ import { MUTATION_IDS, MUTATIONS } from './mutations';
 import { ENVIRONMENT_STATES, SIGNAL_PHASES } from './signal';
 import { UPGRADE_CHOICES_PER_OFFER, UPGRADE_IDS, UPGRADE_TAGS, UPGRADES } from './upgrades';
 import { DIFFICULTY_TIERS, FINAL_WAVE, MUTATION_FREE_WAVES } from './waves';
-import { WEAPON_IDS, WEAPON_ROLES } from './weapons';
+import {
+  LOADOUT_CATEGORIES,
+  PLANNED_WEAPON_IDS,
+  STARTING_LOADOUT,
+  WEAPON_IDS,
+  WEAPON_ROLES,
+  WEAPON_RULES,
+  WEAPONS,
+} from './weapons';
 
 const unique = (items: readonly string[]) => new Set(items).size === items.length;
 
@@ -53,9 +61,61 @@ describe('gameplay config skeletons (plan §31)', () => {
     }
   });
 
-  it('weapons: the three initial weapons (plan §42) with design roles', () => {
-    expect(WEAPON_IDS).toEqual(['pistol', 'assaultRifle', 'shotgun']);
-    expect(Object.keys(WEAPON_ROLES).sort()).toEqual([...WEAPON_IDS].sort());
+  it('weapons: the plan §9 weapons all have roles; Phase 2 implements Bare Hands and the Pistol', () => {
+    expect(WEAPON_IDS).toEqual(['bareHands', 'pistol']);
+    for (const id of ['pistol', 'assaultRifle', 'shotgun']) {
+      expect(WEAPON_ROLES).toHaveProperty(id);
+    }
+    expect(Object.keys(WEAPON_ROLES).sort()).toEqual([...WEAPON_IDS, ...PLANNED_WEAPON_IDS].sort());
+    expect(unique([...WEAPON_IDS, ...PLANNED_WEAPON_IDS])).toBe(true);
+  });
+
+  it('weapons: definitions match their ids, kinds and loadout categories (D-039)', () => {
+    expect(LOADOUT_CATEGORIES).toEqual(['primary', 'secondary', 'melee']);
+    for (const id of WEAPON_IDS) {
+      const def = WEAPONS[id];
+      expect(def.id).toBe(id);
+      expect(def.fits.length).toBeGreaterThan(0);
+      if (def.kind === 'melee') {
+        expect(def.fits).toEqual(['melee']);
+      } else {
+        expect(def.fits).not.toContain('melee');
+      }
+      expect(WEAPON_ROLES[id].category).toBe(def.fits[0]);
+    }
+    expect(WEAPONS.pistol.fits).toEqual(['primary', 'secondary']);
+    expect(STARTING_LOADOUT).toEqual({
+      melee: 'bareHands',
+      primary: 'pistol',
+      secondary: 'locked',
+    });
+    expect(WEAPON_RULES.secondaryUnlockAfterWave).toBe(5);
+  });
+
+  it('weapons: the Pistol has sane Pass-1 values (GAME_DESIGN §5)', () => {
+    const p = WEAPONS.pistol;
+    expect(p.fireMode).toBe('semi');
+    expect(p.reserveAmmo).toBe(Infinity); // D-039: unlimited reserve
+    expect(p.pellets).toBe(1);
+    expect(p.fireRate).toBeGreaterThan(0);
+    expect(p.fireRate).toBeLessThanOrEqual(60);
+    expect(p.magazineSize).toBeGreaterThanOrEqual(6);
+    expect(p.falloff.start).toBeLessThan(p.falloff.end);
+    expect(p.falloff.end).toBeLessThanOrEqual(p.range);
+    expect(p.falloff.minFactor).toBeGreaterThan(0);
+    expect(p.falloff.minFactor).toBeLessThanOrEqual(1);
+    expect(p.spread.crouchMultiplier).toBeLessThan(1);
+    expect(p.spread.movingMultiplier).toBeGreaterThan(1);
+    expect(p.spread.airborneMultiplier).toBeGreaterThan(p.spread.movingMultiplier);
+    expect(p.recoil.pitchVarianceDeg).toBeLessThan(p.recoil.pitchDeg);
+    // The kick settles back within one shot interval: the Pistol stays a precision weapon.
+    expect(
+      (p.recoil.pitchDeg + p.recoil.pitchVarianceDeg) / p.recoil.recoveryDegPerSecond,
+    ).toBeLessThanOrEqual(1 / p.fireRate + 1e-9);
+    // Time-to-kill intent against a 100-health Walker: 4–5 body shots, 1–2 headshots.
+    expect(Math.ceil(100 / p.damage)).toBeGreaterThanOrEqual(4);
+    expect(Math.ceil(100 / p.damage)).toBeLessThanOrEqual(5);
+    expect(Math.ceil(100 / (p.damage * p.headshotMultiplier))).toBeLessThanOrEqual(2);
   });
 
   it('enemies: plan damage zones and multipliers, five archetypes, four in v1', () => {

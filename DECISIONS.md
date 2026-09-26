@@ -53,6 +53,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-037 | Performance targets, reference hardware and graphics quality scaling (resolves O-9) | Accepted |
 | D-038 | Phase 1 first-person foundation: movement model, collision, look, blockout, run entry | Accepted |
 | D-039 | Loadout of Melee, Primary and Secondary; weapons bought with Scrap at the Supply Terminal (resolves O-2) | Accepted |
+| D-040 | Phase 2 weapon framework: timing, trigger, reload, hitscan, recoil, melee placeholder, events | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -751,6 +752,41 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 - GAME_DESIGN §4.1 (controls), §5 (loadout, weapons, acquisition), §11 (Scrap), §14 (HUD loadout strip) and ARCHITECTURE §5 and §7.3 are updated.
 - New open question O-13: how the Supply Terminal is presented, and what unlocks the Secondary slot.
 - The Supply Terminal itself, prices and stock arrive with the progression / economy phases (plan Phases 9 and 14) and the UI phase; they are logged in BALANCING.md.
+
+---
+
+## D-040 — Phase 2 weapon framework: timing, trigger, reload, hitscan, recoil, melee placeholder, events
+**Status:** Accepted · **Date:** 2026-09-26 · **Implements:** plan §9 (Phase 2), D-004, D-007, D-011, D-014, D-039
+
+**Context.** Phase 2 builds the weapon framework around the approved loadout (D-039), with the Pistol as the only firearm and Bare Hands as a melee placeholder, and no enemies yet.
+
+**Decision.**
+
+1. **One interface, two implementations, all data.** `Weapon` is the plan's interface (`fire, reload, canFire, getAmmo, getState`, plus `update` and `cancelReload`). `Firearm` implements every gun from a `FirearmDefinition` (fire mode, pellets, spread, recoil, falloff, ammo); `MeleeWeapon` implements every melee weapon from a `MeleeDefinition`. A new weapon, including an automatic rifle, a shotgun or a Knife, is a config entry (tested with test definitions).
+2. **Timing on the fixed step.** A shot cooldown keeps the fractional remainder of the step in which the weapon becomes ready, so the average fire rate is exact even when the interval is not a whole number of steps. A weapon that was already ready banks nothing, so it never fires early or bursts. At most one shot per step (fire rates up to 60/s). Timers treat a floating-point residue below 1e-9 s as finished, so step-aligned times are exact.
+3. **Trigger rules** live in `WeaponManager`, not in the weapons:
+   - semi-automatic and pump: one shot per press; a press up to 0.12 s before the weapon is ready still fires (buffer), older presses are dropped;
+   - automatic: fires while held;
+   - no firing while switching (the raised weapon's `equipTime`), during a quick melee, or during a reload (a press mid-reload is not queued);
+   - an empty magazine clicks (`dryFire`) and then reloads automatically.
+4. **Reload:** takes `reloadTime`, moves `min(missing, reserve)` rounds at the end, is refused with a full magazine or an empty reserve, and is cancelled by switching away or by a quick melee. The Pistol's reserve is `Infinity` (D-039).
+5. **Hitscan with pluggable targets.** `Hitscan.cast` returns the nearest of the level (`CollisionWorld.raycast`) and any registered `HitscanTarget`. Enemies (Phase 4) register as targets with their hitbox rigs, and walls block them automatically. Results are plain data (`kind`, `distance`, `point`, `normal` or `targetId`/`zone`), with per-pellet damage after falloff and the weapon's headshot multiplier, ready for combat (Phase 3).
+6. **Spread** is a cone around the aim, sampled uniformly over its cross-section from the run's seeded `Rng` (D-014), widened by movement (up to walking speed) and by being airborne, tightened by crouching.
+7. **Recoil through `PlayerLook`.** A shot kicks yaw and pitch (random parts from the seeded `Rng`); only the upward kick is remembered and settles back at the weapon's recovery rate. Pulling the mouse down counts as recovery, and the player's own aim is never undone. Aim and camera therefore never disagree, and recoil never touches render code.
+8. **Loadout rules (D-039) in code:** named categories; 1 / 2 / 3 = `equipPrimary` / `equipSecondary` / `equipMelee`; the mouse wheel cycles **firearms only** (from melee it returns to a firearm; a locked or empty Secondary is skipped); V = quick melee without switching; with melee held, Fire swings it. `acquire` fills an empty fitting category before replacing one; replacing gives a fresh weapon, with no refund.
+9. **Firing cancels sprint:** any attack blocks sprint for 0.35 s (GAME_DESIGN §4.2).
+10. **Events:** `WeaponManager.events` (a typed `EventBus`) announces shots, swings, dry fire, reload start/end/cancel, equips, refusals, acquisitions and the Secondary unlock. Recoil, the view model, debug tools and tests use them; combat, audio, the adaptive profile and analytics will too.
+11. **Bare Hands placeholder:** a swing is an instant ray of 1.6 m along the aim that reports what it touched, with a 0.5 s cooldown. Hit arcs, animation-timed impact and damage to enemies come with combat.
+12. **Presentation (blockout):** `WeaponView` draws a view model (pistol blocks, fists), a muzzle flash (unlit additive quad, no light, D-022) and up to 32 reused impact markers. `WeaponHud` is a placeholder crosshair and ammo readout until the UI phase; the loadout strip (GAME_DESIGN §14) is not built yet.
+
+**Deviation from the plan.** Plan §9 lists the Pistol, Assault Rifle and Shotgun as the initial weapons. As the project owner scoped Phase 2, only the Pistol ships now; the Assault Rifle and Shotgun are Primary weapons bought later at the Supply Terminal (D-039). The framework supports both (automatic fire and pellets are tested with test definitions), so adding them needs data only.
+
+**Why.** Keeping trigger rules in the manager and timing in the weapons makes each weapon a pure function of its data and the step, which is what makes behaviour identical at any frame rate and testable in Node. Pluggable hitscan targets let combat add enemies without the weapon code changing.
+
+**Consequences.**
+- Bare Hands, the Pistol and the rules are in BALANCING.md (created in this phase).
+- Debug tools gain `weapons`, `giveAmmo`, `setInfiniteAmmo`, `giveWeapon` and `unlockSecondary`.
+- Open for later: aim down sights (right mouse), weapon sway, audio, per-weapon view models, damage to enemies.
 
 ---
 

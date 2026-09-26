@@ -83,8 +83,8 @@ Plan §3 controls are kept. Controls must be rebindable later, so bindings live 
 | Jump | Space | |
 | Equip Primary | 1 | Loadout §5.1 (D-039) |
 | Equip Secondary | 2 | Does nothing (brief "locked" feedback) until the Secondary slot is unlocked |
-| Equip melee weapon | 3 [Proposed] | Holds the melee weapon as the active weapon: Fire then attacks with it |
-| Cycle weapons | Mouse wheel | Cycles through the *available* loadout entries only (a locked or empty slot is skipped) |
+| Equip melee weapon | 3 | Holds the melee weapon as the active weapon: Fire then attacks with it |
+| Cycle weapons | Mouse wheel | Cycles the available **firearms** (Primary ↔ Secondary; a locked or empty one is skipped); from melee it returns to a firearm |
 | Pause | Esc | The game pauses when pointer lock is lost; the browser consumes this Esc press |
 | **Interact** | **E** [Proposed, O-6] | Signal objectives (hold to repair or activate) |
 | **Quick melee** | **V** (proposed default key) | **Always available** (D-039): a melee attack from whatever weapon is held, without switching away from it. Needed by Heavy Hands, the `meleeUsage` metric and the "Shotgun + Melee" build |
@@ -95,8 +95,8 @@ Plan §3 controls are kept. Controls must be rebindable later, so bindings live 
 - **No passive health regeneration [Proposed].** Healing comes from upgrades (Vampire, Second Wind), rare pickups, and a partial heal at wave completion. This keeps the Survival build meaningful.
 - **Movement intents** (Phase 1 values in `src/config/player.ts`, D-038; feel still to be confirmed by hand):
   - Walking is brisk: 5 m/s, full speed in 0.1 s, a stop in about 0.13 s.
-  - Sprint is 1.5× walk speed (7.5 m/s), forward only; it lowers the weapon and firing cancels it (Phase 2).
-  - Crouch is 0.5× walk speed, held on C; it lowers the eyes from 1.62 m to 0.95 m, fits under 1.25 m, and tightens weapon spread (Phase 2).
+  - Sprint is 1.5× walk speed (7.5 m/s), forward only; any shot or swing cancels it for 0.35 s (Phase 2). Lowering the weapon while sprinting is a later visual.
+  - Crouch is 0.5× walk speed, held on C; it lowers the eyes from 1.62 m to 0.95 m, fits under 1.25 m, and tightens weapon spread (× 0.6 for the Pistol, Phase 2).
   - A jump reaches 1.15 m: it clears low cover (up to ~1 m) and the loading dock, not a 1.6 m crate. Small forgiveness windows: 0.1 s coyote time, 0.12 s jump buffer.
   - Mouse look: 60° vertical FOV (about 90° horizontal at 16:9), pitch limited to ±89°, subtle head bob (3 cm) while moving on the ground only.
 - **Damage window [Proposed, D-029].** The player can only take damage during `WAVE_ACTIVE` and `BOSS`. This removes a whole class of edge cases, such as dying on the upgrade screen.
@@ -117,7 +117,7 @@ The loadout is modelled around **three named categories**, never as "weapon slot
 | **Primary** | **Pistol** | Assault Rifle, Shotgun; later e.g. an SMG | Holds one firearm. The Pistol is the initial firearm |
 | **Secondary** | **Locked** | Unlocked through progression / a milestone (O-13); then holds one firearm such as a secondary pistol, machine pistol or revolver | Exists in the data from the first run, but cannot be equipped while locked |
 
-- **Switching:** 1 equips the Primary, 2 the Secondary (once unlocked and filled), 3 holds the melee weapon [Proposed]; the mouse wheel cycles through what is available. Quick melee (V) works from any of them.
+- **Switching:** 1 equips the Primary, 2 the Secondary (once unlocked and filled), 3 holds the melee weapon; the mouse wheel cycles the available firearms. Quick melee (V) works from any of them.
 - **Each weapon declares the categories it fits.** Assault Rifle and Shotgun fit Primary; secondary pistols fit Secondary; a Knife fits Melee. The starter Pistol fits Primary *and* Secondary [Proposed], so once the Secondary slot unlocks the player can keep it as a sidearm.
 - **One weapon per category.** Acquiring a weapon for a category that is already filled replaces the weapon there [Proposed: no refund in v1; the Pistol stays cheap to buy back].
 - **No soft-locks.** Melee is always usable, so the player can always deal damage; the Pistol keeps unlimited reserve ammo [Proposed], and the Supply Terminal sells ammunition [Proposed].
@@ -134,6 +134,8 @@ The loadout is modelled around **three named categories**, never as "weapon slot
 | **Shotgun** | Primary | Close-range burst | Pump action, N pellets | Damage is spread across pellets. Devastating up close, but **weak against armor** (see §6) |
 | *Knife* (later) | Melee | Melee build | Melee swing | Bought or unlocked; faster and stronger than fists |
 | *SMG, secondary pistol, machine pistol, revolver* (later) | Primary / Secondary | Future content | — | Added as config entries; no new weapon code (D-011) |
+
+**Phase 2 (D-040):** the Pistol and Bare Hands are implemented; their values are in BALANCING.md. Bare Hands is a placeholder swing (a 1.6 m reach check with a 0.5 s cooldown); damage to enemies arrives with combat (Phase 3) and enemies (Phase 4). The Assault Rifle and Shotgun are future Primary purchases; the framework already supports automatic fire and pellets.
 
 **Time-to-kill intents**, wave 1 Walker:
 - Pistol: 1–2 headshots or 4–5 body shots.
@@ -421,7 +423,8 @@ Minimal. The player must understand the situation within one second (§22).
 ```
 
 - **Largest elements:** health (bottom left) and ammo with the current weapon (bottom right).
-- **Loadout strip** (small, beside the ammo): Primary, Secondary (a lock icon while locked) and Melee, with the active one highlighted (D-039).
+- **Loadout strip** (small, beside the ammo): Primary, Secondary (a lock icon while locked) and Melee, with the active one highlighted (D-039). Not built yet.
+- **Phase 2 placeholder:** a centre dot crosshair and the held weapon's name and ammunition (`12 / ∞`, `RELOADING`) until the UI phase.
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).

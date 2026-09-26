@@ -24,6 +24,13 @@ import { Renderer } from './render/Renderer';
 import { detectWebGL2 } from './render/webglSupport';
 import { LockPrompt } from './ui/LockPrompt';
 import { StatusScreen } from './ui/StatusScreen';
+import { WeaponHud } from './ui/WeaponHud';
+import { Rng } from './utils/Rng';
+import { Hitscan } from './weapons/hitscan';
+import { WeaponController } from './weapons/WeaponController';
+import { WeaponManager } from './weapons/WeaponManager';
+import { WeaponSystem } from './weapons/WeaponSystem';
+import { WeaponView } from './weapons/WeaponView';
 import { FACILITY, FACILITY_BEACON_POSITION } from './world/levels/facility';
 import { World } from './world/World';
 import { WorldView } from './world/WorldView';
@@ -109,19 +116,38 @@ function boot(app: HTMLElement): () => void {
   const stepActions = new ActionMap(stepReader, DEFAULT_BINDINGS);
   const frameActions = new ActionMap(frameReader, DEFAULT_BINDINGS);
 
-  // ---- Player (D-038) ----------------------------------------------------------------------
+  // ---- Player (D-038) and weapons (D-039, D-040) -------------------------------------------
   // Movement runs in the fixed step, only while a run is being played. Look runs every frame.
+  // Weapons step after the player, so shots leave from this step's position.
+  const weapons = new WeaponManager();
   const controller = new PlayerController(stepActions);
   const player = new Player({
     world: world.collision,
     level: FACILITY,
-    intent: () => controller.read(),
+    intent: () => {
+      const intent = controller.read();
+      // Firing cancels sprint (GAME_DESIGN §4.2).
+      return weapons.blocksSprint && intent.sprint ? { ...intent, sprint: false } : intent;
+    },
     active: () => game.state.isIn('PLAYING'),
   });
   game.addSystem(player);
+  const weaponController = new WeaponController(stepActions);
+  const weaponSystem = new WeaponSystem({
+    manager: weapons,
+    player,
+    hitscan: new Hitscan(world.collision),
+    rng: new Rng(Date.now()), // D-014: seeded; one stream for spread and recoil
+    input: () => weaponController.read(),
+    active: () => game.state.isIn('PLAYING'),
+  });
+  game.addSystem(weaponSystem);
   const camera = createCamera();
   const cameraController = new CameraController(camera, player, ENGINE_CONFIG.view);
   cameraController.update(0, 0);
+  view.scene.add(camera); // the weapon view model is a child of the camera
+  const weaponView = new WeaponView(view.scene, camera, weapons);
+  const hud = new WeaponHud(app);
   view.prewarm(camera);
 
   /** Applies view settings (FOV, sensitivity, invert-Y, head bob) to the camera and the look. */
@@ -137,8 +163,9 @@ function boot(app: HTMLElement): () => void {
 
   cleanups.push(
     game.state.onEnter('PLAYING', () => {
-      // A new run (not a resume): back to the spawn point.
+      // A new run (not a resume): back to the spawn point, with the starting loadout.
       player.respawn();
+      weapons.reset();
       cameraController.bob.reset();
     }),
   );
@@ -210,8 +237,16 @@ function boot(app: HTMLElement): () => void {
 
   game.setPresentation({
     render: (alpha, frameDt) => {
-      // Simulated time only: the head bob holds still while paused.
-      cameraController.update(alpha, frameDt * game.time.scale);
+      // Simulated time only: the head bob and weapon animations hold still while paused.
+      const simDt = frameDt * game.time.scale;
+      cameraController.update(alpha, simDt);
+      weaponView.update(simDt);
+      const held = weapons.activeWeapon;
+      hud.update({
+        visible: pointerLock.isLocked && game.state.isIn('PLAYING'),
+        name: held.definition.name,
+        status: held.getState(),
+      });
       view.render(alpha, camera);
     },
   });
@@ -233,6 +268,7 @@ function boot(app: HTMLElement): () => void {
         errors,
         container: app,
         player,
+        weapons,
         applyView,
         getView: () => cameraController.getSettings(),
         extras: {
@@ -244,6 +280,9 @@ function boot(app: HTMLElement): () => void {
           prompt,
           status,
           view,
+          weaponSystem,
+          weaponView,
+          hud,
         },
       }).dispose;
     });
@@ -259,6 +298,9 @@ function boot(app: HTMLElement): () => void {
     browserInput.dispose();
     pointerLock.exit();
     pointerLock.dispose();
+    weaponSystem.dispose();
+    weaponView.dispose();
+    hud.dispose();
     view.dispose();
     renderer.dispose();
   });

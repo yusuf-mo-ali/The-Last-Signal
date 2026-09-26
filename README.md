@@ -2,7 +2,7 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 1 (first-person foundation) complete.** You can enter a grey-box prototype map and walk, strafe, sprint, crouch, jump and look around with full collision. There are no weapons or zombies yet: Phase 2 (weapon framework) is next.
+> **Status: Phase 2 (weapon framework) complete.** You can enter a grey-box prototype map, move with full collision, and shoot the Pistol (with reloads, recoil and impact marks), punch with Bare Hands and switch weapons. There are no zombies or damage yet: Phase 3 (combat) is next.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -26,7 +26,7 @@ You are trapped in a failing communications facility. Survive escalating zombie 
 | [`DECISIONS.md`](DECISIONS.md) | Decision log and open questions |
 | [`PROGRESS.md`](PROGRESS.md) | Current phase, completed and next tasks, blockers |
 | [`TESTING.md`](TESTING.md) | Test levels, how to run them, coverage, manual QA checklist |
-| `BALANCING.md` | Tuning log (created in Phase 2) |
+| [`BALANCING.md`](BALANCING.md) | Tuning values, their reasoning, and the change log |
 
 ## Tech stack (planned)
 
@@ -74,10 +74,11 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
   - `tls.state()` and `tls.stats()` report the current state and frame statistics.
   - `tls.player()` reports position, speed and movement state; `tls.teleportPlayer(x, y, z, yaw?)` and `tls.look(yaw, pitch?)` move and turn the player.
   - `tls.view({ fov: 75, sensitivity: 1.5, invertY: false, headBob: true })` changes view settings live.
+  - `tls.weapons()` shows the loadout and ammo; `tls.giveAmmo()`, `tls.setInfiniteAmmo(true)`, `tls.giveWeapon('pistol', 'secondary')` and `tls.unlockSecondary()` change it.
   - `tls.transition('LOADING')` requests a game state change.
   - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
   - `tls.throwError()` shows the error screen.
-- The plan's other gameplay commands (`giveAmmo`, `spawnEnemy`, `startWave`, …) are listed already. They report which phase will implement them.
+- The plan's other gameplay commands (`healPlayer`, `spawnEnemy`, `startWave`, …) are listed already. They report which phase will implement them.
 
 ## Controls
 
@@ -89,11 +90,12 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
 | Crouch | C, held (Ctrl available as a rebind) | Working |
 | Jump | Space | Working |
 | Pause | Esc | Working |
-| Fire / Aim | Left click / Right click | Phase 2 |
-| Reload | R | Phase 2 |
-| Primary / Secondary / Melee weapon | 1 / 2 / 3 (Secondary starts locked) | Phase 2 |
-| Cycle weapons | Mouse wheel | Phase 2 |
-| Quick melee (always available) | V (proposed default) | Phase 2 |
+| Fire | Left click | Working |
+| Aim down sights | Right click | Later phase |
+| Reload | R | Working |
+| Primary / Secondary / Melee weapon | 1 / 2 / 3 (Secondary starts locked) | Working |
+| Cycle firearms | Mouse wheel | Working |
+| Quick melee (always available) | V | Working |
 | Interact | E (proposed) | Later phases |
 
 Controls will be rebindable. Crouch defaults to C rather than Ctrl because browsers do not let pages block Ctrl+W, so crouch-walking with Ctrl would close the tab.

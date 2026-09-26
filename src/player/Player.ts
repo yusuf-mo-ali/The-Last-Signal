@@ -60,6 +60,7 @@ export class Player implements FixedUpdateSystem {
   respawn(): void {
     this.motor.reset();
     this.look.setAngles(this.spawnYaw, 0);
+    this.look.resetRecoil();
   }
 
   fixedUpdate(fixedDt: number): void {

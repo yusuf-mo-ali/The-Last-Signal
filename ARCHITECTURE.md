@@ -268,6 +268,8 @@ src/
 ├── player/                     Player, PlayerController, CameraController, PlayerHealth, PlayerMovement
 │                               (Phase 1: PlayerMotor is the plan's PlayerMovement; + PlayerLook, HeadBob)
 ├── weapons/                    Weapon, WeaponManager, hitscan/, projectile/, recoil/, ammo/, + melee/, + Loadout (D-039)
+│                               (Phase 2: types, Firearm, melee/MeleeWeapon, timing, hitscan, WeaponManager,
+│                               WeaponController, WeaponSystem, WeaponView; recoil lives in PlayerLook)
 ├── enemies/                    Enemy, EnemyManager, EnemySpawner, zombie/, ai/, damage/, + modifiers/
 ├── waves/                      WaveManager, WaveGenerator, WaveDifficulty, WaveMutation
 │ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
@@ -341,7 +343,7 @@ interface Loadout {
 
 - **`WeaponManager`** (in `weapons/`) owns the `Loadout` for one run and is the only code that changes it:
   - `equip(category)`: switch to Primary, Secondary or Melee (with a switch time); refused, with a "locked"/"empty" event, when the category cannot be used.
-  - `cycle(direction)`: the mouse wheel; skips locked and empty categories.
+  - `cycle(direction)`: the mouse wheel; steps through the **firearm** categories only, skipping a locked or empty one; from melee it returns to a firearm.
   - `quickMelee()`: a melee attack from any active weapon, without changing `active`. Melee is therefore always available.
   - `acquire(weaponId)`: puts a weapon into the category its definition allows (replacing what was there; Melee falls back to Bare Hands, never to nothing).
   - `unlockSecondary()`: moves Secondary from `locked` to `unlocked`.
@@ -349,10 +351,43 @@ interface Loadout {
 - **Input maps to categories, not numbers.** The Phase 0.4 actions `weapon1/2/3` become `equipPrimary`, `equipSecondary` and `equipMelee`; `weaponNext/Previous` drive `cycle`; `melee` (V) drives `quickMelee`. The physical keys stay 1 / 2 / 3, wheel and V.
 - **Acquisition is source-agnostic.** The Supply Terminal (Scrap purchases between waves, progression phases), unlocks and the debug tools all call the same `acquire` / `unlockSecondary`. Prices, stock and the Scrap balance belong to `progression/` (economy), never to `weapons/`.
 - **Run scope.** The loadout belongs to the run (`RunSession`, §5): a new run starts from `STARTING_LOADOUT` in config: Bare Hands, Pistol, Secondary locked.
-- **Phase 2 scope:** the loadout model with all three categories, the Pistol as the only firearm, Bare Hands as a basic melee placeholder, Secondary present but locked. No melee arsenal, no Secondary content, no shop.
+- **Phase 2 scope (implemented, D-040):** the loadout model with all three categories, the Pistol as the only firearm, Bare Hands as a basic melee placeholder, Secondary present but locked. No melee arsenal, no Secondary content, no shop.
 
-**Hitscan pipeline.**
-1. Build a ray from the camera along the aim direction, adding spread and recoil.
+**Phase 2 implementation (D-040).**
+
+```text
+fixed step:  stepReader → ActionMap → WeaponController → WeaponInput
+             WeaponSystem.fixedUpdate (after Player):
+               WeaponManager.step(input, context, dt)
+                 timers (switch, quick melee, sprint lockout, weapon cooldowns, reloads)
+                 equip / cycle → quick melee (V) → reload (R) → trigger (buffer, fire mode)
+                 Firearm.fire(context) / MeleeWeapon.fire(context) → Hitscan.cast (level + targets)
+                 events: shot, melee, dryFire, reload*, equipped, equipRefused, acquired, …
+               'shot' → PlayerLook.addRecoil(pitch, yaw);  every step → PlayerLook.recoverRecoil(rate·dt)
+             context (built only on attack steps): eye = feet + eyeHeight, aim = f(yaw, pitch),
+             stance = crouched / grounded / speed ÷ walk speed, seeded Rng, Hitscan
+presentation (every frame): WeaponView.update(simDt) (view model, flash, impact markers)
+                            WeaponHud.update(held weapon status) (placeholder crosshair + ammo)
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `config/weapons.ts` | data | Categories, definitions (Bare Hands, Pistol), `STARTING_LOADOUT`, `WEAPON_RULES`, falloff |
+| `weapons/types.ts` | sim | `Weapon` interface, results (`ShotResult`, `MeleeResult`), `WeaponEvents` |
+| `weapons/Firearm.ts`, `weapons/melee/MeleeWeapon.ts` | sim | One class per kind, configured by definitions; timing, ammo, reload, spread, recoil |
+| `weapons/timing.ts` | sim | Step-exact cooldowns (remainder rule) and countdowns |
+| `weapons/hitscan.ts` | sim | `Hitscan` (level + `HitscanTarget`s), spread sampling, aim direction |
+| `weapons/WeaponManager.ts` | sim | The loadout and every rule: switching, quick melee, reload, trigger, acquisition |
+| `weapons/WeaponController.ts` | sim | Actions → `WeaponInput` |
+| `weapons/WeaponSystem.ts` | sim | Fixed-step adapter: builds the attack context from the player, applies recoil |
+| `weapons/WeaponView.ts` | presentation | View model, muzzle flash, impact markers |
+| `ui/WeaponHud.ts` | presentation | Placeholder crosshair and ammo readout |
+
+- **Determinism.** Spread and recoil draw from one seeded `Rng` per game (D-014); with the same seed and inputs, shots are identical (tested).
+- **Frozen time freezes weapons.** No fixed steps run while paused, so reloads, cooldowns and recoil recovery all stop; the view model's animations use simulated time too.
+
+**Hitscan pipeline.** Steps 1–2 exist from Phase 2 (`Hitscan`); steps 3–4 plug in as a `HitscanTarget` in Phase 4; steps 5–6 are combat (Phase 3).
+1. Build a ray from the eye along the aim direction, adding spread (recoil has already moved the aim).
 2. `CollisionWorld.raycast` finds the distance to the nearest wall, which caps the range.
 3. Broadphase: collect enemies whose bounding sphere the ray hits within that distance.
 4. Narrow phase: test **hitbox rigs**, which are analytic spheres or capsules for each damage zone (`HEAD, TORSO, ARM_LEFT, ARM_RIGHT, LEG_LEFT, LEG_RIGHT`). The nearest hit wins.
@@ -571,6 +606,11 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 - player step 5–10 µs (≈0.06 % of a 60 Hz frame);
 - blockout: 11 draw calls, ~1,100 triangles, 4 shader programs;
 - our CPU cost per frame ~1 ms (p95 ≤ 2.6 ms) while sprinting around the map.
+
+**Phase 2 baseline** (weapons, no enemies; same container):
+- weapon step 0.45 µs idle, 2.7 µs firing every step, 0.34 µs quick melee; one hitscan ray about 1 µs;
+- the view model adds 2 draw calls; each visible impact marker adds one (up to 32, so at most 46 in total at High), still far below the 250 budget; if markers ever matter, an `InstancedMesh` makes them one draw call;
+- our CPU cost per frame ~1.2–1.3 ms while firing continuously.
 - Known small per-step garbage: the octree query and the movement intent allocate a few short-lived objects per step (`Octree.triangleCapsuleIntersect` returns new vectors). Negligible now; revisit only if profiling with enemies shows GC pauses.
 
 **Measurement tools:**

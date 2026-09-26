@@ -6,6 +6,10 @@
  *
  * Conventions: yaw 0 faces north (−z) and grows to the left (counter-clockwise seen from above),
  * matching three.js `rotation.y`. Pitch 0 is level, positive looks up.
+ *
+ * Recoil (D-040) is applied here too, so aim and camera always agree: a shot kicks the view up
+ * (and a little sideways), and only that upward kick settles back over time. Aim the player adds
+ * is never undone; pulling the mouse down against the kick counts as recovering it.
  */
 
 const TAU = Math.PI * 2;
@@ -25,6 +29,8 @@ export class PlayerLook {
   yaw = 0;
   /** Radians, clamped to ±pitchLimit. */
   pitch = 0;
+  /** Upward recoil kick not yet recovered, radians (≥ 0). */
+  recoilPitch = 0;
   private settings: LookSettings;
 
   constructor(settings: LookSettings) {
@@ -48,7 +54,34 @@ export class PlayerLook {
   applyMouseDelta(dx: number, dy: number): void {
     const scale = this.settings.radiansPerPixel * this.settings.sensitivity;
     const vertical = this.settings.invertY ? dy : -dy;
+    const before = this.pitch;
     this.setAngles(this.yaw - dx * scale, this.pitch + vertical * scale);
+    const change = this.pitch - before;
+    if (change < 0) {
+      // The player pulled down against the kick: that much no longer needs recovering.
+      this.recoilPitch = Math.max(0, this.recoilPitch + change);
+    }
+  }
+
+  /** Kicks the view by a shot's recoil, in radians (+pitch up, +yaw left). */
+  addRecoil(pitch: number, yaw: number): void {
+    const before = this.pitch;
+    this.setAngles(this.yaw + yaw, this.pitch + pitch);
+    this.recoilPitch += Math.max(0, this.pitch - before); // only what the pitch clamp allowed
+  }
+
+  /** Settles up to `maxRadians` of outstanding upward kick back down. */
+  recoverRecoil(maxRadians: number): void {
+    const amount = Math.min(this.recoilPitch, Math.max(0, maxRadians));
+    if (amount > 0) {
+      this.recoilPitch -= amount;
+      this.setAngles(this.yaw, this.pitch - amount);
+    }
+  }
+
+  /** Forgets outstanding recoil (spawn, teleport). */
+  resetRecoil(): void {
+    this.recoilPitch = 0;
   }
 
   /** Sets the view directly (spawn, teleport); wraps yaw and clamps pitch. */

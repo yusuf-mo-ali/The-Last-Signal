@@ -14,6 +14,8 @@ import type { PerspectiveCamera } from 'three';
 import type { ViewSettings } from '../../src/core/Config';
 import type { Player } from '../../src/player/Player';
 import type { World } from '../../src/world/World';
+import type { WeaponManager } from '../../src/weapons/WeaponManager';
+import type { WeaponView } from '../../src/weapons/WeaponView';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -26,6 +28,32 @@ export interface DevHandles {
   readonly player: Player;
   readonly camera: PerspectiveCamera;
   readonly frameActions: ActionMap;
+  readonly weapons: WeaponManager;
+  readonly weaponView: WeaponView;
+}
+
+/** What `tls.weapons()` returns (reserve `'unlimited'` stands for Infinity, which JSON lacks). */
+export interface WeaponsSnapshot {
+  readonly loadout: {
+    readonly melee: string;
+    readonly primary: string | null;
+    readonly secondary: 'locked' | { readonly weapon: string | null };
+    readonly active: 'primary' | 'secondary' | 'melee';
+  };
+  readonly held: {
+    readonly id: string;
+    readonly kind: 'firearm' | 'melee';
+    readonly state: 'ready' | 'cooldown' | 'reloading' | 'empty';
+    readonly ammo: {
+      readonly magazine: number;
+      readonly magazineSize: number;
+      readonly reserve: number | 'unlimited';
+    } | null;
+    readonly reloadProgress: number;
+  };
+  readonly switching: boolean;
+  readonly quickMeleeing: boolean;
+  readonly infiniteAmmo: boolean;
 }
 
 /** What `tls.player()` returns. */
@@ -49,7 +77,12 @@ export interface TlsApi {
   help(): readonly { name: string; available: boolean }[];
   state(): unknown;
   stats(): { overlayVisible: boolean };
-  giveAmmo(): unknown;
+  giveAmmo(): WeaponsSnapshot;
+  healPlayer(): unknown;
+  setInfiniteAmmo(enabled?: boolean): boolean;
+  weapons(): WeaponsSnapshot;
+  giveWeapon(id: string, category?: string): unknown;
+  unlockSecondary(): boolean;
   player(): PlayerSnapshot;
   teleportPlayer(x: number, y: number, z: number, yaw?: number): unknown;
   look(yaw: number, pitch?: number): unknown;

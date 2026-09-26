@@ -5,7 +5,6 @@
 import { expect, isDev, openGame, test } from './helpers';
 
 const PLAN_29_COMMANDS = [
-  'giveAmmo',
   'healPlayer',
   'killAll',
   'spawnEnemy',
@@ -13,7 +12,6 @@ const PLAN_29_COMMANDS = [
   'triggerMutation',
   'spawnBoss',
   'setGodMode',
-  'setInfiniteAmmo',
 ];
 
 test('development build: tls commands, plan §29 stubs and the stats overlay', async ({
@@ -39,12 +37,17 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'teleportPlayer',
     'look',
     'view',
+    'giveAmmo',
+    'setInfiniteAmmo',
+    'weapons',
+    'giveWeapon',
+    'unlockSecondary',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
-  expect(await page.evaluate(() => window.tls!.giveAmmo())).toMatchObject({
+  expect(await page.evaluate(() => window.tls!.healPlayer())).toMatchObject({
     ok: false,
-    reason: expect.stringContaining('Phase 2') as unknown as string,
+    reason: expect.stringContaining('Phase 3') as unknown as string,
   });
   expect(
     await page.evaluate(() => typeof (window as unknown as Record<string, unknown>).__TLS_DEV__),
@@ -56,6 +59,7 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
   expect(text).toMatch(/cost avg [\d.]+/);
   expect(text).toMatch(/draws \d+/);
   expect(text).toMatch(/state MAIN_MENU/);
+  expect(text).toMatch(/weapon primary:pistol 12\/∞ ready {2}secondary locked/);
 
   await page.keyboard.press('Backquote');
   await expect(page.locator('.debug-overlay')).toBeHidden();

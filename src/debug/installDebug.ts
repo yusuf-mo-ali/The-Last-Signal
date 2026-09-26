@@ -19,6 +19,13 @@ import { GameStateId } from '../core/GameState';
 import type { InputState } from '../input/InputState';
 import type { PointerLock } from '../input/PointerLock';
 import type { Player } from '../player/Player';
+import {
+  LOADOUT_CATEGORIES,
+  WEAPON_IDS,
+  type LoadoutCategory,
+  type WeaponId,
+} from '../config/weapons';
+import type { WeaponManager } from '../weapons/WeaponManager';
 import type { Renderer } from '../render/Renderer';
 import { DebugCommands, type DebugApi } from './DebugCommands';
 import { DebugOverlay } from './DebugOverlay';
@@ -34,6 +41,8 @@ export interface DebugContext {
   readonly container: HTMLElement;
   /** The player, for `tls.player()`, `tls.teleportPlayer()` and `tls.look()`. */
   readonly player?: Player;
+  /** The loadout, for `tls.weapons()`, `tls.giveAmmo()`, `tls.giveWeapon()`, … */
+  readonly weapons?: WeaponManager;
   /** View settings access, for `tls.view()`. */
   readonly getView?: () => ViewSettings;
   readonly applyView?: (settings: ViewSettings) => ViewSettings;
@@ -55,8 +64,6 @@ declare global {
 
 /** Plan §29 commands whose systems arrive in later phases. */
 const PLANNED_COMMANDS: readonly (readonly [string, string, string])[] = [
-  ['giveAmmo', 'Refill all ammunition', 'Phase 2 (weapon framework)'],
-  ['setInfiniteAmmo', 'Toggle infinite ammunition', 'Phase 2 (weapon framework)'],
   ['healPlayer', 'Restore full health', 'Phase 3 (combat: health and damage)'],
   ['setGodMode', 'Toggle invulnerability', 'Phase 3 (combat: health and damage)'],
   ['spawnEnemy', 'Spawn an enemy of a given type', 'Phase 4 (zombie foundation)'],
@@ -125,6 +132,7 @@ export function installDebug(context: DebugContext): DebugTools {
     pointerLock,
     errors,
     ...(context.player ? { player: context.player } : {}),
+    ...(context.weapons ? { weapons: context.weapons } : {}),
     ...context.extras,
   });
 
@@ -205,6 +213,7 @@ export function installDebug(context: DebugContext): DebugTools {
     },
   );
   registerPlayerCommands(commands, context);
+  registerWeaponCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -283,6 +292,65 @@ function registerPlayerCommands(commands: DebugCommands, context: DebugContext):
   }
 }
 
+function registerWeaponCommands(commands: DebugCommands, context: DebugContext): void {
+  const { weapons } = context;
+  if (!weapons) {
+    return;
+  }
+  const snapshot = () => {
+    const held = weapons.activeWeapon.getState();
+    // JSON has no Infinity: report the Pistol's unlimited reserve readably.
+    const ammo = held.ammo && {
+      ...held.ammo,
+      reserve: Number.isFinite(held.ammo.reserve) ? held.ammo.reserve : 'unlimited',
+    };
+    return {
+      loadout: weapons.loadout,
+      held: { ...held, ammo },
+      switching: weapons.isSwitching,
+      quickMeleeing: weapons.isQuickMeleeing,
+      infiniteAmmo: weapons.infiniteAmmoEnabled,
+    };
+  };
+  commands.register(
+    'weapons',
+    'Loadout (Melee, Primary, Secondary), held weapon, ammo, state',
+    snapshot,
+  );
+  commands.register('giveAmmo', 'Refill every magazine and reserve', () => {
+    weapons.refillAmmo();
+    return snapshot();
+  });
+  commands.register(
+    'setInfiniteAmmo',
+    'Shots stop consuming ammunition: tls.setInfiniteAmmo(true)',
+    (enabled?: boolean) => {
+      weapons.setInfiniteAmmo(enabled ?? !weapons.infiniteAmmoEnabled);
+      return weapons.infiniteAmmoEnabled;
+    },
+  );
+  commands.register(
+    'giveWeapon',
+    `Put a weapon in the loadout: tls.giveWeapon(id, category?) (${WEAPON_IDS.join(', ')})`,
+    (id: string, category?: string) => {
+      if (!(WEAPON_IDS as readonly string[]).includes(id)) {
+        throw new Error(`Unknown weapon "${id}". Weapons: ${WEAPON_IDS.join(', ')}`);
+      }
+      if (category !== undefined && !(LOADOUT_CATEGORIES as readonly string[]).includes(category)) {
+        throw new Error(
+          `Unknown category "${category}". Categories: ${LOADOUT_CATEGORIES.join(', ')}`,
+        );
+      }
+      return weapons.acquire(id as WeaponId, category as LoadoutCategory | undefined);
+    },
+  );
+  commands.register(
+    'unlockSecondary',
+    'Unlock the Secondary category (normally after wave 5)',
+    () => weapons.unlockSecondary(),
+  );
+}
+
 function throwingPresentation(error: Error) {
   return {
     render: (): void => {
@@ -292,7 +360,7 @@ function throwingPresentation(error: Error) {
 }
 
 function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
-  const { game, renderer, input, pointerLock, player } = context;
+  const { game, renderer, input, pointerLock, player, weapons } = context;
   const info = renderer.webgl.info;
   const v = renderer.viewport;
   const state = game.state.pausedState
@@ -306,6 +374,7 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     `view ${v.width}×${v.height} @${v.pixelRatio}  ctx ${renderer.context.lost ? 'LOST' : 'ok'}`,
     `state ${state}`,
     ...(player ? [formatPlayer(player)] : []),
+    ...(weapons ? [formatWeapons(weapons)] : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
 }
@@ -315,4 +384,13 @@ function formatPlayer(player: Player): string {
   const [x, y, z] = m.position.toArray().map((v) => v.toFixed(2));
   const mode = m.crouched ? 'crouch' : m.sprinting ? 'sprint' : 'walk';
   return `player ${x} ${y} ${z}  ${m.horizontalSpeed.toFixed(1)} m/s  ${m.grounded ? 'ground' : 'air'} ${mode}`;
+}
+
+function formatWeapons(weapons: WeaponManager): string {
+  const status = weapons.activeWeapon.getState();
+  const ammo = status.ammo
+    ? ` ${status.ammo.magazine}/${Number.isFinite(status.ammo.reserve) ? status.ammo.reserve : '∞'}`
+    : '';
+  const secondary = weapons.isSecondaryLocked ? 'locked' : 'open';
+  return `weapon ${weapons.active}:${status.id}${ammo} ${status.state}  secondary ${secondary}`;
 }
