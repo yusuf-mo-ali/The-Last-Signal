@@ -1,0 +1,64 @@
+/**
+ * Minimal "click to play / click to resume" prompt that covers the canvas while the pointer is
+ * not locked (D-017). Pointer lock can only be requested from a user gesture, and a re-lock can be
+ * refused, so the player needs a visible, clickable target and feedback. It also ends a run that
+ * the player lost ("You died": a click starts a new one). Deliberately minimal: the real pause
+ * menu and game-over screen replace it with the UI systems (plan §22).
+ */
+
+export type LockPromptMode = 'start' | 'paused' | 'refused' | 'game-over' | 'hidden';
+
+const MESSAGES: Readonly<
+  Record<Exclude<LockPromptMode, 'hidden'>, { title: string; hint: string }>
+> = {
+  start: {
+    title: 'Click to play',
+    hint: 'WASD move · Mouse look · Shift sprint · C crouch · Space jump · Esc pause',
+  },
+  paused: { title: 'Paused', hint: 'Click to resume' },
+  'game-over': { title: 'You died', hint: 'Click to start a new run' },
+  refused: {
+    title: 'Mouse not captured',
+    hint: 'The browser refused to capture the mouse. Click again to continue.',
+  },
+};
+
+export class LockPrompt {
+  readonly element: HTMLButtonElement;
+  private readonly title: HTMLElement;
+  private readonly hint: HTMLElement;
+  private current: LockPromptMode = 'hidden';
+
+  constructor(container: HTMLElement, onActivate: () => void) {
+    const doc = container.ownerDocument;
+    this.element = doc.createElement('button');
+    this.element.type = 'button';
+    this.element.className = 'lock-prompt';
+    this.title = doc.createElement('span');
+    this.title.className = 'lock-prompt__title';
+    this.hint = doc.createElement('span');
+    this.hint.className = 'lock-prompt__hint';
+    this.element.append(this.title, this.hint);
+    this.element.addEventListener('click', onActivate);
+    container.appendChild(this.element);
+    this.show('start');
+  }
+
+  get mode(): LockPromptMode {
+    return this.current;
+  }
+
+  show(mode: LockPromptMode): void {
+    this.current = mode;
+    this.element.dataset.mode = mode;
+    this.element.hidden = mode === 'hidden';
+    if (mode !== 'hidden') {
+      this.title.textContent = MESSAGES[mode].title;
+      this.hint.textContent = MESSAGES[mode].hint;
+    }
+  }
+
+  dispose(): void {
+    this.element.remove();
+  }
+}

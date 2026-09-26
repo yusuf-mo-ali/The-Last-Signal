@@ -1,0 +1,372 @@
+:root {
+  color-scheme: dark;
+  --color-bg: #07090b;
+  --color-text: #d8dde2;
+  --color-accent: #c8332b;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.notice {
+  display: grid;
+  place-content: center;
+  gap: 1rem;
+  height: 100%;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.notice__title {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 3rem);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+}
+
+.notice__text {
+  max-width: 34rem;
+  margin: 0;
+  line-height: 1.5;
+  color: var(--color-accent);
+}
+
+.lock-prompt {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  width: 100%;
+  border: 0;
+  background: rgb(7 9 11 / 55%);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lock-prompt[hidden] {
+  display: none;
+}
+
+.lock-prompt:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -6px;
+}
+
+.lock-prompt__title {
+  font-size: clamp(1.25rem, 3vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.lock-prompt__hint {
+  font-size: 0.9rem;
+  color: var(--color-accent);
+}
+
+.lock-prompt[data-mode='refused'] .lock-prompt__title {
+  color: var(--color-accent);
+}
+
+.status-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  overflow-y: auto;
+  background: var(--color-bg);
+  text-align: center;
+}
+
+.status-screen[hidden],
+.status-screen [hidden] {
+  display: none;
+}
+
+.status-screen[data-mode='context-lost'] {
+  background: rgb(7 9 11 / 85%);
+}
+
+.status-screen__title {
+  margin: 0;
+  font-size: clamp(1.25rem, 3vw, 2.25rem);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.status-screen__body,
+.status-screen__steps,
+.status-screen__message {
+  max-width: 38rem;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.status-screen__steps {
+  padding-left: 1.25rem;
+  text-align: left;
+}
+
+.status-screen__message {
+  color: var(--color-accent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.status-screen__details {
+  max-width: min(60rem, 100%);
+  max-height: 30vh;
+  margin: 0;
+  overflow: auto;
+  font-size: 0.75rem;
+  text-align: left;
+  opacity: 0.7;
+}
+
+.status-screen__action {
+  padding: 0.6rem 1.6rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.status-screen__action:hover,
+.status-screen__action:focus-visible {
+  background: var(--color-accent);
+}
+
+/* ---- Weapon HUD (Phase 2 placeholder, ui/WeaponHud.ts) ------------------------------------ */
+.weapon-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.weapon-hud[hidden] {
+  display: none;
+}
+
+.weapon-hud__crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 85%);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 60%);
+}
+
+.weapon-hud__panel {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.25rem;
+  display: flex;
+  gap: 0.9rem;
+  align-items: baseline;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+}
+
+.weapon-hud__name {
+  font-size: 0.8rem;
+  letter-spacing: 0.15em;
+  opacity: 0.8;
+}
+
+.weapon-hud__ammo {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+/* ---- Combat feedback (Phase 3 placeholder, ui/CombatFeedback.ts) -------------------------- */
+.combat-feedback {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.combat-feedback[hidden],
+.combat-feedback [hidden] {
+  display: none;
+}
+
+.hit-marker {
+  --hit-color: rgb(255 255 255);
+
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+}
+
+.hit-marker[data-kind='head'] {
+  --hit-color: rgb(255 210 60);
+}
+
+.hit-marker[data-kind='kill'] {
+  --hit-color: rgb(255 70 60);
+
+  transform: scale(1.35);
+}
+
+.hit-marker__tick {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 2px;
+  background: var(--hit-color);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 55%);
+}
+
+.hit-marker__tick:nth-child(1) {
+  transform: translate(-50%, -50%) rotate(45deg) translateX(-8px);
+}
+
+.hit-marker__tick:nth-child(2) {
+  transform: translate(-50%, -50%) rotate(135deg) translateX(-8px);
+}
+
+.hit-marker__tick:nth-child(3) {
+  transform: translate(-50%, -50%) rotate(225deg) translateX(-8px);
+}
+
+.hit-marker__tick:nth-child(4) {
+  transform: translate(-50%, -50%) rotate(315deg) translateX(-8px);
+}
+
+.hit-marker--pop {
+  animation: hit-marker-pop 120ms ease-out;
+}
+
+@keyframes hit-marker-pop {
+  from {
+    opacity: 0.4;
+  }
+}
+
+.damage-number {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: rgb(255 255 255);
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 85%);
+  will-change: transform, opacity;
+}
+
+.damage-number[data-kind='head'] {
+  color: rgb(255 210 60);
+  font-size: 1.15rem;
+}
+
+.damage-number[data-kind='kill'] {
+  color: rgb(255 120 90);
+  font-size: 1.2rem;
+}
+
+/* ---- Health (Phase 4 placeholder, ui/HealthHud.ts) ------------------------------------------ */
+.health-hud {
+  position: absolute;
+  bottom: 1.25rem;
+  left: 1.5rem;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 0.25rem 0.8rem;
+  align-items: baseline;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  pointer-events: none;
+}
+
+.health-hud[hidden] {
+  display: none;
+}
+
+.health-hud__label {
+  font-size: 0.8rem;
+  letter-spacing: 0.15em;
+  opacity: 0.8;
+}
+
+.health-hud__value {
+  font-size: 1.6rem;
+  font-weight: 600;
+}
+
+.health-hud__track {
+  grid-column: 1 / -1;
+  width: 11rem;
+  height: 5px;
+  background: rgb(255 255 255 / 18%);
+}
+
+.health-hud__bar {
+  width: 100%;
+  height: 100%;
+  background: rgb(232 236 240 / 90%);
+  transition: width 120ms linear;
+}
+
+.health-hud[data-state='dead'] .health-hud__bar {
+  width: 0;
+}
+
+.damage-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 12vmin 4vmin rgb(150 20 20 / 85%);
+}
