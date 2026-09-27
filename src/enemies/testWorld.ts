@@ -122,6 +122,9 @@ export function enemyTestWorld(
     'staggered',
     'died',
     'despawned',
+    'alarm',
+    'hasted',
+    'traitsChanged',
   ] as const) {
     manager.events.on(type, (payload: unknown) => {
       events.push({ type, payload } as Recorded);

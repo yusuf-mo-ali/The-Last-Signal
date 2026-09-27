@@ -17,12 +17,14 @@ import type { TrainingRange } from '../combat/training/TrainingRange';
 import {
   AI_STATES,
   DAMAGE_ZONES,
+  DEFAULT_ROSTER,
   IMPLEMENTED_ENEMY_IDS,
   type AiState,
   type DamageZone,
   type ImplementedEnemyId,
 } from '../config/enemies';
 import { PICKUP_IDS, type PickupId } from '../config/drops';
+import { ENEMY_TRAITS, normalizeTraits } from '../config/traits';
 import { TRAINING_DUMMY_KINDS, type TrainingDummyKind } from '../config/training';
 import { ENGINE_CONFIG, type ViewSettings } from '../core/Config';
 import type { ErrorHandler } from '../core/ErrorHandler';
@@ -697,6 +699,8 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
       nav: e.navMode,
       attack: e.attackPhase,
       attacks: e.attacks,
+      traits: [...e.config.traits],
+      hasted: e.haste(enemies.now) > 1,
     }));
   commands.register('enemies', 'Every enemy: state, health, position, target, attack', summary);
   commands.register('enemy', 'One enemy in detail: tls.enemy(id)', (id: string) => {
@@ -716,8 +720,34 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
       route: routes ? e.route.slice(e.routeCursor).map((n) => routes.nodes[n]?.id) : [],
       patrols: e.patrols,
       corpseTimer: round(e.corpseTimer),
+      stats: {
+        moveSpeed: round(e.config.moveSpeed),
+        attackDamage: round(e.config.attackDamage),
+        attackRange: e.config.attackRange,
+        detectionRange: e.config.detectionRange,
+        attackCooldown: e.config.attackCooldown,
+        staggerThreshold: round(e.config.staggerThreshold),
+        staggerZones: e.config.staggerZones ?? 'all',
+        zoneMultipliers: e.config.zoneMultipliers ?? 'plan defaults',
+        zoneArmor: e.config.zoneArmor,
+        threatCost: round(e.config.threatCost),
+        behavior: e.config.behavior,
+        ability: e.config.ability ?? null,
+      },
+      plates: e.plates.map((plate) => ({
+        id: plate.id,
+        durability: round(plate.durability),
+        max: plate.max,
+        broken: plate.broken,
+      })),
+      haste: e.haste(enemies.now) > 1 ? round(e.hasteMultiplier) : 1,
     };
   });
+  commands.register(
+    'traits',
+    'Trait definitions (Armored, Helmeted, Elite): what each changes',
+    () => Object.values(ENEMY_TRAITS),
+  );
 
   const inFront = (distance: number, sideways = 0): [number, number, number] => {
     if (!player) {
@@ -739,17 +769,26 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
     }
     return type as ImplementedEnemyId;
   };
+  const traitList = (traits?: string | readonly string[]): string[] =>
+    normalizeTraits(
+      typeof traits === 'string'
+        ? traits
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean)
+        : [...(traits ?? [])],
+    );
   commands.register(
     'spawnEnemy',
-    `Spawn an enemy facing you: tls.spawnEnemy(type?, distance?) (${IMPLEMENTED_ENEMY_IDS.join(', ')})`,
-    (type = 'walker', distance = 6) => {
+    `Spawn an enemy facing you: tls.spawnEnemy(type?, distance?, traits?) (${IMPLEMENTED_ENEMY_IDS.join(', ')}; traits e.g. ['armored', 'elite'] or 'armored,elite')`,
+    (type = 'walker', distance = 6, traits?: string | readonly string[]) => {
       const archetype = archetypeOf(type);
       const at = inFront(distance);
       if (!enemies.canStand(archetype, at)) {
         throw new Error(`No room for a ${type} ${distance} m ahead (wall, obstacle or no ground)`);
       }
       const yaw = (player?.look.yaw ?? 0) + Math.PI;
-      const enemy = enemies.spawn(archetype, at, { yaw, patrol: false });
+      const enemy = enemies.spawn(archetype, at, { yaw, patrol: false, traits: traitList(traits) });
       if (!enemy) {
         throw new Error('Enemy cap reached');
       }
@@ -778,6 +817,65 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
       }
       return ids;
     },
+  );
+  commands.register(
+    'spawnMixed',
+    `A mixed group in rows in front of you, cycling ${DEFAULT_ROSTER.join(', ')} (skipping blocked spots): tls.spawnMixed(count?, distance?, traits?)`,
+    (count = 8, distance = 10, traits?: string | readonly string[]) => {
+      const yaw = (player?.look.yaw ?? 0) + Math.PI;
+      const ids: string[] = [];
+      const extra = traitList(traits);
+      for (let i = 0; ids.length < count && i < count * 4; i++) {
+        const archetype = DEFAULT_ROSTER[ids.length % DEFAULT_ROSTER.length] ?? 'walker';
+        const row = Math.floor(i / 6);
+        const column = (i % 6) - 2.5;
+        const at = inFront(distance + row * 1.6, column * 1.5);
+        if (!enemies.canStand(archetype, at)) {
+          continue;
+        }
+        const enemy = enemies.spawn(archetype, at, { yaw, patrol: false, traits: extra });
+        if (!enemy) {
+          break; // the cap
+        }
+        ids.push(enemy.id);
+      }
+      return ids;
+    },
+  );
+  commands.register(
+    'setTraits',
+    `Replace an enemy's traits: tls.setTraits(id, ['armored', 'helmeted']) (${Object.keys(ENEMY_TRAITS).join(', ')})`,
+    (id: string, traits: string | readonly string[] = []) => {
+      if (!enemies.setTraits(id, traitList(traits))) {
+        throw new Error(`No living enemy "${id}"`);
+      }
+      return [...(enemies.get(id)?.config.traits ?? [])];
+    },
+  );
+  commands.register(
+    'applyTrait',
+    'Add a trait to an enemy: tls.applyTrait(id, trait)',
+    (id: string, trait: string) => {
+      if (!enemies.addTrait(id, trait)) {
+        throw new Error(`No living enemy "${id}"`);
+      }
+      return [...(enemies.get(id)?.config.traits ?? [])];
+    },
+  );
+  commands.register(
+    'removeTrait',
+    'Remove a trait from an enemy: tls.removeTrait(id, trait)',
+    (id: string, trait: string) => {
+      if (!enemies.removeTrait(id, trait)) {
+        throw new Error(`No living enemy "${id}"`);
+      }
+      return [...(enemies.get(id)?.config.traits ?? [])];
+    },
+  );
+  commands.register(
+    'forceAbility',
+    'Make an enemy use its attack or ability now (a Screamer screams), ignoring its cooldown: tls.forceAbility(id)',
+    (id: string) => enemies.forceAttack(id),
   );
   commands.register('killEnemy', 'Kill an enemy through combat: tls.killEnemy(id)', (id: string) =>
     enemies.kill(id),
@@ -850,7 +948,7 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
   };
   commands.register(
     'showAI',
-    'Show AI states, detection and attack ranges, targets and routes: tls.showAI(false) hides them',
+    'Show AI states, traits, detection, attack and ability ranges, targets and routes: tls.showAI(false) hides them',
     (visible?: boolean) => setAi(visible ?? aiView === null),
   );
   disposers.push(() => setAi(false));

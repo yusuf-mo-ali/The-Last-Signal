@@ -9,6 +9,7 @@ import { EFFECT_KINDS } from './effects';
 import {
   AI_STATES,
   DAMAGE_ZONES,
+  DEFAULT_ROSTER,
   DEFAULT_ZONE_MULTIPLIERS,
   ENEMY_ARCHETYPE_IDS,
   ENEMY_ARCHETYPES,
@@ -291,8 +292,12 @@ describe('enemy data (Phase 4, D-042)', () => {
       expect(ENEMY_ARCHETYPE_IDS).toContain(id);
       expect(ENEMY_BEHAVIOR_IDS).toContain(c.behavior);
       expect(c.drops === null || DROP_TABLE_IDS.includes(c.drops)).toBe(true);
-      expect(c.attack.reach).toBeGreaterThanOrEqual(c.attackRange);
-      expect(c.attack.windup + c.attack.recovery).toBeLessThanOrEqual(c.attackCooldown);
+      // A leap closes the gap between where an attack starts and where the strike reaches.
+      expect(c.attack.reach + (c.attack.lunge?.distance ?? 0)).toBeGreaterThanOrEqual(
+        c.attackRange,
+      );
+      const leapTime = c.attack.lunge ? c.attack.lunge.distance / c.attack.lunge.speed : 0;
+      expect(c.attack.windup + leapTime + c.attack.recovery).toBeLessThanOrEqual(c.attackCooldown);
       expect(c.perception.loseTargetRange).toBeGreaterThan(c.detectionRange);
       expect(c.body.eyeHeight).toBeLessThan(c.body.height);
       expect(c.patrol.pauseMin).toBeLessThanOrEqual(c.patrol.pauseMax);
@@ -344,10 +349,124 @@ describe('enemy data (Phase 4, D-042)', () => {
     });
   });
 
-  it('the Phase 4 test encounter places implemented enemies on the level floor', () => {
+  it('the test encounter places implemented enemies on the level floor, with known traits', () => {
     for (const p of TRAINING_ENEMIES.placements) {
       expect(IMPLEMENTED_ENEMY_IDS).toContain(p.archetype);
       expect(p.position[1]).toBe(0);
+      for (const trait of p.traits ?? []) {
+        expect(ENEMY_MODIFIER_IDS).toContain(trait);
+      }
+    }
+    // Phase 5: one of each archetype of the default roster, and each trait at least once.
+    expect(new Set(TRAINING_ENEMIES.placements.map((p) => p.archetype))).toEqual(
+      new Set(DEFAULT_ROSTER),
+    );
+    expect(new Set(TRAINING_ENEMIES.placements.flatMap((p) => p.traits ?? []))).toEqual(
+      new Set(ENEMY_MODIFIER_IDS),
+    );
+  });
+});
+
+describe('enemy archetypes (Phase 5, D-043)', () => {
+  const pistol = WEAPONS.pistol;
+  const headshot = pistol.damage * pistol.headshotMultiplier;
+  const { walker, runner, tank, screamer } = ENEMY_STATS;
+
+  it('O-3: the default roster is Walker, Runner, Tank, Screamer; the Climber is deferred', () => {
+    expect(DEFAULT_ROSTER).toEqual(['walker', 'runner', 'tank', 'screamer']);
+    expect(IMPLEMENTED_ENEMY_IDS).toEqual(DEFAULT_ROSTER);
+    expect(IMPLEMENTED_ENEMY_IDS).not.toContain('climber');
+    expect(ENEMY_ARCHETYPES.climber.inV1).toBe(false);
+    for (const id of DEFAULT_ROSTER) {
+      expect(ENEMY_ARCHETYPES[id].inV1, id).toBe(true);
+    }
+  });
+
+  it('Runner: fast pressure, fragile; outrun only by sprinting', () => {
+    expect(runner.moveSpeed).toBeGreaterThan(walker.moveSpeed * 3);
+    expect(runner.moveSpeed).toBeGreaterThan(PLAYER_MOVEMENT.walkSpeed);
+    expect(runner.moveSpeed).toBeLessThan(
+      PLAYER_MOVEMENT.walkSpeed * PLAYER_MOVEMENT.sprintMultiplier,
+    );
+    expect(runner.health).toBeLessThan(walker.health);
+    expect(runner.health).toBeLessThan(tank.health);
+    expect(Math.ceil(runner.health / pistol.damage)).toBe(3); // three body shots
+    expect(headshot).toBeGreaterThanOrEqual(runner.health); // one headshot
+    expect(pistol.damage).toBeGreaterThanOrEqual(runner.staggerThreshold); // any body shot staggers
+    // Its danger is getting to you, not its hits: lighter, and less damage per second.
+    expect(runner.attackDamage).toBeLessThan(walker.attackDamage);
+    expect(runner.attackDamage / runner.attackCooldown).toBeLessThan(
+      walker.attackDamage / walker.attackCooldown,
+    );
+    expect(runner.attack.lunge).toBeDefined();
+    expect(runner.weave).toBeDefined();
+  });
+
+  it('Tank: slow, very tough in the body, weak in the head, hits very hard', () => {
+    expect(tank.moveSpeed).toBeLessThan(walker.moveSpeed);
+    expect(tank.health).toBe(360);
+    expect(Math.ceil(tank.health / headshot)).toBe(6);
+    const torso = pistol.damage * (tank.zoneMultipliers?.TORSO ?? 1);
+    expect(Math.ceil(tank.health / torso)).toBeGreaterThanOrEqual(25);
+    expect(tank.staggerZones).toEqual(['HEAD']);
+    expect(headshot).toBeGreaterThanOrEqual(tank.staggerThreshold);
+    expect(Math.ceil(PLAYER_HEALTH.max / tank.attackDamage)).toBe(3);
+    expect(tank.attack.windup).toBeGreaterThan(walker.attack.windup); // a longer telegraph
+    expect(tank.behavior).toBe('melee');
+    expect(tank.ability).toBeUndefined(); // no ranged attack
+    expect(tank.body.radius).toBeGreaterThan(walker.body.radius);
+  });
+
+  it('Screamer: never hurts, screams from range with a long, readable wind-up', () => {
+    expect(screamer.behavior).toBe('screamer');
+    expect(screamer.attackDamage).toBe(0);
+    expect(screamer.ability?.kind).toBe('scream');
+    expect(screamer.attack.windup).toBeGreaterThanOrEqual(1);
+    expect(screamer.ability?.radius).toBeGreaterThan(screamer.attackRange);
+    expect(screamer.attackRange).toBeLessThanOrEqual(screamer.detectionRange);
+    const band = screamer.preferredRange;
+    expect(band && band.min < band.max && band.max <= screamer.attackRange).toBe(true);
+    expect(screamer.attackCooldown).toBeGreaterThan(
+      screamer.attack.windup + screamer.attack.recovery + 5,
+    );
+    expect(screamer.ability?.haste.multiplier).toBeGreaterThan(1);
+    expect(screamer.ability?.haste.multiplier).toBeLessThan(1.5);
+    // Worth shooting first: two body shots or one headshot, and a body shot interrupts it.
+    expect(Math.ceil(screamer.health / pistol.damage)).toBeLessThanOrEqual(4);
+    expect(headshot).toBeLessThan(screamer.health);
+    expect(pistol.damage).toBeGreaterThanOrEqual(screamer.staggerThreshold);
+  });
+
+  it('a lean is in the rig: the Runner’s head is ahead of its hips, legs upright, inside its body', () => {
+    const shape = (id: 'runner' | 'walker', zone: string) =>
+      ENEMY_STATS[id].rig.shapes.find((s) => s.zone === zone);
+    const head = shape('runner', 'HEAD');
+    const leg = shape('runner', 'LEG_LEFT');
+    expect(head?.kind === 'sphere' && head.center[2]).toBeLessThan(-0.1);
+    expect(leg?.kind === 'capsule' && leg.a[2]).toBe(0);
+    expect(leg?.kind === 'capsule' && leg.b[2]).toBe(0);
+    // The head stays over the body (its collision capsule), plus its own radius.
+    if (head?.kind === 'sphere') {
+      expect(Math.abs(head.center[2])).toBeLessThan(runner.body.radius + head.radius);
+    }
+    // The attack pose leans the same way.
+    const poseHead = runner.attackPose?.shapes.find((s) => s.zone === 'HEAD');
+    expect(poseHead).toEqual(head);
+    expect(shape('walker', 'HEAD')).toEqual(HUMANOID_RIG.shapes[0]); // the Walker stands upright
+  });
+
+  it('threat cost orders the roster by how dangerous each is', () => {
+    expect(walker.threatCost).toBeLessThan(runner.threatCost);
+    expect(runner.threatCost).toBeLessThan(screamer.threatCost);
+    expect(screamer.threatCost).toBeLessThan(tank.threatCost);
+  });
+
+  it('every rig covers each damage zone once, scaled to its body', () => {
+    for (const id of IMPLEMENTED_ENEMY_IDS) {
+      const c = ENEMY_STATS[id];
+      for (const rig of [c.rig, c.attackPose ?? c.rig]) {
+        expect(rig.shapes.map((s) => s.zone).sort(), id).toEqual([...DAMAGE_ZONES].sort());
+      }
     }
   });
 });

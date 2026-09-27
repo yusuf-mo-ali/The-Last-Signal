@@ -25,7 +25,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-009 | One data-driven modifier/trigger system | Accepted |
 | D-010 | Engine config vs gameplay config | Accepted |
 | D-011 | One weapon framework, weapons as data | Accepted (loadout by D-039) |
-| D-012 | Enemy = archetype + modifiers | Accepted |
+| D-012 | Enemy = archetype + modifiers | Accepted (implemented by D-042, D-043) |
 | D-013 | Level defined as data | Accepted |
 | D-014 | Seeded, injected RNG | Accepted |
 | D-015 | EventBus usage rules | Accepted |
@@ -56,6 +56,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-040 | Phase 2 weapon framework: timing, trigger, reload, hitscan, recoil, melee placeholder, events | Accepted |
 | D-041 | Phase 3 combat: hitbox rigs, pure damage, reusable Health, one-time death, feedback, drops, training dummies | Accepted |
 | D-042 | Phase 4 zombie foundation: generic enemy framework, the Walker, AI state machine, limited-rate decisions, route-graph navigation, melee, player health | Accepted |
+| D-043 | Phase 5 archetypes: the v1 roster (resolves O-3), the Runner, the Tank and the Screamer, composable traits, and a generic alarm event | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -223,7 +224,7 @@ A flat machine would bring back hidden flags (such as "state before pause"), whi
 **Status:** Accepted · **Date:** 2026-09-25
 
 **Decision.**
-- Archetypes: Walker, Runner, Tank, Screamer, Climber.
+- Archetypes: Walker, Runner, Tank, Screamer, Climber. (The v1 roster is the first four; the Climber is deferred as adaptive content: D-043.)
 - Modifiers overlay any archetype: Armored, Helmeted, Elite.
 
 **Why.** The plan's adaptive responses need "armored" and "protected-head" enemies (§15), and BLOOD MOON needs "elite" enemies (§14), but none are defined as archetypes. Modifiers supply all three without multiplying archetypes.
@@ -882,6 +883,86 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 - The player can walk through enemies (enemies stop short of the player and push away from their body, but the player's motor does not collide with them). Body blocking comes with the horde work if play needs it.
 - Open for later: the wave spawner and spawn points (Phase 6), the other archetypes and elite traits (Phase 5), a flow field if hordes outgrow the route graph (D-008), per-state rig poses beyond the reach pose, final models and animation (D-030), a proper HUD (health vignette, damage direction).
 
+## D-043 — Phase 5 archetypes: the v1 roster (resolves O-3), the Runner, the Tank and the Screamer, composable traits, and a generic alarm event
+**Status:** Accepted · **Date:** 2026-09-27 · **Implements:** plan §11 (Phase 5), §12, §15 (armored / protected-head / elite), D-012 · **Resolves:** O-3 · **Builds on:** D-041, D-042
+
+**Context.** Phase 5 adds the rest of the v1 roster on top of the Phase 4 framework, plus the traits the adaptive system and BLOOD MOON will need (plan §15: "armored", "protected-head", "elite"). O-3 asked which four of the plan's five archetypes ship in v1. There are still no waves (Phase 6), no mutations (Phase 7) and no adaptive system (Phase 8).
+
+**Decision.**
+
+1. **O-3: the v1 default roster is Walker, Runner, Tank and Screamer. The Climber is deferred, as adaptive content.**
+   - `DEFAULT_ROSTER` (config) lists the four; it is what `tls.spawnMixed` cycles through and what Phase 6's normal wave composition will draw from. The Climber is in neither the roster nor `IMPLEMENTED_ENEMY_IDS`, so it cannot be spawned (`enemyConfig('climber')` refuses: there is no data) and it will not appear in normal waves.
+   - It stays in `ENEMY_ARCHETYPES` (`inV1: false`) with its purpose restated: it counters camping on high ground. The architecture keeps room for it: an archetype is data plus a behaviour, so adding it means its `EnemyArchetypeConfig`, a climbing behaviour (or an option of the melee one) and climb links in the level's navigation (D-008). Nothing generic needs to change.
+   - **Later, the adaptive system (Phase 8) may bring the Climber in as a response to heavy high-ground use** (its "camping on high ground" metric), instead of it being part of every run. Nothing adaptive is built now.
+   - Why: the Climber is the most expensive archetype (climb navigation, climb links, climb animation) and only matters against one play style. As a targeted response it keeps its purpose without costing every wave.
+2. **Archetypes stay data plus a small set of behaviours (D-042 unchanged).** Phase 5 adds optional archetype fields rather than archetype code:
+   - `staggerZones`: only damage to these zones counts toward a stagger (the Tank: head only).
+   - `attack.lunge {distance, speed}`: a committed leap between the wind-up and the strike (the Runner).
+   - `weave {angleDeg, period, minDistance, maxDistance}`: a zig-zag approach in the open at mid range (the Runner).
+   - `preferredRange {min, max}`: the distance a ranged or support enemy keeps (the Screamer).
+   - `ability {kind: 'scream', radius, alertDuration, haste}`: what its attack does instead of a strike (the Screamer).
+   - There are two behaviours: `melee` (Walker, Runner, Tank; the options above switch parts on) and `screamer` (support). Both sit on `enemies/ai/common.ts` (perception and targeting, chase planning, path following, stuck checks, idle and patrol, alerts, stagger, attack cancelling), so every archetype shares the state machine, the 10 Hz decisions spread over the steps, the navigation and the combat hooks. No class or `if` names an archetype.
+3. **Runner: pressure through movement.** It is fast (5.2 m/s: faster than the player walks, slower than the player sprints) and fragile (60 health: three Pistol body shots or one headshot; any body shot staggers it). It notices from further away (15 m). In the open at 4–12 m it **weaves** 35° either side of the direct line (the side alternates over time and is taken only if walkable), which makes it harder to track. Its attack starts from 3.2 m. After a short wind-up (0.4 s, the telegraph) it **leaps** 2.2 m along its locked facing at 9 m/s and strikes (10 damage). The leap is committed: side-stepping during the wind-up makes it miss. It stops early a body's width from the target and brakes hard on landing (it plants its feet instead of sliding on). A hit during the leap staggers it and cancels the attack.
+4. **Tank: a slow wall that must be shot in the head.** 360 health, 1.1 m/s, a slow turn. Body shots do half, limbs a third, and **only head damage staggers it** (`staggerZones: ['HEAD']`, threshold 60): one Pistol headshot. It takes six headshots, or about 28 body shots, to kill. It hits for 35 after a long 1.1 s wind-up, with a wide arc and 2.4 m reach. It has no ranged attack. Its bigger body (radius 0.5 m) still fits every route link in the facility (tested). Future resistances are data (`resistance`, `armor`, `zoneArmor`), not Tank code.
+5. **Screamer: support that disrupts, never damages.**
+   - **Positioning:** it closes in when it cannot see the target or is beyond `preferredRange.max` (11 m), backs away (to a walkable point 3 m away, straight back or angled up to 90°) when the target is inside `preferredRange.min` (6 m), and otherwise holds its ground facing the target.
+   - **Ability:** with the target in sight within 14 m and its cooldown ready, it raises its arms and glows violet for 1.2 s (the telegraph, readable at range), then screams, then recovers for 1 s. The cooldown (10 s) is spent when the scream starts, so interrupting it (any hit ≥ 25 staggers it) wastes the scream, and the next one is still a full cooldown away.
+   - It deals no damage itself. What the scream does is up to whoever listens to its alarm.
+6. **The alarm: one generic event for "the enemies are being called".**
+   - The screamer brain emits `alarm` on the enemy event bus: `{sourceId, kind: 'scream', position, radius, targetId, targetPosition, alertDuration, haste {multiplier, duration} | null, time}`. Nothing in the payload needs a listener to know a Screamer raised it; `kind` names the cause for presentation and can grow (a siren objective, a mutation) without new event types.
+   - **Prototype response (in `EnemyManager`, testable):** every other living enemy within the radius (and within half the radius in height) is told where the target is for `alertDuration` (8 s), and, if the alarm carries haste, moves faster for its duration (×1.35 for 6 s; a repeat refreshes it and does not stack). Each emits `hasted`. Any code may emit an alarm and get the same response.
+   - **Presentation:** an expanding violet shockwave ring at the source (`EnemyView`, a pool of four), and a violet screen-edge pulse with a short shake when the player is within the radius (`ui/AlarmPulse`, simulated time, so it holds while paused).
+   - **Later consumers need no Screamer dependency:** the wave manager can spawn reinforcements toward an alarm, SCREAM (a mutation) can emit alarms on its own, the adaptive system can count them, and audio and VFX react to `kind`. There is no dependency on a WaveManager or mutation system now.
+7. **Traits: data overlays that compose, on any archetype (plan §15, D-012).**
+   - `config/traits.ts` defines three traits, each a set of optional overlays: health, speed, damage, stagger-threshold and threat multipliers; flat armor per zone; breakable plates; bonus drop tables.
+     - **Armored:** +10 armor on the torso and +6 on each limb (none on the head), 0.9× speed, 1.5× threat. It punishes spraying the body and rewards headshots.
+     - **Helmeted:** a helmet over the head (a breakable plate with 50 durability) that absorbs headshot damage until it breaks. Breaking it staggers the wearer and emits `armorBroken`; after that, headshots land in full. 1.3× threat.
+     - **Elite:** 1.6× health, 1.1× speed, 1.3× damage, 1.5× stagger threshold, 2.5× threat, and a bonus `elite` drop (always an ammo pickup).
+   - `applyTraits(base, traits)` is pure. It folds the traits into the archetype in canonical order whatever order they were given in; duplicates count once. Multipliers multiply, per-zone armor adds up, and plates and bonus drops are collected. Unknown traits throw. The result, `EnemyConfig`, is what an enemy reads everywhere (stats, speed, combat profile, drops, view attachments). The archetype definition is never changed.
+   - **Run time:** `EnemyManager.setTraits / addTrait / removeTrait` swap an enemy's config. Health keeps its fraction; a plate still worn keeps its damage (a broken helmet stays broken); the combat profile is updated at once (`CombatSystem.configure`); `traitsChanged` is emitted. A pooled enemy starts its next life with only the traits it is spawned with: whole plates and no haste.
+8. **Combat: mitigation through a generic `DamageProfile` (D-041 extended, no per-archetype code).** A target's profile is its zone multipliers, flat `armor`, `zoneArmor`, `plates`, `resistance`, `staggerThreshold` and `staggerZones`, set at registration and changeable with `configure(id, profile)`.
+   - The order of a hit is: `computeDamage` (with the armor for that zone: `armor + zoneArmor[zone]`), then plates covering the zone absorb what they can (`ArmorPlate`, `combat/armor.ts`), then health.
+   - `damaged` now also reports `armorReduction` and `absorbed`, and the hit marker shows a steel "armored" marker when a hit was mitigated (and did not kill).
+   - Stagger only counts damage to `staggerZones` when set. A plate with `staggerOnBreak` staggers its wearer when it breaks, unless the blow killed.
+   - Direct damage (debug, hazards) ignores armor and plates.
+9. **Separation and posture fixes that mixed crowds exposed.**
+   - Push distance is the larger of the rule's distance and both bodies' radii plus 0.1 m (a Tank needs more room).
+   - Two bodies closing on each other push apart **earlier and harder**: the room grows by their closing speed × `separationAnticipation` (0.5 s), and the push by the closing speed × `separationSpeedFactor` (1.5). A body cannot brake or turn instantly (acceleration limits), so the push has to start before the overlap. With the flat Phase 4 push, a sprinting Runner ran straight through an oncoming enemy (its centre passed within 0.2 m of the other's); now it steers round every archetype head-on (tested). Slow crowds, which barely close on each other, are almost unaffected.
+   - The push is applied in m/s relative to the body's current top speed (haste and a leap included).
+   - A Runner's or Tank's resting lean is **part of its hitbox rig** (`leanRig`: head, torso and arms turned about the hips), not only of its drawing. The drawn body is built from the rig, so what is drawn is what is hit. When it was drawn only, the Runner's visible head sat about 0.2 m ahead of its hit sphere.
+10. **Presentation (placeholders).**
+    - Each archetype is drawn from its own rig with its own palette (`config/enemyLooks.ts`):
+      - Runner: slighter, leaning, red eyes, amber telegraph.
+      - Tank: huge, dark, a lighter head so the weak point stands out, red telegraph.
+      - Screamer: tall and thin with a big pale head and a gaping mouth, violet eyes and telegraph; it raises its arms to scream.
+    - Traits change the outline, so they read without colour: chest, back and shoulder plates (Armored), a steel dome that disappears when it breaks (Helmeted), bone spikes on the shoulders and spine and pale eyes (Elite).
+    - Attachments are built into the enemy's single skinned mesh. Geometry is cached per archetype and set of attachments, so an enemy is still one draw call plus one shadow draw.
+11. **The test encounter shows the roster.** Five placements: a Helmeted Walker and an Armored Tank as sentries, a patrolling Runner, a Screamer by the north wall, and a patrolling Elite Walker. Each is beyond its own detection range (plus patrol radius) from the spawn, and each comes back after its body is removed. Temporary, until the wave system.
+12. **Debug (development only).**
+    - Spawning: `spawnEnemy(type?, distance?, traits?)` (all four archetypes) and `spawnMixed(count?, distance?, traits?)` (cycles the roster).
+    - Traits: `traits()`, `setTraits(id, traits)`, `applyTrait(id, trait)`, `removeTrait(id, trait)`.
+    - Ability: `forceAbility(id)` (use the attack or scream now, ignoring the cooldown).
+    - Inspection: `enemies()` and `enemy(id)` now include traits, haste, plates and the effective stats.
+    - The `showAI()` label adds traits and HASTE and carries `data-archetype`, and a violet ring shows the ability radius.
+
+**Why.**
+- Every archetype plays differently through existing systems. The Runner changes when and from where the player must shoot; the Tank changes where; the Screamer changes what to shoot first. There is no new AI architecture, no per-archetype damage code, and one timeline per fight (deterministic, tested).
+- Traits as data overlays give the adaptive system and BLOOD MOON "armored", "protected-head" and "elite" enemies on any archetype without new classes, and they compose predictably.
+- A generic alarm keeps the Screamer small and gives Phases 6–8 a hook they can emit and consume without knowing about each other.
+
+**Consequences.**
+- Balance values for the four archetypes and three traits are logged in BALANCING.md §2.7–2.10.
+- Measured costs at 64 mixed enemies (TESTING.md §7.4, on a slower host than Phase 4's):
+  - Simulation: 1.27 ms per step headless, against 1.15 ms for 64 Walkers in the same run.
+  - Browser: the same frame cost as 64 Walkers and the same 144 draw calls; each enemy is still one mesh, and traits add triangles, not draw calls.
+- Open for later:
+  - the Climber (as adaptive content, with climb links);
+  - reinforcements toward an alarm (Phase 6) and SCREAM (Phase 7);
+  - Elite visuals beyond placeholders;
+  - audio for the scream and the helmet (Phase 11);
+  - distance-based think rates if hordes need them;
+  - body blocking of the player (still none).
+
 ---
 
 ## Open questions
@@ -892,7 +973,7 @@ None of these block Phase 0. Each lists the phase that needs the answer and the 
 |---|---|---|---|
 | **O-1** | What does XP buy, and does unspent Scrap buy anything persistent? (**Partly answered by D-039:** Scrap is the purchase currency at the Supply Terminal between waves.) | Phase 9 (Progression) | XP → profile level that unlocks new cards and purchasable weapons; unspent Scrap does not carry over between runs |
 | ~~**O-2**~~ | ~~How does the player get the Assault Rifle and Shotgun during a run?~~ **Resolved 2026-09-26 → D-039:** loadout of Melee (Bare Hands), Primary (Pistol) and Secondary (locked); weapons bought with Scrap at the Supply Terminal between waves | — | — |
-| **O-3** | Which 4 of the 5 archetypes ship in v1 (plan §12 lists 5, §42 targets 4)? | Phase 5 (Archetypes) | Walker, Runner, Tank, Screamer; defer Climber (most expensive: climb navigation and animation) |
+| ~~**O-3**~~ | ~~Which 4 of the 5 archetypes ship in v1 (plan §12 lists 5, §42 targets 4)?~~ **Resolved 2026-09-27 → D-043:** Walker, Runner, Tank and Screamer are the default roster; the Climber is deferred and kept as possible adaptive content (a response to high-ground camping), not part of normal waves | — | — |
 | **O-4** | Which 6 of the 8 mutations ship in v1? | Phase 7 (Mutations) | BLACKOUT, HUNGER, STATIC, SCREAM, HIVE, BLOOD MOON; defer LOW GRAVITY and OVERLOAD |
 | **O-5** | Boss placement, and what "unlimited waves" means next to a wave-20 victory. | Phase 6 / Phase 13 | Siren at wave 20 (final); the generator supports unlimited waves; endless mode after victory is a later nice-to-have |
 | **O-6** | The controls lack **interact**, and no **utility/trap** system exists, yet Technician and signal objectives depend on them. (**Melee answered by D-039:** always-available quick melee, default key V.) | Phase 12 (interact) | Interact = E. Keep Technician out of the pool until a utility item is designed |

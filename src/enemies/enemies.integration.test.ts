@@ -7,6 +7,7 @@
  *   Walker → melee attack → player Health → damage / death → GAME_OVER → restart
  */
 
+import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { CombatSystem, type DamagedEvent } from '../combat/CombatSystem';
 import { ENEMY_STATS } from '../config/enemies';
@@ -252,6 +253,114 @@ describe('the pistol against a Walker', () => {
     expect(g.hits).toEqual([
       expect.objectContaining({ targetId: 'walker-1', source: 'melee', quick: true, amount: 15 }),
     ]);
+  });
+});
+
+describe('the pistol against every archetype (Phase 5)', () => {
+  /** An enemy standing 7 m ahead of the spawn, facing it, frozen so it stands still to be shot. */
+  function standing(archetype: 'walker' | 'runner' | 'tank' | 'screamer', traits: string[] = []) {
+    const g = headlessGame();
+    g.startRun();
+    const enemy = g.enemies.spawn(archetype, [0, 0, 7], { yaw: Math.PI, patrol: false, traits });
+    g.enemies.frozen = true;
+    if (!enemy) {
+      throw new Error('no spawn');
+    }
+    /** Aims at the middle of a zone's hit volume, where it is in the world now. */
+    const aimAtZone = (zone: string) => {
+      const shape = enemy.rig.definition.shapes.find((s) => s.zone === zone);
+      if (!shape) {
+        throw new Error(`no ${zone}`);
+      }
+      const local =
+        shape.kind === 'sphere'
+          ? shape.center
+          : ([0, 1, 2].map((i) => ((shape.a[i] ?? 0) + (shape.b[i] ?? 0)) / 2) as [
+              number,
+              number,
+              number,
+            ]);
+      const p = enemy.rig.toWorld(local);
+      g.aimAt(p.x, p.y, p.z);
+    };
+    return { g, enemy, aimAtZone };
+  }
+
+  it('headshots: what the Pistol’s 65 does to each', () => {
+    const outcome = (archetype: 'walker' | 'runner' | 'tank' | 'screamer') => {
+      const { g, enemy, aimAtZone } = standing(archetype);
+      aimAtZone('HEAD');
+      g.click();
+      const hit = g.hits[0];
+      return [hit?.zone, hit?.critical, hit?.dealt, hit?.killed, enemy.state];
+    };
+    expect(outcome('walker')).toEqual(['HEAD', true, 65, false, 'STAGGER']);
+    expect(outcome('runner')).toEqual(['HEAD', true, 65, true, 'DEAD']);
+    expect(outcome('tank')).toEqual(['HEAD', true, 65, false, 'STAGGER']);
+    expect(outcome('screamer')).toEqual(['HEAD', true, 65, false, 'STAGGER']);
+  });
+
+  it('body and limb shots land on the zone aimed at, with each archetype’s multipliers', () => {
+    for (const archetype of ['runner', 'tank', 'screamer'] as const) {
+      const { g, aimAtZone } = standing(archetype);
+      const zoneMultipliers = ENEMY_STATS[archetype].zoneMultipliers ?? {};
+      for (const zone of ['TORSO', 'ARM_LEFT', 'LEG_RIGHT'] as const) {
+        aimAtZone(zone);
+        g.click();
+        g.seconds(1.2); // out of any stagger window
+        const hit = g.hits.at(-1);
+        expect(hit?.zone, `${archetype} ${zone}`).toBe(zone);
+        const multiplier =
+          zoneMultipliers[zone] ?? { TORSO: 1, ARM_LEFT: 0.65, LEG_RIGHT: 0.5 }[zone];
+        expect(hit?.dealt, `${archetype} ${zone}`).toBeCloseTo(26 * multiplier, 9);
+      }
+    }
+  });
+
+  it('the Runner’s lean is where it is hit: from above, its head is ahead of its hips', () => {
+    const { enemy } = standing('runner');
+    const down = new Vector3(0, -1, 0);
+    const above = (forward: number) => enemy.rig.toWorld([0, 3, -forward]);
+    // Straight above its feet (where an upright head would be) is its back; its head is ahead.
+    expect(enemy.rig.raycast(above(0), down, 5)?.zone).toBe('TORSO');
+    expect(enemy.rig.raycast(above(0.2), down, 5)?.zone).toBe('HEAD');
+  });
+
+  it('a helmet takes the first headshot, falls off and staggers; the second lands in full', () => {
+    const { g, enemy, aimAtZone } = standing('walker', ['helmeted']);
+    const broken: string[] = [];
+    g.combat.events.on('armorBroken', (e) => broken.push(e.plateId));
+    aimAtZone('HEAD');
+    g.click();
+    expect(g.hits[0]).toMatchObject({ zone: 'HEAD', amount: 15, absorbed: 50 });
+    expect(broken).toEqual(['helmet']);
+    expect(enemy.state).toBe('STAGGER');
+    g.click();
+    expect(g.hits[1]).toMatchObject({ zone: 'HEAD', amount: 65, absorbed: 0 });
+  });
+
+  it('an Armored Tank shrugs off body shots: 3 per torso hit', () => {
+    const { g, aimAtZone } = standing('tank', ['armored']);
+    aimAtZone('TORSO');
+    g.click();
+    expect(g.hits[0]).toMatchObject({ zone: 'TORSO', amount: 3, armorReduction: 10 });
+  });
+
+  it('each archetype dies once, through the same death path', () => {
+    for (const archetype of ['runner', 'tank', 'screamer'] as const) {
+      const { g, enemy, aimAtZone } = standing(archetype);
+      g.enemies.frozen = false;
+      const died: string[] = [];
+      g.enemies.events.on('died', (e) => died.push(e.archetype));
+      for (let i = 0; i < 12 && enemy.alive; i++) {
+        aimAtZone('HEAD');
+        g.click();
+        g.seconds(0.3);
+      }
+      expect(enemy.state, archetype).toBe('DEAD');
+      expect(died).toEqual([archetype]);
+      expect(g.combat.get(enemy.id)?.health.isDead).toBe(true);
+    }
   });
 });
 

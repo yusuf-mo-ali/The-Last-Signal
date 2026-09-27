@@ -46,7 +46,7 @@ describe('EnemyManager: spawning and combat registration', () => {
 
   it('only implemented archetypes can be spawned', () => {
     const t = enemyTestWorld();
-    expect(() => t.manager.spawn('runner', [0, 0, 0])).toThrow(/no definition yet/);
+    expect(() => t.manager.spawn('climber', [0, 0, 0])).toThrow(/no definition yet/);
   });
 
   it('canStand: room for the body and ground under the feet (spawn validation)', () => {
@@ -245,8 +245,9 @@ describe('TrainingEncounter', () => {
     encounter.reset();
     for (const enemy of t.manager.enemies) {
       const p = enemy.motor.position;
-      // Beyond detection range (plus patrol radius when patrolling) of the spawn (0, 0, 14).
-      const reach = W.detectionRange + (enemy.patrols ? W.patrol.radius : 0);
+      // Beyond its detection range (plus patrol radius when patrolling) of the spawn (0, 0, 14).
+      const { detectionRange, patrol } = enemy.config;
+      const reach = detectionRange + (enemy.patrols ? patrol.radius : 0);
       expect(Math.hypot(p.x, p.z - 14), enemy.id).toBeGreaterThan(reach);
     }
     expect(ENEMY_RULES.maxAlive).toBeGreaterThanOrEqual(t.manager.enemies.length);

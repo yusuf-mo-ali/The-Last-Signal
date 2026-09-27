@@ -107,9 +107,13 @@ describe('the facility', () => {
     }
   });
 
-  it('the test encounter places every Walker where it fits, and the player spawn is clear', () => {
+  it('the test encounter places every enemy where its body fits, and the player spawn is clear', () => {
     for (const placement of TRAINING_ENEMIES.placements) {
-      expect(fitsWalker(...placement.position), placement.position.join(',')).toBe(true);
+      const body = ENEMY_STATS[placement.archetype].body;
+      expect(
+        bodyFits(FACILITY.brushes, ...placement.position, body, ENEMY_RULES.maxRise),
+        `${placement.archetype} at ${placement.position.join(',')}`,
+      ).toBe(true);
     }
     expect(fitsWalker(...FACILITY.spawn.position)).toBe(true);
   });

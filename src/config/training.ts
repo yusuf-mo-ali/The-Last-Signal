@@ -8,7 +8,7 @@
  * (`TRAINING_RANGE.enabled`), and the debug tools can still spawn dummies.
  */
 
-import type { DamageZone, ImplementedEnemyId } from './enemies';
+import type { DamageZone, EnemyModifierId, ImplementedEnemyId } from './enemies';
 import type { DropTableId } from './drops';
 
 export const TRAINING_DUMMY_KINDS = ['standard', 'zoned'] as const;
@@ -90,16 +90,21 @@ export interface TrainingEnemyPlacement {
   readonly yaw: number;
   /** Whether it wanders around its spawn point while idle (its archetype's patrol radius). */
   readonly patrol: boolean;
+  readonly traits?: readonly EnemyModifierId[];
 }
 
 /**
- * Phase 4 test encounter: Walkers placed in the yard so the enemy foundation can be played and
- * verified in every build before waves exist (D-042). Temporary, like the dummy range: the wave
- * system (Phase 6) replaces it (`enabled`).
+ * Test encounter: one of each archetype placed around the yard so the enemy foundation can be
+ * played and verified in every build before waves exist (D-042, D-043). Temporary, like the dummy
+ * range: the wave system (Phase 6) replaces it (`enabled`).
  *
- * The two sentries stand 14–15 m from the spawn, beyond the Walker's 12 m detection range, so a
- * player standing at the spawn is never engaged; walking about 6 m forward brings them in. The
- * third patrols the north-east yard, away from the control room's south door.
+ * Every enemy stands beyond its own detection range (plus its patrol radius) from the spawn, so a
+ * player standing at the spawn is never engaged:
+ * - a Helmeted Walker and an Armored Tank stand guard 8 m to either side of the path north
+ *   (14–15 m from the spawn); walking about 6 m forward brings them in;
+ * - a Runner patrols the north-east yard;
+ * - a Screamer waits north of the signal tower, out of sight of the spawn;
+ * - an Elite Walker patrols the north-west yard.
  */
 export const TRAINING_ENEMIES: {
   readonly enabled: boolean;
@@ -110,8 +115,22 @@ export const TRAINING_ENEMIES: {
   enabled: true,
   respawnDelay: 10,
   placements: [
-    { archetype: 'walker', position: [8, 0, 2], yaw: Math.PI / 2, patrol: false },
-    { archetype: 'walker', position: [-8, 0, 1], yaw: -Math.PI / 2, patrol: false },
-    { archetype: 'walker', position: [12, 0, -3], yaw: Math.PI / 2, patrol: true },
+    {
+      archetype: 'walker',
+      position: [8, 0, 2],
+      yaw: Math.PI / 2,
+      patrol: false,
+      traits: ['helmeted'],
+    },
+    {
+      archetype: 'tank',
+      position: [-8, 0, 1],
+      yaw: -Math.PI / 2,
+      patrol: false,
+      traits: ['armored'],
+    },
+    { archetype: 'runner', position: [12, 0, -6], yaw: Math.PI / 2, patrol: true },
+    { archetype: 'screamer', position: [0, 0, -9], yaw: Math.PI, patrol: false },
+    { archetype: 'walker', position: [-14, 0, -9], yaw: Math.PI, patrol: true, traits: ['elite'] },
   ],
 };

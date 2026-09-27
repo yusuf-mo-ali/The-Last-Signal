@@ -44,7 +44,7 @@ A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared a
 | 4–5 | More variety | Collect components | Screamer; first mutations |
 | 6–7 | More variety | Restore power | Tank |
 | 8–10 | Higher pressure | Restore power | First adaptations (Armored / Helmeted modifiers) |
-| 11–12 | Higher pressure | Repair transmitter | Climber (if in the v1 roster, O-3) |
+| 11–12 | Higher pressure | Repair transmitter | Stronger adaptations (the Climber only as an adaptive response to high-ground play, D-043) |
 | 13–15 | Complex combinations | Repair transmitter | Elite modifier |
 | 16–19 | Complex combinations | Charge transmitter | Mixed compositions; strongest mutations |
 | 20 | Boss / major event | Transmit final signal | The Siren (boss) |
@@ -176,6 +176,7 @@ Multipliers are configurable, and archetypes can override them (a Tank's body re
   - This naturally punishes many small hits (shotgun pellets, AR spray) more than a few large ones.
   - That is the mechanical meaning of "shotgun use → more armored enemies" (§15). It creates a real problem the player can solve by switching weapon or aiming better.
 - **Helmets (the "protected-head" counter)** absorb head damage until they break. Headshot-focused players are slowed down, not shut out, and knocking the helmet off feels good.
+- **Phase 5 (D-043):** armor can differ per zone (the Armored trait: torso 10, limbs 6, head none); helmets are breakable plates (50 durability) whose breaking staggers the wearer; a hit that armor or a helmet reduced shows a steel-blue hit marker, so the player can tell the target is protected. A Tank's stagger counts head damage only.
 - **Distance falloff** is configured per weapon.
 - **Hit reactions.** Enough damage within a short window triggers `STAGGER`. Tanks resist stagger except from headshots. Phase 3 implements the rule and the `staggered` event (damage within 1 s of the previous hit adds up; each target has a threshold, or none to be immune). Phase 4: a staggered enemy stops for its stagger duration and loses the attack it was winding up (§7.1).
 - **Feedback:**
@@ -212,13 +213,13 @@ Multipliers are configurable, and archetypes can override them (a Tank's body re
 |---|---|---|---|---|
 | **Walker** | Baseline; teaches headshots | Slow, high health, melee | Headshots, positioning | Yes |
 | **Runner** | Punishes standing still; dangerous in groups | Fast, low health, lunges | Crowd control, retreat paths | Yes |
-| **Tank** | Forces focus fire; blocks chokepoints | Very slow, very high health, body-shot resistant, stagger-immune | Aim for the head weak point; kite | Yes |
+| **Tank** | Forces focus fire; blocks chokepoints | Very slow, very high health, body-shot resistant; only headshots stagger it | Aim for the head weak point; kite | Yes |
 | **Screamer** | Forces target prioritisation | Keeps its distance; screams to alert and hasten nearby zombies; the scream triggers a screen/audio effect | Kill it first; interrupt the scream | Yes |
-| **Climber** | Counters camping on high ground | Scales walls using climb links; medium health | Move; watch the climb points | **Deferred [Open O-3]** |
+| **Climber** | Counters camping on high ground | Scales walls using climb links; medium health | Move; watch the climb points | **Deferred** (O-3 resolved, D-043): not in normal waves; possible adaptive response |
 
-**Why defer the Climber.** The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically: it needs climb links, vertical navigation and climb animations. Until it exists, the "elevated position" adaptation rule falls back to Runners with spawns biased toward flanking routes.
+**The v1 roster (O-3, resolved by D-043).** Walker, Runner, Tank and Screamer are the default roster: they are what normal waves are built from. The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically (climb links, vertical navigation, climb animations) and only matters against one play style, so it is **deferred and kept as adaptive content**: later, the adaptive system (§10) may bring Climbers in as its response to heavy high-ground use, rather than them appearing in every run. Until it exists, the "elevated position" adaptation rule falls back to Runners with spawns biased toward flanking routes. The code keeps room for it (an archetype is data plus a behaviour; climb links belong in the level's navigation data).
 
-**Modifiers** (overlays on any archetype, D-012):
+**Modifiers (traits)** (overlays on any archetype, D-012; implemented in Phase 5, §7.4):
 - **Armored:** flat armor on torso and limbs.
 - **Helmeted:** breakable head armor.
 - **Elite:** stat boost, a visual tell, and bonus rewards.
@@ -245,9 +246,57 @@ The first zombie, and the baseline the others are measured against. Values are i
 - **Idle:** without a target it stands, or wanders a few metres around where it was placed.
 - **Placeholder look:** a grey-box humanoid built from its own hit volumes (pale green head and arms, dark shirt and trousers, yellow eyes), so what you see is exactly what you can hit. Final models and animation come later (D-030).
 
-### 7.2 The test encounter (temporary, Phase 4)
+### 7.2 The test encounter (temporary, Phases 4–5)
 
-Until waves exist (Phase 6), every new run places three Walkers: two standing guard to either side of the yard (8 m off the path north from the spawn, 14–15 m from the spawn, so a player who stays at the spawn is left alone) and one wandering the north-east yard. A Walker whose body has gone comes back 10 s later. It is on in every build, like the training dummies, so the Walker can be played in production; the wave system replaces it.
+Until waves exist (Phase 6), every new run places one of each archetype, with each trait shown once:
+- a **Helmeted Walker** and an **Armored Tank** standing guard to either side of the yard (8 m off the path north from the spawn);
+- a **Runner** wandering the north-east yard;
+- a **Screamer** by the north wall;
+- an **Elite Walker** wandering the north-west yard.
+
+Each stands beyond its own detection range from the spawn, so a player who stays at the spawn is left alone. An enemy whose body has gone comes back 10 s later. The encounter is on in every build, like the training dummies, so the roster can be played in production; the wave system replaces it.
+
+### 7.3 The Runner (Phase 5, D-043)
+
+Pressure through movement: it changes *when* and *from where* the player must shoot. Values are in `src/config/enemies.ts`; the reasoning is in BALANCING.md §2.7.
+
+- **Fast and fragile:** 5.2 m/s, faster than the player walks (5) but slower than a sprint (7.5), so it can be outrun but not out-walked. It has 60 health: three Pistol body shots or one headshot, and any body shot staggers it.
+- **Sharp senses:** it notices the player from 15 m and reacts in 0.3 s.
+- **Weaves:** in the open, between 12 and 4 m, it zig-zags about 35° either side of its line to the player, so it is harder to track. It runs straight when a wall is in the way of the zig-zag, and in corridors and on routes.
+- **Leaps (the telegraph):** from about 3 m it crouches for 0.4 s (arms forward, an amber glow), then leaps about 2 m straight at where the player was and strikes for 10. The leap is committed: a side-step during the crouch makes it miss. After landing it recovers for 0.8 s, and it attacks at most every 1.8 s.
+- **Counter-play:** shoot it before it closes; a single body shot during its crouch or leap staggers it out of the attack; sidestep the leap.
+- **Look:** slighter and shorter than a Walker, leaning forward like a sprinter (the lean is part of its hit volumes: its head is where it is drawn), grey skin, a torn dark red top, red eyes.
+
+### 7.4 The Tank (Phase 5, D-043)
+
+A slow wall that must be shot in the head: it changes *where* the player must shoot. BALANCING.md §2.8.
+
+- **Tough body, weak head:** 360 health. Body shots do half damage and limb shots a third, and only damage to the head can stagger it: one Pistol headshot does (threshold 60). It takes six headshots, or about 28 body shots, to kill.
+- **Slow:** 1.1 m/s with a slow turn, so it can be kited, but it blocks corridors and doorways.
+- **Hits very hard:** a long, obvious 1.1 s wind-up (a red glow), then a wide swing for 35 within 2.4 m. Three hits kill a player at full health. No ranged attack.
+- **Look:** huge, dark and hunched, with a paler head so the weak point stands out.
+
+### 7.5 The Screamer (Phase 5, D-043)
+
+Support that never hurts the player itself: it changes *what* to shoot first. BALANCING.md §2.9.
+
+- **Keeps its distance:** it closes to about 11 m, holds its ground between 6 and 11 m facing the player, and backs away if the player comes closer than 6 m.
+- **The scream (the telegraph):** within 14 m and in sight, it throws its arms up and glows violet for 1.2 s, then screams. Everyone hears it within 18 m: nearby zombies learn where the player is (for 8 s) and move 35% faster for 6 s. The player sees a violet shockwave ring and, if within earshot, a violet pulse and shudder at the screen's edges. It can scream again 10 s after the last scream started.
+- **Interrupt it:** any hit of 25 or more during the wind-up staggers it and cancels the scream, and the cooldown is still spent.
+- **Fragile:** 80 health (four body shots or two headshots).
+- **Look:** tall and thin with a big pale head and a gaping mouth, violet eyes.
+
+### 7.6 Traits: Armored, Helmeted, Elite (Phase 5, D-043)
+
+Any archetype can carry any combination. Traits change the body's outline, so they read without relying on colour. BALANCING.md §2.10.
+
+| Trait | Effect | Tell | Counter-play |
+|---|---|---|---|
+| **Armored** | 10 flat armor on the torso and 6 on each limb (never below 1 damage); 10% slower | Steel plates on the chest, back and shoulders; a steel hit marker on mitigated hits | Headshots; heavy single hits |
+| **Helmeted** | A helmet absorbs up to 50 headshot damage. When it breaks, it falls off and the zombie staggers; after that, headshots land in full | A steel dome on the head, gone once broken | Knock the helmet off, then headshot |
+| **Elite** | 1.6× health, 1.1× speed, 1.3× damage, harder to stagger, always drops extra ammo | Bone spikes on the shoulders and spine, hot pale eyes | Focus it; worth the ammo |
+
+- Traits come from data: the wave generator (Phase 6), the adaptive system (Phase 8: "armored", "protected-head") and BLOOD MOON ("elite", Phase 7) will choose them. For now, the test encounter and the debug tools apply them.
 
 ---
 
@@ -314,7 +363,7 @@ The first four rules come from the plan. Exact thresholds go in `config/adaptati
 | Observed behaviour | Response |
 |---|---|
 | High shotgun usage | Higher chance of the **Armored** modifier |
-| Frequent high-ground use | More **Climbers** (fallback while the Climber is deferred: Runners plus flank-biased spawns) |
+| Frequent high-ground use | **Climbers** (deferred archetype, introduced only as this response, D-043; until it exists: Runners plus flank-biased spawns) |
 | High mobility (sprint and kite frequency) | More **Runners** |
 | Extreme headshot rate | Higher chance of the **Helmeted** modifier |
 | Camping in one area **[Proposed]** | Spawns biased toward that area's flanks; more Screamers |

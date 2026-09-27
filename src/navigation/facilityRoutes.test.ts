@@ -1,13 +1,14 @@
 /**
  * The authored route graph of the facility (D-042) is only useful if an enemy body can really
- * walk it. These tests check every node and walk every link, both ways, with a Walker's capsule
- * through the real collision, so a node too close to a wall or a link clipping an obstacle fails
- * here rather than as a zombie stuck in play.
+ * walk it. These tests check every node and walk every link, both ways, with the capsule of every
+ * implemented archetype (the Tank is the widest and tallest, D-043) through the real collision, so
+ * a node too close to a wall or a link clipping an obstacle fails here rather than as a zombie
+ * stuck in play.
  */
 
 import type { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { ENEMY_STATS } from '../config/enemies';
+import { ENEMY_STATS, IMPLEMENTED_ENEMY_IDS, type EnemyArchetypeConfig } from '../config/enemies';
 import { enemyMovementConfig } from '../enemies/body';
 import { NO_INTENT, PlayerMotor } from '../player/PlayerMotor';
 import { FACILITY, FACILITY_NAVIGATION } from '../world/levels/facility';
@@ -15,22 +16,21 @@ import { World } from '../world/World';
 import { RouteGraph } from './RouteGraph';
 
 const DT = 1 / 60;
-const WALKER = ENEMY_STATS.walker;
 const world = new World(FACILITY);
 const graph = new RouteGraph(FACILITY_NAVIGATION);
 
-function body(at: Vector3): PlayerMotor {
-  return new PlayerMotor(world.collision, enemyMovementConfig(WALKER), {
+function body(at: Vector3, config: EnemyArchetypeConfig): PlayerMotor {
+  return new PlayerMotor(world.collision, enemyMovementConfig(config), {
     position: at.clone(),
     killPlaneY: FACILITY.killPlaneY,
   });
 }
 
 /** Walks a Walker body straight at `to`; returns where it ended and how long it took. */
-function walk(from: Vector3, to: Vector3) {
-  const motor = body(from);
+function walk(from: Vector3, to: Vector3, config: EnemyArchetypeConfig) {
+  const motor = body(from, config);
   const length = Math.hypot(to.x - from.x, to.z - from.z);
-  const maxSteps = Math.ceil((length / WALKER.moveSpeed + 3) / DT);
+  const maxSteps = Math.ceil((length / config.moveSpeed + 3) / DT);
   let steps = 0;
   for (; steps < maxSteps; steps++) {
     const dx = to.x - motor.position.x;
@@ -49,9 +49,9 @@ describe('facility route graph', () => {
     expect(graph.isConnected()).toBe(true);
   });
 
-  it('every node stands on walkable floor with room for the body', () => {
+  it.each(IMPLEMENTED_ENEMY_IDS)('every node stands on walkable floor with room for a %s', (id) => {
     for (const node of graph.nodes) {
-      const motor = body(node.position);
+      const motor = body(node.position, ENEMY_STATS[id]);
       expect(motor.grounded, node.id).toBe(true);
       expect(Math.abs(motor.position.y - node.position.y), node.id).toBeLessThan(0.1);
       // Teleporting resolves overlaps: a node too close to a wall would have been pushed away.
@@ -67,7 +67,8 @@ describe('facility route graph', () => {
     }
   });
 
-  it('every link can be walked both ways by a Walker body, arriving at the right height', () => {
+  it.each(IMPLEMENTED_ENEMY_IDS)('every link can be walked both ways by a %s body', (id) => {
+    const config = ENEMY_STATS[id];
     for (const link of FACILITY_NAVIGATION.links) {
       for (const [a, b] of [
         [link.from, link.to],
@@ -75,8 +76,8 @@ describe('facility route graph', () => {
       ] as const) {
         const from = graph.position(graph.indexOf(a));
         const to = graph.position(graph.indexOf(b));
-        const result = walk(from, to);
-        const label = `${a} → ${b}`;
+        const result = walk(from, to, config);
+        const label = `${id}: ${a} → ${b}`;
         expect(
           Math.hypot(result.position.x - to.x, result.position.z - to.z),
           `${label}: arrival`,
@@ -85,7 +86,7 @@ describe('facility route graph', () => {
         expect(result.respawns, label).toBe(0);
         // No detour: straight walking takes about length / speed.
         expect(result.seconds, `${label}: time`).toBeLessThan(
-          from.distanceTo(to) / WALKER.moveSpeed + 1.5,
+          from.distanceTo(to) / config.moveSpeed + 1.5,
         );
       }
     }

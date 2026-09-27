@@ -75,6 +75,119 @@ export const HUMANOID_REACH_POSE: HitboxRigDefinition = {
   }),
 };
 
+/** Per-part scale factors for `scaleRig` (1 = the humanoid's own proportions). */
+export interface RigScale {
+  /** Sideways (x) positions. */
+  readonly width: number;
+  /** Heights (y). */
+  readonly height: number;
+  /** Front-to-back (z) positions. */
+  readonly depth: number;
+  readonly head: number;
+  readonly torso: number;
+  readonly arm: number;
+  readonly leg: number;
+  /** Extra sideways spread of the arms, so thicker arms stay clear of a wider torso. */
+  readonly shoulders: number;
+}
+
+/**
+ * A differently built humanoid from an existing rig (Phase 5 archetypes, D-043): positions scale
+ * per axis, radii per body part. Zones stay the same, so damage rules apply unchanged.
+ */
+export function scaleRig(rig: HitboxRigDefinition, id: string, s: RigScale): HitboxRigDefinition {
+  const radiusFactor = (zone: DamageZone): number =>
+    zone === 'HEAD'
+      ? s.head
+      : zone === 'TORSO'
+        ? s.torso
+        : zone === 'ARM_LEFT' || zone === 'ARM_RIGHT'
+          ? s.arm
+          : s.leg;
+  const point = (p: Point3, zone: DamageZone): Point3 => {
+    const spread = zone === 'ARM_LEFT' || zone === 'ARM_RIGHT' ? s.shoulders : 1;
+    return [p[0] * s.width * spread, p[1] * s.height, p[2] * s.depth];
+  };
+  return {
+    id,
+    shapes: rig.shapes.map((shape): HitboxShape => {
+      const radius = shape.radius * radiusFactor(shape.zone);
+      return shape.kind === 'sphere'
+        ? { ...shape, center: point(shape.center, shape.zone), radius }
+        : { ...shape, a: point(shape.a, shape.zone), b: point(shape.b, shape.zone), radius };
+    }),
+  };
+}
+
+/**
+ * The same rig with both arms swung up and forward over the head, `angleDeg` from hanging (135°:
+ * a Screamer's scream, D-043). The arms turn about the shoulders exactly as the drawn arms do, so
+ * they stay hittable where they are drawn.
+ */
+export function armsRaisedPose(
+  rig: HitboxRigDefinition,
+  id: string,
+  angleDeg = 135,
+): HitboxRigDefinition {
+  const angle = (angleDeg * Math.PI) / 180;
+  return {
+    id,
+    shapes: rig.shapes.map((shape) => {
+      if (shape.kind !== 'capsule' || (shape.zone !== 'ARM_LEFT' && shape.zone !== 'ARM_RIGHT')) {
+        return shape;
+      }
+      const length = Math.hypot(
+        shape.b[0] - shape.a[0],
+        shape.b[1] - shape.a[1],
+        shape.b[2] - shape.a[2],
+      );
+      // A hanging arm (0, −L, 0) turned about the shoulder's x axis.
+      const b: Point3 = [
+        shape.b[0],
+        shape.a[1] - length * Math.cos(angle),
+        shape.a[2] - length * Math.sin(angle),
+      ];
+      return { ...shape, b };
+    }),
+  };
+}
+
+/**
+ * The same rig leaning forward from the hips by `angle` radians (negative leans back): head, torso
+ * and arms turn about the top of the legs, the legs stay put (a Runner's sprinter's crouch, a
+ * Tank's hunch; D-043). It is part of the rig, not just the drawing, so the drawn body (built from
+ * the rig) and the hit volumes stay together.
+ */
+export function leanRig(rig: HitboxRigDefinition, id: string, angle: number): HitboxRigDefinition {
+  let hip = 0;
+  for (const shape of rig.shapes) {
+    if (shape.zone === 'LEG_LEFT' || shape.zone === 'LEG_RIGHT') {
+      hip = Math.max(
+        hip,
+        ...(shape.kind === 'capsule' ? [shape.a[1], shape.b[1]] : [shape.center[1]]),
+      );
+    }
+  }
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  // Forward is −z: a point above the hips moves toward −z as it leans.
+  const turn = (p: Point3): Point3 => {
+    const y = p[1] - hip;
+    return [p[0], hip + y * cos + p[2] * sin, p[2] * cos - y * sin];
+  };
+  return {
+    id,
+    shapes: rig.shapes.map((shape): HitboxShape => {
+      if (shape.zone === 'LEG_LEFT' || shape.zone === 'LEG_RIGHT') {
+        return shape;
+      }
+      return shape.kind === 'sphere'
+        ? { ...shape, center: turn(shape.center) }
+        : { ...shape, a: turn(shape.a), b: turn(shape.b) };
+    }),
+  };
+}
+
 export interface CombatRules {
   /**
    * The least damage a hit can do once armor has reduced it (GAME_DESIGN §6: flat armor with a

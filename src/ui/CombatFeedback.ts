@@ -1,6 +1,7 @@
 /**
  * Hit feedback (GAME_DESIGN §6, D-041), placeholder presentation until the UI phase:
- * - a hit marker on the crosshair: white for a hit, gold for a headshot, red and larger for a kill;
+ * - a hit marker on the crosshair: white for a hit, gold for a headshot, steel blue when armor or a
+ *   helmet took part of it (D-043), red and larger for a kill;
  * - optional damage numbers that rise from the hit point and fade (pooled DOM nodes, D-018).
  *
  * It only listens to combat events and reads the camera; it never changes the simulation. The
@@ -13,7 +14,8 @@ import type { CombatEvents } from '../combat/CombatSystem';
 import { COMBAT_FEEDBACK } from '../config/combat';
 import type { EventBus } from '../core/EventBus';
 
-export type HitMarkerKind = 'hit' | 'head' | 'kill';
+/** `armor`: armor or a plate (a helmet) took some of the hit (D-043). */
+export type HitMarkerKind = 'hit' | 'head' | 'armor' | 'kill';
 
 interface DamageNumber {
   readonly element: HTMLElement;
@@ -25,6 +27,7 @@ interface DamageNumber {
 const MARKER_TIME: Readonly<Record<HitMarkerKind, number>> = {
   hit: COMBAT_FEEDBACK.hitMarkerTime,
   head: COMBAT_FEEDBACK.headshotMarkerTime,
+  armor: COMBAT_FEEDBACK.headshotMarkerTime,
   kill: COMBAT_FEEDBACK.killMarkerTime,
 };
 /** Metres a damage number rises over its lifetime. */
@@ -76,7 +79,8 @@ export class CombatFeedback {
         if (e.killed) {
           this.kills++;
         }
-        this.showMarker(e.killed ? 'kill' : e.critical ? 'head' : 'hit');
+        const mitigated = e.absorbed > 0 || e.armorReduction > 0;
+        this.showMarker(e.killed ? 'kill' : mitigated ? 'armor' : e.critical ? 'head' : 'hit');
         if (this.showNumbers && e.amount > 0) {
           this.spawnNumber(e.point, e.amount, e.critical, e.killed);
         }

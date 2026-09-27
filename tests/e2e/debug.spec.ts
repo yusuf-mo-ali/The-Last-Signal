@@ -64,6 +64,13 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'clearEnemies',
     'freezeEnemies',
     'showAI',
+    // Phase 5 archetype and trait tools.
+    'spawnMixed',
+    'traits',
+    'setTraits',
+    'applyTrait',
+    'removeTrait',
+    'forceAbility',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
@@ -82,10 +89,10 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
   expect(text).toMatch(/draws \d+/);
   expect(text).toMatch(/state MAIN_MENU/);
   expect(text).toMatch(/weapon primary:pistol 12\/∞ ready {2}secondary locked/);
-  // Three training dummies and the three Walkers of the test encounter.
-  expect(text).toMatch(/combat targets 6\/6 alive/);
+  // Three training dummies and the five enemies of the test encounter (one of each archetype).
+  expect(text).toMatch(/combat targets 8\/8 alive/);
   expect(text).toMatch(
-    /enemies 3 alive \((IDLE|PATROL) \d(, (IDLE|PATROL) \d)?\) {2}player 100\/100/,
+    /enemies 5 alive \((IDLE|PATROL) \d(, (IDLE|PATROL) \d)?\) {2}player 100\/100/,
   );
 
   await page.keyboard.press('Backquote');

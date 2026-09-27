@@ -25,6 +25,7 @@ import type { FixedUpdateSystem } from '../core/Game';
 import { countDown } from '../weapons/timing';
 import type { Hitscan, HitscanTarget, TargetHit } from '../weapons/hitscan';
 import type { MeleeResult, ShotResult, Vec3Tuple, WeaponEvents } from '../weapons/types';
+import type { ArmorPlate } from './armor';
 import { computeDamage, type ZoneMultipliers } from './damage';
 import type { Health } from './Health';
 import type { HitboxRig } from './hitbox';
@@ -76,6 +77,10 @@ export interface DamagedEvent {
   readonly amount: number;
   /** What the hit was worth before it was capped by the health left. */
   readonly dealt: number;
+  /** Damage flat armor took off this hit (the target's and its zone's). */
+  readonly armorReduction: number;
+  /** Damage a breakable plate (a helmet) absorbed. */
+  readonly absorbed: number;
   /** Health left after the hit. */
   readonly health: number;
   readonly maxHealth: number;
@@ -97,6 +102,15 @@ export interface KilledEvent {
   readonly direction: Vec3Tuple;
 }
 
+/** A breakable plate (a helmet) was used up by a hit. */
+export interface ArmorBrokenEvent {
+  readonly targetId: string;
+  readonly plateId: string;
+  readonly zone: DamageZone;
+  readonly point: Vec3Tuple;
+  readonly direction: Vec3Tuple;
+}
+
 export interface StaggeredEvent {
   readonly targetId: string;
   readonly zone: DamageZone;
@@ -109,18 +123,33 @@ export interface CombatEvents {
   staggered: StaggeredEvent;
   killed: KilledEvent;
   revived: { readonly targetId: string };
+  armorBroken: ArmorBrokenEvent;
 }
 
-export interface CombatTargetOptions {
+/**
+ * How a target takes damage (D-041, D-043): overrides of the plan's zone multipliers, flat armor
+ * (on every zone, and per zone), breakable plates, resistance and stagger. Traits change these at
+ * run time through `CombatSystem.configure`.
+ */
+export interface DamageProfile {
+  readonly zoneMultipliers?: ZoneMultipliers;
+  readonly armor?: number;
+  /** Flat armor per hit on particular zones, added to `armor`. */
+  readonly zoneArmor?: Readonly<Partial<Record<DamageZone, number>>>;
+  /** Breakable armor (state owned by the target's owner). */
+  readonly plates?: readonly ArmorPlate[];
+  readonly resistance?: number;
+  /** Damage within the stagger window that causes a stagger; omitted = never staggers. */
+  readonly staggerThreshold?: number;
+  /** Only damage to these zones counts towards a stagger; omitted = every zone. */
+  readonly staggerZones?: readonly DamageZone[];
+}
+
+export interface CombatTargetOptions extends DamageProfile {
   /** Unique among the registered targets. */
   readonly id: string;
   readonly rig: HitboxRig;
   readonly health: Health;
-  readonly zoneMultipliers?: ZoneMultipliers;
-  readonly armor?: number;
-  readonly resistance?: number;
-  /** Damage within the stagger window that causes a stagger; omitted = never staggers. */
-  readonly staggerThreshold?: number;
   /** Called once when the target dies, before the `killed` event: the owner's deactivation hook. */
   readonly onKilled?: (event: KilledEvent) => void;
 }
@@ -132,15 +161,30 @@ export interface CombatTarget {
   readonly health: Health;
   readonly zoneMultipliers: ZoneMultipliers | undefined;
   readonly armor: number;
+  readonly zoneArmor: Readonly<Partial<Record<DamageZone, number>>>;
+  readonly plates: readonly ArmorPlate[];
   readonly resistance: number;
   readonly staggerThreshold: number;
+  readonly staggerZones: readonly DamageZone[] | undefined;
 }
 
-interface TargetRecord extends CombatTarget {
+interface TargetRecord {
+  readonly id: string;
+  readonly rig: HitboxRig;
+  readonly health: Health;
+  zoneMultipliers: ZoneMultipliers | undefined;
+  armor: number;
+  zoneArmor: Readonly<Partial<Record<DamageZone, number>>>;
+  plates: readonly ArmorPlate[];
+  resistance: number;
+  staggerThreshold: number;
+  staggerZones: readonly DamageZone[] | undefined;
   readonly onKilled: ((event: KilledEvent) => void) | undefined;
   staggerDamage: number;
   staggerTimer: number;
 }
+
+const NO_ZONE_ARMOR: Readonly<Partial<Record<DamageZone, number>>> = {};
 
 export interface CombatSystemOptions {
   readonly hitscan: Hitscan;
@@ -201,17 +245,34 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
       id: options.id,
       rig: options.rig,
       health: options.health,
-      zoneMultipliers: options.zoneMultipliers,
-      armor: options.armor ?? 0,
-      resistance: options.resistance ?? 0,
-      staggerThreshold: options.staggerThreshold ?? Number.POSITIVE_INFINITY,
+      zoneMultipliers: undefined,
+      armor: 0,
+      zoneArmor: NO_ZONE_ARMOR,
+      plates: [],
+      resistance: 0,
+      staggerThreshold: Number.POSITIVE_INFINITY,
+      staggerZones: undefined,
       onKilled: options.onKilled,
       staggerDamage: 0,
       staggerTimer: 0,
     };
+    setProfile(record, options);
     this.records.set(record.id, record);
     this.list = [...this.list, record];
     return record;
+  }
+
+  /**
+   * Replaces how a registered target takes damage (a trait added or removed). Returns whether the
+   * target is registered.
+   */
+  configure(id: string, profile: DamageProfile): boolean {
+    const record = this.records.get(id);
+    if (!record) {
+      return false;
+    }
+    setProfile(record, profile);
+    return true;
   }
 
   /** Unregisters a target (despawned, returned to a pool). Returns whether it was registered. */
@@ -347,12 +408,45 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
         headshotMultiplier: hit.headshotMultiplier,
         zoneMultipliers: record.zoneMultipliers,
         attackerMultiplier: this.attackerMultiplier,
-        armor: record.armor,
+        armor: record.armor + (record.zoneArmor[hit.zone] ?? 0),
         resistance: record.resistance,
       },
       this.rules,
     );
-    return this.apply(record, damage.amount, damage.critical, hit);
+    // Breakable plates over the zone take what they can before health does.
+    let amount = damage.amount;
+    let absorbed = 0;
+    const broken: ArmorPlate[] = [];
+    for (const plate of record.plates) {
+      if (amount > 0 && plate.covers(hit.zone)) {
+        const taken = plate.absorb(amount);
+        amount -= taken;
+        absorbed += taken;
+        if (plate.broken) {
+          broken.push(plate);
+        }
+      }
+    }
+    const event = this.apply(
+      record,
+      amount,
+      damage.critical,
+      { armorReduction: damage.armorReduction, absorbed },
+      hit,
+    );
+    for (const plate of broken) {
+      this.events.emit('armorBroken', {
+        targetId: record.id,
+        plateId: plate.id,
+        zone: hit.zone,
+        point: hit.point,
+        direction: hit.direction,
+      });
+      if (plate.staggerOnBreak && record.health.isAlive) {
+        this.stagger(record, hit);
+      }
+    }
+    return event;
   }
 
   /**
@@ -366,7 +460,7 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
     }
     const p = record.rig.position;
     const amount = Number.isNaN(damage.amount) ? 0 : Math.max(0, damage.amount);
-    return this.apply(record, amount, damage.zone === 'HEAD', {
+    return this.apply(record, amount, damage.zone === 'HEAD', NO_MITIGATION, {
       zone: damage.zone ?? 'TORSO',
       weaponId: null,
       source: 'direct',
@@ -387,6 +481,7 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
     record: TargetRecord,
     amount: number,
     critical: boolean,
+    mitigation: Mitigation,
     hit: Pick<HitInput, 'zone' | 'source' | 'quick' | 'point' | 'direction' | 'distance'> & {
       readonly weaponId: WeaponId | null;
     },
@@ -401,6 +496,8 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
       critical,
       amount: outcome.applied,
       dealt: amount,
+      armorReduction: mitigation.armorReduction,
+      absorbed: mitigation.absorbed,
       health: record.health.current,
       maxHealth: record.health.max,
       killed: outcome.killed,
@@ -425,7 +522,11 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
       };
       record.onKilled?.(killed);
       this.events.emit('killed', killed);
-    } else if (outcome.applied > 0 && Number.isFinite(record.staggerThreshold)) {
+    } else if (
+      outcome.applied > 0 &&
+      Number.isFinite(record.staggerThreshold) &&
+      (record.staggerZones === undefined || record.staggerZones.includes(hit.zone))
+    ) {
       // Hit reaction: damage close together adds up; enough of it staggers.
       if (record.staggerTimer <= 0) {
         record.staggerDamage = 0;
@@ -433,16 +534,20 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
       record.staggerDamage += outcome.applied;
       record.staggerTimer = this.rules.staggerWindow;
       if (record.staggerDamage >= record.staggerThreshold) {
-        record.staggerDamage = 0;
-        this.events.emit('staggered', {
-          targetId: record.id,
-          zone: hit.zone,
-          point: hit.point,
-          direction: hit.direction,
-        });
+        this.stagger(record, hit);
       }
     }
     return event;
+  }
+
+  private stagger(record: TargetRecord, hit: Pick<HitInput, 'zone' | 'point' | 'direction'>): void {
+    record.staggerDamage = 0;
+    this.events.emit('staggered', {
+      targetId: record.id,
+      zone: hit.zone,
+      point: hit.point,
+      direction: hit.direction,
+    });
   }
 
   dispose(): void {
@@ -452,4 +557,21 @@ export class CombatSystem implements FixedUpdateSystem, HitscanTarget {
     this.unsubscribe.length = 0;
     this.clear();
   }
+}
+
+interface Mitigation {
+  readonly armorReduction: number;
+  readonly absorbed: number;
+}
+
+const NO_MITIGATION: Mitigation = { armorReduction: 0, absorbed: 0 };
+
+function setProfile(record: TargetRecord, profile: DamageProfile): void {
+  record.zoneMultipliers = profile.zoneMultipliers;
+  record.armor = profile.armor ?? 0;
+  record.zoneArmor = profile.zoneArmor ?? NO_ZONE_ARMOR;
+  record.plates = profile.plates ?? [];
+  record.resistance = profile.resistance ?? 0;
+  record.staggerThreshold = profile.staggerThreshold ?? Number.POSITIVE_INFINITY;
+  record.staggerZones = profile.staggerZones;
 }

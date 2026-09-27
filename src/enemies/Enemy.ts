@@ -9,26 +9,42 @@
  * - AI: an explicit `EnemyStateMachine` plus the perception, attack, navigation and patrol data
  *   the brain works with.
  *
- * Browser-independent. Instances are pooled and reused: `prepare` resets everything.
+ * - Traits (D-043): `config` is the archetype with its traits folded in (`applyTraits`); breakable
+ *   plates (a helmet) are per-enemy state in `plates`.
+ *
+ * Browser-independent. Instances are pooled per archetype and reused: `prepare` resets everything.
  */
 
 import { Vector3 } from 'three';
+import { ArmorPlate } from '../combat/armor';
 import { Health } from '../combat/Health';
 import { HitboxRig } from '../combat/hitbox';
 import type { AiState, EnemyArchetypeConfig } from '../config/enemies';
+import type { PlayerMovementConfig } from '../config/player';
+import { applyTraits, type EnemyConfig } from '../config/traits';
 import type { CollisionWorld } from '../physics/CollisionWorld';
 import { PlayerMotor } from '../player/PlayerMotor';
 import { EnemyStateMachine, type EnemyStateListener } from './ai/EnemyStateMachine';
 import { enemyMovementConfig } from './body';
 import type { EnemyTarget } from './types';
 
-export type AttackPhase = 'none' | 'windup' | 'recovery';
+/** `lunge`: a committed leap between the wind-up and the strike (archetypes with `attack.lunge`). */
+export type AttackPhase = 'none' | 'windup' | 'lunge' | 'recovery';
 
 /** How the enemy is currently getting to its target. */
 export type NavMode = 'none' | 'direct' | 'route';
 
+type MutableMovement = { -readonly [K in keyof PlayerMovementConfig]: PlayerMovementConfig[K] };
+
 export class Enemy {
-  readonly config: EnemyArchetypeConfig;
+  /** The archetype this (pooled) body was built for: size, rig and poses never change. */
+  readonly archetype: EnemyArchetypeConfig;
+  /** The archetype with its traits folded in (changes when traits are added or removed). */
+  config: EnemyConfig;
+  /** Breakable armor from traits, in `config.plates` order. */
+  plates: ArmorPlate[] = [];
+  /** Bumped whenever `config` or `plates` change (views rebuild their look). */
+  configVersion = 0;
   readonly motor: PlayerMotor;
   readonly rig: HitboxRig;
   readonly health: Health;
@@ -68,6 +84,8 @@ export class Enemy {
   attackYaw = 0;
   /** Attacks started since spawning (tests, debug). */
   attacks = 0;
+  /** Which way its zig-zag approach currently heads (−1 left, 1 right, 0 straight). */
+  weaveSide = 0;
 
   // ---- stagger, idle, patrol ----------------------------------------------------------------
   staggerTimer = 0;
@@ -100,6 +118,14 @@ export class Enemy {
   faceYaw: number | null = null;
   /** Push away from neighbours this step, m/s (world XZ). */
   readonly separation = new Vector3();
+  /** Multiplies its walking speed and acceleration this step (a lunge). */
+  speedScale = 1;
+  accelerationScale = 1;
+  /** A timed speed boost (an alarm's haste): the multiplier, until this sim time. */
+  hasteMultiplier = 1;
+  hasteUntil = Number.NEGATIVE_INFINITY;
+  /** Backing away from its target (keeping its distance). */
+  retreating = false;
 
   // ---- lifecycle ----------------------------------------------------------------------------
   /** Seconds a dead body has left before it is removed. */
@@ -109,20 +135,25 @@ export class Enemy {
   /** `motor.respawns` at spawn: a change means it fell out of the level (a safety net). */
   respawnsAtSpawn = 0;
 
+  /** The motor's settings, owned by this enemy: speed follows traits, haste and lunges. */
+  private readonly movement: MutableMovement;
+
   constructor(
-    config: EnemyArchetypeConfig,
+    archetype: EnemyArchetypeConfig,
     world: CollisionWorld,
     killPlaneY: number,
     onStateChange: (enemy: Enemy, from: AiState, to: AiState) => void,
     strict = false,
   ) {
-    this.config = config;
-    this.motor = new PlayerMotor(world, enemyMovementConfig(config), {
+    this.archetype = archetype;
+    this.config = applyTraits(archetype);
+    this.movement = { ...enemyMovementConfig(archetype) };
+    this.motor = new PlayerMotor(world, this.movement, {
       position: new Vector3(),
       killPlaneY,
     });
-    this.rig = new HitboxRig(config.rig);
-    this.health = new Health({ max: config.health });
+    this.rig = new HitboxRig(archetype.rig);
+    this.health = new Health({ max: archetype.health });
     const listener: EnemyStateListener = (from, to) => {
       onStateChange(this, from, to);
     };
@@ -138,11 +169,57 @@ export class Enemy {
     return !this.despawned && this.health.isAlive;
   }
 
+  /** Speed multiplier from haste at sim time `now` (1 when none is active). */
+  haste(now: number): number {
+    return now < this.hasteUntil ? this.hasteMultiplier : 1;
+  }
+
+  /** Its top speed this step (m/s): config × the brain's scale × haste. */
+  get walkSpeed(): number {
+    return this.movement.walkSpeed;
+  }
+
+  /** Sets the motor's speed for this step from its config, the brain's scale and haste. */
+  applySpeed(now: number): void {
+    this.movement.walkSpeed = this.config.moveSpeed * this.speedScale * this.haste(now);
+    const acceleration = this.config.acceleration * this.accelerationScale;
+    this.movement.groundAcceleration = acceleration;
+    this.movement.groundDeceleration = acceleration * 1.5;
+  }
+
+  /**
+   * Replaces its traits: new stats (health keeps its fraction), plates kept where the same plate
+   * is still worn (a broken helmet stays broken), new ones whole.
+   */
+  setConfig(config: EnemyConfig): void {
+    this.config = config;
+    if (this.health.isAlive) {
+      this.health.setMax(config.health, true);
+    }
+    const previous = this.plates;
+    this.plates = config.plates.map(
+      (definition) =>
+        previous.find((plate) => plate.id === definition.id) ?? new ArmorPlate(definition),
+    );
+    this.configVersion++;
+  }
+
   /** Readies a (new or pooled) enemy to enter the world at `position`, facing `yaw`. */
-  prepare(id: string, spawnNumber: number, position: Vector3, yaw: number, patrols: boolean): void {
+  prepare(
+    id: string,
+    spawnNumber: number,
+    position: Vector3,
+    yaw: number,
+    patrols: boolean,
+    config: EnemyConfig = applyTraits(this.archetype),
+  ): void {
     this.id = id;
     this.spawnNumber = spawnNumber;
     this.despawned = false;
+    this.config = config;
+    this.plates = config.plates.map((definition) => new ArmorPlate(definition));
+    this.configVersion++;
+    this.health.setMax(config.health);
     this.health.revive();
     this.fsm.reset();
     this.motor.teleport(position);
@@ -159,6 +236,7 @@ export class Enemy {
     this.attackTimer = 0;
     this.attackCooldown = 0;
     this.attacks = 0;
+    this.weaveSide = 0;
     this.staggerTimer = 0;
     this.idleTimer = 0;
     this.patrolTimer = 0;
@@ -174,6 +252,12 @@ export class Enemy {
     this.moveSpeed = 0;
     this.faceYaw = null;
     this.separation.set(0, 0, 0);
+    this.speedScale = 1;
+    this.accelerationScale = 1;
+    this.hasteMultiplier = 1;
+    this.hasteUntil = Number.NEGATIVE_INFINITY;
+    this.retreating = false;
+    this.applySpeed(0);
     this.corpseTimer = 0;
     this.rig.setPose(this.config.rig);
     this.syncRig();

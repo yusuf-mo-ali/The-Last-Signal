@@ -2,7 +2,7 @@
 
 The tuning log (plan §32, §36): every gameplay number that affects feel or difficulty, where it lives, why it has its value, and how it changed. Values live in `src/config/` only (plan §31); logic never hard-codes them.
 
-> **Status (Phase 4):** Pass 1 (functional). Player movement, the first weapons (Pistol, Bare Hands), the combat rules, the first zombie (the Walker) and the player's health have starting values. Nothing has been play-tested by hand yet, and there are no waves, so how many Walkers a player can handle is unknown until Pass 2.
+> **Status (Phase 5):** Pass 1 (functional). Player movement, the first weapons (Pistol, Bare Hands), the combat rules, the v1 zombie roster (Walker, Runner, Tank, Screamer), the three traits (Armored, Helmeted, Elite) and the player's health have starting values. Only the Walker has been play-tested by hand (Phase 4); there are no waves, so how many zombies of each kind a player can handle is unknown until Pass 2.
 
 ---
 
@@ -95,7 +95,7 @@ Balance is never tuned from assumptions alone. Three passes:
 
 | Rule | Setting | Why |
 |---|---|---|
-| Minimum damage after armor | 1 per hit | GAME_DESIGN §6: armor is flat with a floor. No target has armor yet |
+| Minimum damage after armor | 1 per hit | GAME_DESIGN §6: armor is flat with a floor. Used by the Armored trait (Phase 5) |
 | Stagger window | 1 s | Damage within 1 s of the previous hit adds up towards a stagger |
 | Attacker multiplier | 1 | Hook for damage upgrades (Phase 9) |
 
@@ -111,6 +111,8 @@ Balance is never tuned from assumptions alone. Three passes:
 | Pickups on the ground at once | 16 (oldest removed) | Bounded cost |
 | Training dummy drop table | ammo, 50 % | Test value, not an enemy drop rate |
 | Walker drop table | ammo, 20 % | Phase 4 placeholder: a trickle, not an economy. The starter Pistol's reserve is unlimited, so it only matters once a limited-reserve weapon exists |
+| Runner / Screamer / Tank drop tables | ammo, 15 % / 30 % / 60 % | Phase 5 placeholders, roughly in proportion to the effort each takes to kill |
+| Elite bonus table | ammo, 100 % (on top of its archetype's table) | "Bonus rewards" (GAME_DESIGN §7): an Elite always pays out |
 
 The Scavenger bonus and the ammo economy are Pass-2 work (waves and progression phases).
 
@@ -141,12 +143,84 @@ The baseline zombie (GAME_DESIGN §7.1): slow, durable, melee only. Every other 
 | Cooldown | 1.6 s (from the start of an attack) | At most 9.4 damage per second per Walker: a lone Walker kills a player who stands still in ~10 s, two in ~5 s |
 | Arc / vertical reach | 120° / 1.2 m | Committed: a player who gets behind it during the wind-up is missed. Reaches a player on a crate or the dock edge, not on the catwalk |
 | Stagger threshold / duration | 35 in 1 s / 0.7 s | Any headshot (65) staggers; two quick body shots (52) do. The stagger lasts as long as a wind-up and cancels one in progress: a well-timed headshot stops an attack |
-| Armor / resistance | 0 / 0 | Armored enemies are Phase 5 modifiers |
+| Armor / resistance | 0 / 0 | Armor comes from the Armored trait (§2.10) |
 | Patrol | 4 m around its post, pauses 2–4 s, at 0.45 × speed | Only when placed with patrol on; ambience, not threat |
 | Corpse time | 5 s, then sinks | Readable kills without clutter |
 | Threat cost | 1 | The unit of the wave budget (Phase 6); other archetypes cost relative to it |
 
-### 2.7 Player health (`src/config/player.ts`, Phase 4)
+### 2.7 The Runner (`src/config/enemies.ts`, Phase 5, D-043)
+
+Pressure through movement (GAME_DESIGN §7.3): it decides *when* the player must shoot, not how long.
+
+| Value | Setting | Why |
+|---|---|---|
+| Health | 60 | Half a Walker: three Pistol body shots, one headshot (65 ≥ 60, tested). Punishes missing, rewards a calm first shot |
+| Move speed | 5.2 m/s | Just faster than the player walks (5) and clearly slower than a sprint (7.5): walking away does not work, sprinting does (tested) |
+| Turn rate / acceleration | 6 rad/s / 14 m/s² | Agile: it turns round in about half a second |
+| Detection / reaction | 15 m / 0.3 s | It notices first and reacts fast: the player has little warning, so it must be dealt with on sight |
+| Lose range / memory | 28 m / 6 s | Once on the player, it stays on them |
+| Weave | ±35°, side changes every ~1.2 s, between 12 and 4 m, only where walkable | Harder to track in the open (it strays more than 0.6 m from the straight line, tested; up to ~1.9 m measured), while its closing speed stays ~4.3 m/s |
+| Attack range / reach | 3.2 m / 1.4 m | Its attack starts out of arm's reach: the leap closes the gap |
+| Wind-up (telegraph) | 0.4 s | Short but readable (a crouch, amber glow): reaction ~0.25 s, then a step aside |
+| Leap | 2.2 m at 9 m/s (~0.25 s), committed; stops a body's width from the target | Lands from 3.2 m (2.2 + 1.4 reach = 3.6 ≥ 3.2); a side-step during the wind-up makes it miss (tested) |
+| Attack damage / cooldown | 10 / 1.8 s | Light and not especially frequent (5.6 DPS vs the Walker's 9.4): its danger is getting to the player and in groups, not its hit |
+| Recovery | 0.8 s | After a leap it is exposed |
+| Stagger threshold / duration | 20 / 0.45 s | Any body shot staggers it, and cancels a leap in progress |
+| Patrol | 5 m, pauses 1.5–3 s, 0.35 × speed | Restless |
+| Threat cost | 1.5 | Between the Walker (1) and the Screamer (2) |
+| Drops | ammo, 15 % | |
+
+### 2.8 The Tank (`src/config/enemies.ts`, Phase 5, D-043)
+
+A slow wall with a weak head (GAME_DESIGN §7.4): it decides *where* the player must shoot.
+
+| Value | Setting | Why |
+|---|---|---|
+| Health | 360 | Three Walkers' worth: 6 Pistol headshots (tested), a whole magazine at best |
+| Zone multipliers | torso × 0.5, arms and legs × 0.35, head unchanged | Body shots are soaked (13 per torso shot: 28 to kill, tested); headshots keep full value, so aim matters more than volume |
+| Stagger | 60 within 1 s, **head only**, 0.6 s | A Pistol headshot staggers it; body damage never does. "Stagger-immune except from headshots" (GAME_DESIGN §6) |
+| Move speed / turn / acceleration | 1.1 m/s / 1.8 rad/s / 3 m/s² | Slower than a Walker; easy to kite in the open, a problem in doorways |
+| Detection / reaction | 10 m / 0.8 s | Dull senses: it can be avoided |
+| Lose range / memory | 20 m / 8 s | It gives up slowly |
+| Attack damage | 35 | Three hits kill a full-health player: every hit matters |
+| Attack range / reach / arc | 1.9 m / 2.4 m / 150° | Big arms: harder to slip round than a Walker |
+| Wind-up / recovery / cooldown | 1.1 s / 0.9 s / 2.6 s | The longest telegraph (red glow): fair warning for a heavy hit, and a long window to punish |
+| Body | radius 0.5 m, 2.25 m tall | Fits every route link of the facility (tested) |
+| Threat cost | 4 | The most expensive regular zombie |
+| Drops | ammo, 60 % | |
+
+### 2.9 The Screamer (`src/config/enemies.ts`, Phase 5, D-043)
+
+Support (GAME_DESIGN §7.5): it decides *what* the player shoots first.
+
+| Value | Setting | Why |
+|---|---|---|
+| Health | 80 | Four Pistol body shots or two headshots: killable quickly once targeted |
+| Stagger | 25 within 1 s, 0.8 s | Any body shot interrupts a scream in progress |
+| Move speed / turn / acceleration | 2.6 m/s / 4 rad/s / 8 m/s² | Faster than a Walker, so it can keep its distance |
+| Detection / reaction | 16 m / 0.4 s | It spots the player from the furthest away |
+| Preferred range | 6–11 m | Close enough to scream (14 m), far enough to be hard to reach |
+| Scream range (attack range) | 14 m, in sight | It screams at a player it can see |
+| Wind-up (telegraph) | 1.2 s, arms up, violet glow | Long enough to see from range and shoot it (the counter-play) |
+| Recovery / cooldown | 1.0 s / 10 s (spent when the scream starts) | One scream per ten seconds at most; an interrupted scream still costs the full cooldown |
+| Alarm radius | 18 m (half that in height) | Covers most of the yard from its post, not the whole map |
+| Alert duration | 8 s | Zombies that heard it know where the player is for 8 s, whatever the range or sight |
+| Haste | × 1.35 for 6 s (refreshed, not stacked) | A Walker becomes 2.2 m/s, a Tank 1.5: a real but short surge |
+| Damage | 0 | It never hurts the player itself |
+| Threat cost | 2 | |
+| Drops | ammo, 30 % | |
+
+### 2.10 Traits (`src/config/traits.ts`, Phase 5, D-043)
+
+Overlays on any archetype (GAME_DESIGN §7.6). Applied in a fixed order (Armored, Helmeted, Elite); multipliers multiply, armor adds up.
+
+| Trait | Values | Why |
+|---|---|---|
+| **Armored** | armor torso 10, each limb 6, head 0; speed × 0.9; threat × 1.5 | A Pistol torso shot does 16 instead of 26; a limb shot 10.9 instead of 16.9; a headshot is untouched. Punishes body spam and pellets (plan §15, "shotgun use → more armored") and rewards headshots. An Armored Tank's torso takes 3 per Pistol shot |
+| **Helmeted** | helmet on the head: 50 durability, staggers when it breaks; threat × 1.3 | The first Pistol headshot is absorbed (15 gets through) and knocks it off with a stagger; the second lands in full. A Helmeted Walker takes three headshots instead of two |
+| **Elite** | health × 1.6, speed × 1.1, damage × 1.3, stagger threshold × 1.5, threat × 2.5, bonus drop (ammo, 100 %) | An Elite Walker has 192 health (3 headshots), hits for 19.5 and still staggers from a headshot (65 ≥ 52.5); an Elite Tank has 576 health |
+
+### 2.11 Player health (`src/config/player.ts`, Phase 4)
 
 | Value | Setting | Why |
 |---|---|---|
@@ -154,20 +228,21 @@ The baseline zombie (GAME_DESIGN §7.1): slow, durable, melee only. Every other 
 | Damage window | `WAVE_ACTIVE` and `BOSS` only | D-029; a run is one open-ended wave until the wave system (Phase 6) |
 | Regeneration | none | GAME_DESIGN §4.2 [Proposed]; healing arrives with upgrades and pickups |
 
-### 2.8 Shared enemy rules (`ENEMY_RULES`, Phase 4)
+### 2.12 Shared enemy rules (`ENEMY_RULES`, Phases 4–5)
 
 | Value | Setting | Why |
 |---|---|---|
 | Think interval | 0.1 s (10 Hz), spread over the steps | Decisions within the plan's 5–10 Hz; timing stays exact every step |
 | Living enemies, hard cap | 64 | Above the planned wave default (24) and the stress test (60); waves set their own lower cap |
-| Separation | within 0.8 m, up to 2.5 m/s of push | A little more than two body radii (0.7 m): a crowd spreads out instead of stacking |
+| Separation | within 0.8 m (or both radii + 0.1 m, if more), up to 2.5 m/s of push | A little more than two Walker radii (0.7 m): a crowd spreads out instead of stacking. Big bodies (a Tank) need more room |
+| Separation vs closing speed | room + closing speed × 0.5 s; push + closing speed × 1.5 | Phase 5: with the flat push, a sprinting Runner (5.2 m/s) ran through an oncoming enemy (centres 0.2–0.34 m apart); with anticipation it keeps ≥ 0.73 m, more than both radii (0.65), from any archetype head-on (tested). Walkers in a crowd barely close on each other, so it hardly changes them |
 | Route: arrival / re-plan | 0.6 m / every 1 s (or when the goal changes) | Smooth corners without overshooting doorways |
 | Stuck | < 0.2 m of progress in 0.8 s | Short enough to recover before it looks broken |
 | Straight-line test | within 0.5 m of height; rays at 0.4 m (knee) and 1.3 m (chest) | Crates, walls, jambs and low ducts block it; steps and ramps do not |
 
-### 2.9 Test encounter (`src/config/training.ts`, Phase 4, temporary)
+### 2.13 Test encounter (`src/config/training.ts`, Phases 4–5, temporary)
 
-Three Walkers (two sentries 14–15 m from the spawn, beyond detection; one patrolling the north-east yard), each back 10 s after its body is removed. Validation values, not balance: the wave system replaces them.
+Five enemies: a Helmeted Walker and an Armored Tank as sentries 14–15 m from the spawn; a Runner patrolling the north-east yard; a Screamer by the north wall; an Elite Walker patrolling the north-west yard. Each stands beyond its own detection range (plus its patrol radius) from the spawn (tested) and comes back 10 s after its body is removed. Validation values, not balance: the wave system replaces them.
 
 ---
 
@@ -180,3 +255,5 @@ Three Walkers (two sentries 14–15 m from the spawn, beyond detection; one patr
 | 2026-09-26 | Pistol recoil recovery | 7 → 9 °/s (before release) | The design intent "the kick settles within one shot interval" failed at 7 °/s (0.19 s > 0.167 s) |
 | 2026-09-26 | Combat rules, zone multipliers in use, humanoid rig, drops, training dummies | Initial Pass-1 values | Phase 3 (D-041). Zone multipliers are the plan's example; HEAD follows each weapon's headshot multiplier |
 | 2026-09-26 | Walker, player health, shared enemy rules, Walker drops, test encounter | Initial Pass-1 values | Phase 4 (D-042). Verified by automated tests only (time-to-kill both ways, attack timing, dodging the wind-up, stagger); not play-tested by hand |
+| 2026-09-27 | Runner, Tank, Screamer, traits, their drops, test encounter | Initial Pass-1 values | Phase 5 (D-043). Verified by automated tests only (time-to-kill, attack timing, the leap, head-only stagger, the scream and its response, trait damage); not play-tested by hand |
+| 2026-09-27 | Separation | room = max(0.8 m, both radii + 0.1 m) + closing speed × 0.5 s; push + closing speed × 1.5 | Phase 5 head-on tests: a Runner ran through oncoming enemies with the flat push. A first try (push ≥ 1.5 × the faster body's speed) did not help head-on (planted-bug run) and was replaced |

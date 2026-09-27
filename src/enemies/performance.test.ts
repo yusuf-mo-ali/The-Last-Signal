@@ -1,8 +1,10 @@
 /**
  * Enemy simulation cost as the crowd grows (plan §11 "no expensive logic every render frame",
- * D-037 budget: a simulation step ≤ 4 ms with the maximum alive enemies). 1–64 Walkers chase a
- * target that keeps moving around the facility yard, the expensive case: every one of them
- * steering, re-planning, colliding and pushing apart.
+ * D-037 budget: a simulation step ≤ 4 ms with the maximum alive enemies). 1–64 Walkers, then 1–64
+ * of the mixed default roster (Phase 5: Walkers, Runners, Tanks, Screamers, D-043), chase a target
+ * that keeps moving around the facility yard, the expensive case: every one of them steering,
+ * re-planning, colliding and pushing apart (and in the mixed crowd, Runners weaving and leaping,
+ * Screamers keeping their distance and screaming, hastening the rest).
  *
  * The checks are on work, which is deterministic: decisions (`think`, the part that casts rays)
  * are spread evenly over the think interval, so the decisions and rays per step grow linearly
@@ -13,13 +15,16 @@
 
 import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { ENEMY_RULES } from '../config/enemies';
+import { DEFAULT_ROSTER, ENEMY_RULES, type ImplementedEnemyId } from '../config/enemies';
 import { FACILITY } from '../world/levels/facility';
 import { World } from '../world/World';
+import type { EnemyBrain } from './ai/brain';
 import { meleeBrain } from './ai/meleeBrain';
+import { screamerBrain } from './ai/screamerBrain';
 import { DT, enemyTestWorld, TestTarget } from './testWorld';
 
 const COUNTS = [1, 4, 8, 16, 32, 64] as const;
+const MIXED_COUNTS = [1, 8, 16, 32, 64] as const;
 const WARM_UP_STEPS = 120;
 const MEASURED_STEPS = 600;
 const STEP_BUDGET_MS = 4;
@@ -27,8 +32,11 @@ const THINK_STEPS = Math.round(ENEMY_RULES.thinkInterval / DT);
 const report = process.env.PERF_REPORT === '1';
 const facility = new World(FACILITY);
 
+type Crowd = 'walkers' | 'mixed';
+
 interface Sample {
   readonly count: number;
+  readonly alarms: number;
   /** Average and worst milliseconds per fixed step (manager + combat). */
   readonly stepMs: number;
   readonly worstStepMs: number;
@@ -51,15 +59,16 @@ function moveTarget(target: TestTarget, step: number): void {
   target.position.set(Math.cos(angle) * 7, 0, 9 + Math.sin(angle) * 3);
 }
 
-function crowd(count: number) {
+function crowd(count: number, kind: Crowd) {
   const target = new TestTarget(7, 9);
   target.health = Number.POSITIVE_INFINITY; // they hit it; it never dies
   const t = enemyTestWorld({ targets: [target], level: FACILITY, world: facility.collision });
   // Spawn spots across the north yard, nearest to its middle first, where a body fits.
+  // (Spots fit the biggest body, the Tank's, so every archetype can use any of them.)
   const spots: Vector3[] = [];
   for (let x = -18; x <= 18; x += 1.3) {
     for (let z = -10; z <= 3; z += 1.3) {
-      if (t.manager.canStand('walker', [x, 0, z])) {
+      if (t.manager.canStand('tank', [x, 0, z])) {
         spots.push(new Vector3(x, 0, z));
       }
     }
@@ -69,7 +78,9 @@ function crowd(count: number) {
     throw new Error(`only ${spots.length} spawn spots`);
   }
   for (let i = 0; i < count; i++) {
-    const enemy = t.manager.spawn('walker', spots[i] ?? new Vector3(), { alertTo: target });
+    const archetype: ImplementedEnemyId =
+      kind === 'mixed' ? (DEFAULT_ROSTER[i % DEFAULT_ROSTER.length] ?? 'walker') : 'walker';
+    const enemy = t.manager.spawn(archetype, spots[i] ?? new Vector3(), { alertTo: target });
     if (!enemy) {
       throw new Error('spawn refused');
     }
@@ -77,8 +88,8 @@ function crowd(count: number) {
   return { ...t, target };
 }
 
-function measure(count: number): Sample {
-  const t = crowd(count);
+function measure(count: number, kind: Crowd = 'walkers'): Sample {
+  const t = crowd(count, kind);
   let step = 0;
   const tick = () => {
     moveTarget(t.target, step++);
@@ -90,6 +101,10 @@ function measure(count: number): Sample {
   }
 
   // Clean timing, and the work done per step.
+  let alarms0 = 0;
+  const offAlarm = t.manager.events.on('alarm', () => {
+    alarms0++;
+  });
   const thinks0 = t.manager.stats.thinks;
   const rays0 = t.manager.lines.rays;
   let maxThinks = 0;
@@ -103,6 +118,7 @@ function measure(count: number): Sample {
     maxThinks = Math.max(maxThinks, t.manager.stats.thinks - before);
   }
   const stepMs = (performance.now() - start) / MEASURED_STEPS;
+  offAlarm();
   const thinksPerStep = (t.manager.stats.thinks - thinks0) / MEASURED_STEPS;
   const raysPerStep = (t.manager.lines.rays - rays0) / MEASURED_STEPS;
 
@@ -120,12 +136,16 @@ function measure(count: number): Sample {
     separate: (...args: unknown[]) => void;
     move: (...args: unknown[]) => void;
   };
-  const brainMethods = {
-    think: Object.getOwnPropertyDescriptor(meleeBrain, 'think'),
-    update: Object.getOwnPropertyDescriptor(meleeBrain, 'update'),
-  };
-  meleeBrain.think = timed('think', meleeBrain.think.bind(meleeBrain));
-  meleeBrain.update = timed('update', meleeBrain.update.bind(meleeBrain));
+  const brains: EnemyBrain[] = [meleeBrain, screamerBrain];
+  const brainMethods = brains.map((brain) => ({
+    brain,
+    think: Object.getOwnPropertyDescriptor(brain, 'think'),
+    update: Object.getOwnPropertyDescriptor(brain, 'update'),
+  }));
+  for (const brain of brains) {
+    brain.think = timed('think', brain.think.bind(brain));
+    brain.update = timed('update', brain.update.bind(brain));
+  }
   manager.separate = timed('separate', manager.separate.bind(t.manager));
   manager.move = timed('move', manager.move.bind(t.manager));
   const combatStep = timed('combat', (dt: number) => {
@@ -138,9 +158,10 @@ function measure(count: number): Sample {
       combatStep(DT);
     }
   } finally {
-    for (const [name, descriptor] of Object.entries(brainMethods)) {
-      if (descriptor) {
-        Object.defineProperty(meleeBrain, name, descriptor);
+    for (const { brain, think, update } of brainMethods) {
+      if (think && update) {
+        Object.defineProperty(brain, 'think', think);
+        Object.defineProperty(brain, 'update', update);
       }
     }
     delete (manager as Partial<typeof manager>).separate;
@@ -168,6 +189,7 @@ function measure(count: number): Sample {
   const us = (ms: number) => (ms / MEASURED_STEPS) * 1000;
   return {
     count,
+    alarms: alarms0,
     stepMs,
     worstStepMs: worst,
     thinkUs: us(parts.think),
@@ -199,23 +221,54 @@ describe('enemy simulation cost, 1 to 64 Walkers chasing', () => {
 
   it('prints the measurements (PERF_REPORT=1)', () => {
     if (report) {
-      console.table(
-        samples.map((s) => ({
-          walkers: s.count,
-          'step ms': s.stepMs.toFixed(3),
-          'worst ms': s.worstStepMs.toFixed(2),
-          'think µs': s.thinkUs.toFixed(1),
-          'update µs': s.updateUs.toFixed(1),
-          'separate µs': s.separateUs.toFixed(1),
-          'move µs': s.moveUs.toFixed(1),
-          'combat µs': s.combatUs.toFixed(2),
-          'hitscan µs': s.hitscanUs.toFixed(2),
-          'thinks/step': s.thinksPerStep.toFixed(2),
-          'max thinks': s.maxThinksInAStep,
-          'rays/step': s.raysPerStep.toFixed(1),
-        })),
-      );
+      printTable('walkers', samples);
     }
     expect(samples).toHaveLength(COUNTS.length);
   });
 });
+
+describe('enemy simulation cost, 1 to 64 of the mixed roster chasing (Phase 5)', () => {
+  const samples: Sample[] = [];
+
+  it.each(MIXED_COUNTS)(
+    '%i mixed: decisions spread evenly, work linear, inside the budget',
+    (n) => {
+      const sample = measure(n, 'mixed');
+      samples.push(sample);
+      expect(sample.thinksPerStep).toBeCloseTo(n / THINK_STEPS, 1);
+      expect(sample.maxThinksInAStep).toBeLessThanOrEqual(Math.ceil(n / THINK_STEPS));
+      expect(sample.raysPerStep).toBeLessThanOrEqual(sample.thinksPerStep * 16);
+      expect(sample.stepMs).toBeLessThan(STEP_BUDGET_MS);
+      if (n >= 4) {
+        expect(sample.alarms, 'the Screamers screamed').toBeGreaterThan(0);
+      }
+    },
+  );
+
+  it('prints the measurements (PERF_REPORT=1)', () => {
+    if (report) {
+      printTable('mixed', samples);
+    }
+    expect(samples).toHaveLength(MIXED_COUNTS.length);
+  });
+});
+
+function printTable(kind: Crowd, samples: readonly Sample[]): void {
+  console.table(
+    samples.map((s) => ({
+      [kind]: s.count,
+      'step ms': s.stepMs.toFixed(3),
+      'worst ms': s.worstStepMs.toFixed(2),
+      'think µs': s.thinkUs.toFixed(1),
+      'update µs': s.updateUs.toFixed(1),
+      'separate µs': s.separateUs.toFixed(1),
+      'move µs': s.moveUs.toFixed(1),
+      'combat µs': s.combatUs.toFixed(2),
+      'hitscan µs': s.hitscanUs.toFixed(2),
+      'thinks/step': s.thinksPerStep.toFixed(2),
+      'max thinks': s.maxThinksInAStep,
+      'rays/step': s.raysPerStep.toFixed(1),
+      alarms: s.alarms,
+    })),
+  );
+}

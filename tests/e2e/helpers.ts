@@ -119,8 +119,10 @@ export interface EnemySnapshot {
   readonly targetDistance: number | null;
   readonly canSeeTarget: boolean;
   readonly nav: 'none' | 'direct' | 'route';
-  readonly attack: 'none' | 'windup' | 'recovery';
+  readonly attack: 'none' | 'windup' | 'lunge' | 'recovery';
   readonly attacks: number;
+  readonly traits: string[];
+  readonly hasted: boolean;
 }
 
 /** What `tls.playerHealth()` (and the other player-health commands) return. */
@@ -185,8 +187,14 @@ export interface TlsApi {
   killPlayer(): PlayerHealthSnapshot;
   enemies(): EnemySnapshot[];
   enemy(id: string): EnemySnapshot & Record<string, unknown>;
-  spawnEnemy(type?: string, distance?: number): string;
+  spawnEnemy(type?: string, distance?: number, traits?: string | readonly string[]): string;
   spawnWalkers(count?: number, distance?: number): string[];
+  spawnMixed(count?: number, distance?: number, traits?: string | readonly string[]): string[];
+  traits(): { id: string; name: string }[];
+  setTraits(id: string, traits?: string | readonly string[]): string[];
+  applyTrait(id: string, trait: string): string[];
+  removeTrait(id: string, trait: string): string[];
+  forceAbility(id: string): boolean;
   killEnemy(id: string): boolean;
   killAll(): number;
   damageEnemy(id: string, amount?: number): { health: number; killed: boolean } | null;

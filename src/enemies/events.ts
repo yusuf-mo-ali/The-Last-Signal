@@ -3,12 +3,39 @@
  * tests, and later waves, XP/Scrap, the adaptive profile and analytics.
  */
 
-import type { AiState, EnemyArchetypeId } from '../config/enemies';
+import type { AiState, EnemyArchetypeId, EnemyModifierId } from '../config/enemies';
 import type { Vec3Tuple } from '../weapons/types';
 
 export type AttackMissReason = 'range' | 'height' | 'arc' | 'blocked' | 'dead';
 export type AttackCancelReason = 'stagger' | 'death' | 'lostTarget';
 export type TargetLossReason = 'dead' | 'range' | 'memory';
+/** What an attack does at the end of its wind-up: a melee strike, or a scream (an alarm). */
+export type AttackKind = 'strike' | 'scream';
+
+/**
+ * Something raised the alarm (D-043): a disturbance that tells whoever hears it where a target
+ * is. Generic on purpose: listeners never need to know what raised it. The Screamer's scream is the
+ * first source; the prototype response (nearby enemies told and hastened) is in `EnemyManager`,
+ * and waves, signal mutations, the adaptive profile, audio and effects can listen too.
+ */
+export interface AlarmEvent {
+  /** Who raised it (an enemy id). */
+  readonly sourceId: string;
+  /** How it was raised. */
+  readonly kind: 'scream';
+  /** Where it came from (feet) and how far it carries, metres. */
+  readonly position: Vec3Tuple;
+  readonly radius: number;
+  /** What it is about: the target the source was after, if any. */
+  readonly targetId: string | null;
+  readonly targetPosition: Vec3Tuple | null;
+  /** Seconds listeners are told about the target for. */
+  readonly alertDuration: number;
+  /** A speed boost for those who hear it, if any. */
+  readonly haste: { readonly multiplier: number; readonly duration: number } | null;
+  /** Sim time it was raised. */
+  readonly time: number;
+}
 
 export interface EnemyEvents {
   spawned: {
@@ -24,8 +51,13 @@ export interface EnemyEvents {
     readonly alerted: boolean;
   };
   targetLost: { readonly id: string; readonly targetId: string; readonly reason: TargetLossReason };
-  /** The telegraph: a strike follows after `windup` seconds unless it is cancelled. */
-  attackStarted: { readonly id: string; readonly targetId: string; readonly windup: number };
+  /** The telegraph: a strike (or a scream) follows after `windup` seconds unless it is cancelled. */
+  attackStarted: {
+    readonly id: string;
+    readonly targetId: string;
+    readonly windup: number;
+    readonly kind: AttackKind;
+  };
   attackHit: {
     readonly id: string;
     readonly targetId: string;
@@ -47,4 +79,8 @@ export interface EnemyEvents {
   };
   /** Removed from the world (body cleared, pool release). Exactly once per spawn. */
   despawned: { readonly id: string };
+  alarm: AlarmEvent;
+  /** Sped up by an alarm (or anything else), until sim time `until`. */
+  hasted: { readonly id: string; readonly multiplier: number; readonly until: number };
+  traitsChanged: { readonly id: string; readonly traits: readonly EnemyModifierId[] };
 }

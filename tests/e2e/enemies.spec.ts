@@ -348,7 +348,7 @@ test.describe('enemies (development build)', () => {
     expect(await page.evaluate(() => window.tls!.damagePlayer(10))).toMatchObject({ health: 0 });
     expect((await log(page)).filter((e) => e === 'player died')).toHaveLength(1);
 
-    // Click: a new run. Full health, the three encounter Walkers back at their posts.
+    // Click: a new run. Full health, the five encounter enemies back at their posts.
     await page.click('.lock-prompt');
     await frames(page, 4);
     expect(await page.evaluate(() => window.tls!.state())).toMatchObject({
@@ -362,21 +362,25 @@ test.describe('enemies (development build)', () => {
       state: 'alive',
     });
     const fresh = await page.evaluate(() => window.tls!.enemies());
-    expect(fresh.map((e) => [e.id, e.health, e.target])).toEqual([
-      ['walker-1', 120, null],
-      ['walker-2', 120, null],
-      ['walker-3', 120, null],
+    expect(fresh.map((e) => [e.id, e.health, e.target, e.traits])).toEqual([
+      ['walker-1', 120, null, ['helmeted']],
+      ['tank-2', 360, null, ['armored']],
+      ['runner-3', 60, null, []],
+      ['screamer-4', 80, null, []],
+      ['walker-5', 192, null, ['elite']],
     ]);
     expect(fresh.map((e) => rounded(e.position))).toEqual([
       [8, 0, 2],
       [-8, 0, 1],
-      [12, 0, -3],
+      [12, 0, -6],
+      [0, 0, -9],
+      [-14, 0, -9],
     ]);
-    await expect.poll(() => page.evaluate(() => window.tls!.inspect().enemyView.count)).toBe(3);
-    // Dummies (cleared above) are back as well: 3 dummies + 3 Walkers.
+    await expect.poll(() => page.evaluate(() => window.tls!.inspect().enemyView.count)).toBe(5);
+    // Dummies (cleared above) are back as well: 3 dummies + 5 enemies.
     expect(await page.evaluate(() => window.tls!.combat())).toMatchObject({
-      targets: 6,
-      alive: 6,
+      targets: 8,
+      alive: 8,
     });
     expect(issues.problems()).toEqual([]);
   });
@@ -419,8 +423,8 @@ test.describe('enemies (development build)', () => {
         const marker = root?.children[0];
         return marker ? marker.children.map((c) => c.visible) : [];
       });
-    // Detection ring, attack ring visible; no target line or route yet.
-    expect(await lines()).toEqual([true, true, false, false]);
+    // Detection ring, attack ring visible; no target line or route yet; no ability ring (a Walker).
+    expect(await lines()).toEqual([true, true, false, false, false]);
     expect(await page.evaluate(() => window.tls!.alertEnemies())).toBe(1);
     await frames(page, 2);
     expect((await lines()).slice(0, 3)).toEqual([true, true, true]);
@@ -440,7 +444,7 @@ test.describe('enemies (development build)', () => {
     expect(await page.evaluate((e) => window.tls!.killEnemy(e), id)).toBe(true);
     await frames(page, 2);
     await expect(label).toHaveText(`${id} DEAD 0`);
-    expect(await lines()).toEqual([false, false, false, false]);
+    expect(await lines()).toEqual([false, false, false, false, false]);
     expect(await page.evaluate(() => window.tls!.clearEnemies())).toBe(0);
     await frames(page, 2);
     await expect(label).toHaveCount(0);

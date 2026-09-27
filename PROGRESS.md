@@ -3,16 +3,16 @@
 > The working state of the project. Every session reads this file first and updates it last, so
 > work can be resumed safely (plan §36).
 >
-> **Last updated:** 2026-09-26 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
+> **Last updated:** 2026-09-27 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
 > (open PR into `main`: yusuf-mo-ali/The-Last-Signal#1)
 
 ---
 
 ## Current Phase
 
-**Phase 4: Zombie Foundation. Complete** (plan §11, D-042). A generic enemy framework (archetype data, a behaviour, pooled enemies registered with the Phase 3 combat model), the plan's seven AI states in an explicit transition table, decisions at 10 Hz spread over the steps with exact timing every step, navigation that fits the blockout (straight pursuit, or the level's authored route graph), a telegraphed melee attack, player health with death, game over and restart, and the first archetype, the **Walker**. See "Phase 4 acceptance review" below. Phase 5 (zombie archetypes) has not started and is awaiting approval.
+**Phase 5: Zombie Archetypes. Complete** (plan §12, D-043). O-3 is resolved: the v1 default roster is **Walker, Runner, Tank and Screamer**; the Climber is deferred and kept as possible adaptive content. The Runner (a fast weaving chase and a committed leap), the Tank (a slow wall that only headshots stagger) and the Screamer (keeps its distance, a telegraphed, interruptible scream that raises a generic `alarm`: nearby zombies are alerted and hastened) run on the Phase 4 framework as data plus two behaviours. Composable traits (Armored, Helmeted, Elite) work on any archetype, through a generic combat damage profile (per-zone armor, breakable plates, stagger zones). See "Phase 5 acceptance review" below. Phase 6 (wave system) has not started and is awaiting approval.
 
-- Phases 0 (Project Foundation), 1 (First Person Foundation), 2 (Weapon Framework) and 3 (Combat System) are complete: see their acceptance reviews.
+- Phases 0 (Project Foundation), 1 (First Person Foundation), 2 (Weapon Framework), 3 (Combat System) and 4 (Zombie Foundation) are complete: see their acceptance reviews.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -200,29 +200,70 @@
     - Performance (TESTING.md §7.4): simulation cost measured at 1–64 Walkers (well inside the 4 ms step budget). One finding fixed with measurements: a body mesh plus an arms mesh per enemy drew 272 draw calls at 64 Walkers (over the Low budget of 250); one skinned mesh per enemy draws 144.
   - Live Vercel preview: the PR's Vercel deployment succeeds, but the preview is still not reachable from the container (proxy 403 for `*.vercel.app`).
 
+- [x] **Phase 5: Zombie Archetypes** (plan §12, D-043).
+  - **O-3 resolved:** the default roster is Walker, Runner, Tank and Screamer (`DEFAULT_ROSTER`). The Climber is deferred: not implemented, not in normal waves, kept in the data as possible adaptive content (a response to high-ground play, Phase 8).
+  - **Archetypes as data plus two behaviours:**
+    - New archetype options: `staggerZones`, `attack.lunge`, `weave`, `preferredRange`, `ability`.
+    - `ai/common.ts` holds what every behaviour shares (extracted from the Phase 4 melee brain).
+    - `meleeBrain` (Walker, Runner, Tank) gains the weave and leap options; `screamerBrain` (Screamer) is new.
+    - The state machine, decision schedule, navigation and combat are unchanged.
+  - **Runner:** 5.2 m/s, 60 health. It weaves in the open, then does a telegraphed, committed leap (2.2 m at 9 m/s) and brakes hard on landing. Any body shot staggers it.
+  - **Tank:** 360 health, 1.1 m/s. Body shots do ½, limbs 0.35; only headshots stagger it. It hits for 35 after a 1.1 s wind-up, has no ranged attack, and its big body fits every route.
+  - **Screamer:** keeps 6–11 m, backs away from a close player, and screams with a 1.2 s raised-arms violet telegraph. The cooldown is spent when the scream starts, and any solid hit interrupts it.
+  - **Alarm event (generic):** payload `{sourceId, kind, position, radius, targetId, targetPosition, alertDuration, haste, time}`.
+    - Prototype response in `EnemyManager`: enemies within 18 m are alerted (8 s) and hastened (×1.35 for 6 s; refreshed, not stacked).
+    - Presentation: a violet shockwave ring (`EnemyView`) and a screen-edge pulse (`ui/AlarmPulse`).
+  - **Traits** (`config/traits.ts`): Armored, Helmeted and Elite as composable data overlays on any archetype.
+    - `applyTraits` is pure and uses a canonical order.
+    - Traits can be set at run time with the health fraction kept; they reset in the pool.
+    - Elite rolls a bonus drop.
+  - **Combat:** a generic `DamageProfile` (per-zone armor, breakable `ArmorPlate`s, stagger zones), `configure()` at run time, the `armorBroken` event, and `armorReduction` / `absorbed` in `damaged`. A steel "armored" hit marker.
+  - **Movement:** separation fits big bodies and anticipates closing ones, so a sprinting Runner steers round others instead of running through them. Postures (the Runner's lean, the Tank's hunch) are part of the hitbox rigs (`leanRig`), so what is drawn is what is hit.
+  - **Presentation (placeholder):**
+    - Per-archetype builds from their rigs, with palettes, eyes, the Screamer's mouth and raised arms, and telegraph colours.
+    - Trait attachments (plates, a helmet that disappears when broken, spikes) in the same skinned mesh; geometry is cached per archetype and set of attachments.
+  - **Test encounter:** one of each archetype, and each trait once (5 enemies).
+  - **Debug (dev only):**
+    - `tls.spawnEnemy(type, distance, traits)`, `spawnMixed()`, `traits()`, `setTraits()`, `applyTrait()`, `removeTrait()`, `forceAbility()`.
+    - `enemy(id)` stats, plates and haste.
+    - `showAI()` labels with traits and haste, and the ability-radius ring.
+  - Verified:
+    - 113 new unit and integration tests (1047 in the suite): traits, mitigation, Runner and Tank, the Screamer and the alarm, traits on enemies, mixed groups (including head-on Runner passes), every archetype through the real game, and the cost at 1–64 mixed.
+    - Planted bugs: 49 of 49 unit-level and 4 of 4 end-to-end bugs caught. The first unit run caught 40 of 48; the survivors led to stronger tests and to one real fix (TESTING.md §4). Separation did not stop a Runner running through an oncoming enemy, and now anticipates closing bodies.
+    - Two defects found while testing and fixed:
+      - Runners ran through other enemies (the separation above).
+      - The Runner's and Tank's resting lean was only drawn, so the Runner's visible head sat about 0.2 m ahead of its hit sphere. The lean is now in the rig.
+    - `npm run check` passes; `npm run build` has no warnings (game 140.8 kB, 45.8 kB gzipped); no debug code in `dist/`; the plan's hash is unchanged.
+    - `npm run test:e2e` (final run): 124 tests; 76 passed and 42 skipped by design. All production tests passed, including the real-keys run against the new encounter, as did every enemy and archetype spec.
+      - New `archetypes.spec` (5 tests): Runner, Tank, Screamer (alarm, shockwave, pulse, haste, interruption), traits (attachments, helmet break, live changes), a mixed group of 8. It also passed twice in a row on its own.
+      - `enemies.spec` and the other specs are updated for the five-enemy encounter.
+      - 6 dev tests failed: the 4 known wall-clock-sensitive Phase 1–3 tests, plus Phase 1 sprint/crouch and Phase 0's fixed-step loop check, all timed in real time on a 2–6 FPS host. All 6 fail identically on the unchanged Phase 4 commit (control run; TESTING.md §8).
+    - Browser screenshots inspected (each archetype, the traits, the scream's wind-up and shockwave with the AI view).
+    - Performance (TESTING.md §7.4): 64 mixed cost 1.27 ms per step headless against 1.15 ms for 64 Walkers on the same host, the same 144 draw calls in the browser and the same frame cost. Traits add triangles, not draw calls. One cost regression was found and fixed with measurements: the first anticipation bound doubled separation to 325 µs at 64; an exact rejection brought it to 158 µs.
+  - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
+
 ## Active Task
 
-None. Phase 4 is complete; waiting for approval to start **Phase 5**.
+None. Phase 5 is complete; waiting for approval to start **Phase 6**.
 
 ## Known Bugs
 
-- **Test infrastructure, not the game:** 4 Phase 1–3 end-to-end tests are wall-clock-sensitive and fail when software rendering drops below ~7 FPS (TESTING.md §8). The player can walk through enemies (a known Phase 4 limitation, not a bug: D-042).
+- **Test infrastructure, not the game:** 4 Phase 1–3 end-to-end tests (6 on the slowest hosts, adding Phase 0–1 real-time checks) are wall-clock-sensitive and fail when software rendering drops below ~7 FPS (TESTING.md §8). The player can walk through enemies (a known Phase 4 limitation, not a bug: D-042). Enemies can overlap briefly in a crowd (at most ~0.2 s, tested): separation is a push that anticipates closing bodies, not a hard constraint (D-043).
 
 ## Next Task
 
-**Phase 5: Zombie Archetypes (plan §12).** The Runner (fast, lower health, dangerous in groups), the Tank (very high health, slow, resistant to normal body shots), the Screamer (keeps its distance; alerts nearby zombies; temporary screen/audio effects) and the Climber (counters elevated positions), each with a clear purpose, plus the Elite/trait modifiers (D-012). Suggested steps, each a small commit:
-1. **Decide O-3** (the v1 roster): the default is Walker, Runner, Tank, Screamer, with the Climber deferred (it needs climb links and vertical navigation).
-2. **Runner and Tank as data** (`config/enemies.ts`): the melee brain already takes speed, health, turn rate, attack shape and zone overrides from config; the Tank's body resistance is a zone-multiplier override, its stagger immunity no threshold. A Runner lunge, if wanted, is an option of the melee behaviour.
-3. **Screamer** as a new brain: keep a distance, a telegraphed scream (interruptible by damage), `EnemyManager.alert` for zombies in a radius, a screen/audio event for the presentation.
-4. **Traits** (Armored, Helmeted, Elite): overlays on an archetype's data (armor per zone, a breakable head armor, a stat boost and a visual tell).
-5. **Presentation:** per-archetype placeholder silhouettes (the view builds any rig), the Screamer's tell.
-6. **Verify:** per-archetype intent tests (time-to-kill, speed vs the player, Tank body shots), behaviour tests, e2e with a mixed group, performance with the heavier archetypes.
+**Phase 6: Wave System (plan §13).** Each wave has a number, an enemy budget, a spawn rate, a composition, a mutation slot, a special-event slot and a boss flag; difficulty follows a controlled curve (waves 1–3 introduction, 4–7 variety, 8–12 pressure, 13–19 combinations, 20 boss), and the generator supports unlimited waves. Suggested steps, each a small commit:
+1. **Wave data and generator** (`config/waves.ts` already has the tiers): a pure, seeded `generateWave(n)` → budget from the curve, composition drawn from `DEFAULT_ROSTER` by threat cost (the Runner from wave 3, the Screamer from 4–5, the Tank from 6–7, GAME_DESIGN §3), traits by tier (Armored / Helmeted from 8, Elite from 13), `maxAlive`, spawn rate. Unit tests for the curve, budgets, determinism and unlimited waves.
+2. **Spawn points and the spawner:** level spawn points (D-013), `EnemyManager.canStand` validation, never in the player's view or too close (GAME_DESIGN §7 fairness), a spawn queue under `maxAlive`, spawned enemies told where the player is (the horde is drawn to the signal).
+3. **Wave flow:** `WaveManager` drives `WAVE_START → WAVE_ACTIVE → WAVE_COMPLETE` (replacing the placeholder open-ended wave and the test encounter; the training range leaves normal play), a breather, the wave counter in the HUD. Mutation, special-event and boss slots stay empty (Phases 7, 12, 13).
+4. **Alarm consumers (optional, D-043):** reinforcements toward a Screamer's alarm, as data on the wave.
+5. **Verify:** wave tests through the real loop, E2E of a wave start → clear → next wave, performance at the default `maxAlive` (24) with the mixed roster.
 
 **Needed from you:**
-- Approval to start Phase 5.
-- A manual QA pass of TESTING.md §6 in real browsers, including the new "Enemies" section: the Walker's feel (speed, the wind-up tell, dodging, shooting it) can only be judged by hand.
-- O-3 (the v1 zombie roster) before Phase 5; the default applies otherwise.
-- Run the performance measurement on the reference machine (TESTING.md §7.2, now with `tls.spawnWalkers(24)`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
+- Approval to start Phase 6.
+- A manual QA pass of TESTING.md §6 in real browsers, including the new "Archetypes and traits" section: the Runner's leap, the Tank's weight and the Screamer's scream can only be judged by hand.
+- O-5 (boss placement vs "unlimited waves") and O-7 (mutation-free intro waves) apply to Phase 6/7; the defaults apply otherwise.
+- Run the performance measurement on the reference machine (TESTING.md §7.2, now with `tls.spawnMixed(24)`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -258,6 +299,12 @@ None. Phase 4 is complete; waiting for approval to start **Phase 5**.
   - Distance-based think rates ("distant enemies think less often"), not needed at the measured cost.
   - The full HUD (low-health vignette and heartbeat, damage direction), healing, and a real game-over screen (wave reached, cause of death: GAME_DESIGN §16).
   - Final zombie models and animation (D-030).
+- **From 5:**
+  - The Climber (deferred, D-043): its data, a climbing behaviour and climb links in the level's navigation, if the adaptive system (Phase 8) brings it in against high-ground play.
+  - Alarm consumers: wave reinforcements (Phase 6), SCREAM (Phase 7), adaptive metrics (Phase 8), scream audio (Phase 11).
+  - Hard enemy–enemy collision (separation is a push; brief brush-throughs are accepted and bounded by a test).
+  - Short animation leans (a wind-up, a leap) are drawn without the hit volumes following; resting postures are in the rigs.
+  - Trait visuals beyond placeholders; audio for the helmet breaking.
 
 ## Blocked Tasks
 
@@ -268,7 +315,6 @@ Nothing is blocked now. These later tasks need decisions (full list in `DECISION
 | Supply Terminal presentation; Secondary unlock condition | O-13 | Phase 9 / Phase 14 |
 | Technician upgrade | O-6 (no utility/trap system defined) | Phase 9 |
 | Performance measurements on the weak reference (TESTING.md §7) | Access to the reference machine (i5-4440 / GTX 750); the container has no GPU. The map, weapons and `?quality=low` are ready | Now, then each phase |
-| v1 zombie roster | O-3 | Phase 5 |
 | v1 mutation set; intro waves without mutations | O-4, O-7 | Phase 7 |
 | XP/Scrap sinks (meta-progression screen) | O-1 | Phase 9 |
 | Signal objective rules; interact binding | O-12, O-6 | Phase 12 |
@@ -333,6 +379,27 @@ Reviewed 2026-09-25 against the code on this branch.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
 - O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 5 acceptance review (plan §12)
+
+Reviewed 2026-09-27 against the code on this branch, with the scope the project owner set for Phase 5 (the O-3 roster, the Runner, the Tank, the Screamer, traits and the alarm event; no waves, mutations, adaptive system, Climber, bosses or final art).
+
+| Plan §12 / Phase 5 requirement | Status | Evidence |
+|---|---|---|
+| O-3: default roster Walker, Runner, Tank, Screamer; Climber deferred and extensible; possible adaptive content; not in normal waves | Done | `DEFAULT_ROSTER`, `IMPLEMENTED_ENEMY_IDS` (no Climber), `ENEMY_ARCHETYPES.climber.inV1 = false`; D-043 §1; config tests |
+| Runner: fast, fragile, same movement / collision / hitbox / health / combat / targeting, feels different through movement and pressure | Done | Data + melee options (weave, committed leap, landing brake); `archetypes.test.ts` (speed, closing time, detection, weave, leap, dodge, stagger, death); E2E |
+| Tank: high health, slow, strong melee, head-only stagger, no ranged attack, resistance as data | Done | Zone multipliers + `staggerZones`; `archetypes.test.ts`; integration (Pistol vs Tank); E2E |
+| Screamer: detection, configurable range and cooldown, readable wind-up, generic event, prototype effect, no WaveManager or mutation dependency | Done | `screamerBrain.ts`, `alarm` event, `EnemyManager.respondToAlarm` (alert + haste), shockwave ring, alarm pulse; `screamerBrain.test.ts` (19); E2E |
+| Traits: generic, composable, on any archetype, damage and hitboxes consult them, deterministic, data-driven (Armored, Helmeted, Elite) | Done | `config/traits.ts` (`applyTraits`), `DamageProfile` (zone armor, plates, stagger zones, `configure`), run-time `setTraits`; `traits.test.ts`, `armor.test.ts`, `enemyTraits.test.ts` |
+| Presentation: readable per archetype and trait, not by colour alone; procedural | Done | Rig-built bodies (size, lean, head), mouths, raised arms, plates / helmet / spikes as geometry; screenshots inspected |
+| AI: reuse the Phase 4 foundation, common state machine, limited-rate decisions; per-archetype speed, attack, distance, ability, stagger, perception | Done | `ai/common.ts` shared by two behaviours; think at 10 Hz spread; mixed-population cost measured |
+| Combat: every archetype through the existing CombatSystem (heads, torso, limbs, stagger, death, drops); no per-archetype damage code | Done | `enemies.integration.test.ts` (Pistol vs every archetype), `mixed.test.ts`; drops per archetype + Elite bonus |
+| Debug tools (dev only): spawn each / mixed, apply / remove traits, inspect, AI state, force ability, ranges | Done | `tls.spawnEnemy(type, d, traits)`, `spawnMixed`, `traits`, `setTraits`, `applyTrait`, `removeTrait`, `forceAbility`, `enemy(id)` stats, `showAI()` labels and ability ring; absent from `dist/` |
+| Tests, planted bugs, E2E, performance at 1–64 mixed | Done | See "Completed Tasks → Phase 5" and TESTING.md §3, §4, §7.4 |
+
+**Open items that do not block Phase 6:** manual feel check in real browsers (the leap, the Tank's weight, the scream); reference-machine measurement; Vercel preview not reachable from the container; no CI yet; body blocking of the player (deferred); brief enemy–enemy brush-throughs (bounded, accepted).
 
 ---
 
@@ -443,7 +510,7 @@ Reviewed 2026-09-25 against the code on this branch.
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
 | **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–4 complete (a player can shoot zombies and die; waves remain) |
-| **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | Not started |
+| **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | In progress: Phase 5 (archetypes and traits) complete |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
 | **M5 Polish** | 16 audio · 17 VFX · lighting · UI polish · 18 performance · 21 stability · deployment | Feels like a finished indie browser game | Not started |
@@ -460,5 +527,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 4: enemy coverage, mutations, manual QA, performance at 1–64 Walkers) |
-| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules |
+| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed) |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation |

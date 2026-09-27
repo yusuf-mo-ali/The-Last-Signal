@@ -1,8 +1,9 @@
 /**
- * Development-only AI visualiser (D-042): for every enemy, its state and health as a label over
- * its head, its detection range (yellow ring) and attack range (orange ring) on the ground, a
- * line to its target (green while it sees it, grey from memory) and the route it is following
- * (cyan). Toggled with `tls.showAI()`. Reads the simulation; never changes it.
+ * Development-only AI visualiser (D-042, D-043): for every enemy, its state, health, traits and
+ * haste as a label over its head, its detection range (yellow ring), attack range (orange ring) and
+ * ability range (violet ring: how far a Screamer's scream carries) on the ground, a line to its
+ * target (green while it sees it, grey from memory) and the route it is following (cyan). Toggled
+ * with `tls.showAI()`. Reads the simulation; never changes it.
  */
 
 import {
@@ -28,6 +29,7 @@ interface Marker {
   readonly attack: LineLoop;
   readonly toTarget: Line;
   readonly route: Line;
+  readonly ability: LineLoop;
   readonly label: HTMLElement;
 }
 
@@ -42,6 +44,7 @@ export class EnemyDebugView {
     seen: new LineBasicMaterial({ color: 0x5ce65c, depthTest: false }),
     remembered: new LineBasicMaterial({ color: 0x9aa0a6, depthTest: false }),
     route: new LineBasicMaterial({ color: 0x3fe0e0, depthTest: false }),
+    ability: new LineBasicMaterial({ color: 0xb46cff, depthTest: false }),
   };
   private readonly manager: EnemyManager;
 
@@ -81,7 +84,8 @@ export class EnemyDebugView {
       const onScreen = _p.z < 1 && Math.abs(_p.x) <= 1.1 && Math.abs(_p.y) <= 1.1;
       marker.label.hidden = !onScreen;
       marker.label.dataset.state = enemy.state;
-      marker.label.textContent = `${enemy.id} ${enemy.state} ${Math.ceil(enemy.health.current)}`;
+      marker.label.dataset.archetype = enemy.archetype.id;
+      marker.label.textContent = labelFor(enemy, this.manager.now);
       if (onScreen) {
         const x = ((_p.x + 1) / 2) * width;
         const y = ((1 - _p.y) / 2) * height;
@@ -119,16 +123,17 @@ export class EnemyDebugView {
     const attack = new LineLoop(this.ring, this.materials.attack);
     const toTarget = new Line(new BufferGeometry(), this.materials.seen);
     const route = new Line(new BufferGeometry(), this.materials.route);
-    for (const line of [detection, attack, toTarget, route]) {
+    const ability = new LineLoop(this.ring, this.materials.ability);
+    for (const line of [detection, attack, toTarget, route, ability]) {
       line.frustumCulled = false;
       line.renderOrder = 20;
     }
-    group.add(detection, attack, toTarget, route);
+    group.add(detection, attack, toTarget, route, ability);
     this.root.add(group);
     const label = this.layer.ownerDocument.createElement('span');
     label.className = 'enemy-debug__label';
     this.layer.appendChild(label);
-    const marker = { group, detection, attack, toTarget, route, label };
+    const marker = { group, detection, attack, toTarget, route, ability, label };
     this.markers.set(id, marker);
     return marker;
   }
@@ -136,11 +141,13 @@ export class EnemyDebugView {
   private place(marker: Marker, enemy: Enemy): void {
     const p = enemy.motor.position;
     const alive = enemy.health.isAlive;
+    const abilityRadius = enemy.config.ability?.radius ?? 0;
     for (const [ring, radius] of [
       [marker.detection, enemy.config.detectionRange],
       [marker.attack, enemy.config.attackRange],
+      [marker.ability, abilityRadius],
     ] as const) {
-      ring.visible = alive;
+      ring.visible = alive && radius > 0;
       ring.position.copy(p);
       ring.scale.set(radius, 1, radius);
     }
@@ -171,6 +178,13 @@ export class EnemyDebugView {
       setPoints(marker.route.geometry, points);
     }
   }
+}
+
+/** `walker-3 CHASE 95`, then its traits and haste if any: `walker-3 CHASE 95 [armored+elite] HASTE`. */
+function labelFor(enemy: Enemy, now: number): string {
+  const traits = enemy.config.traits.length > 0 ? ` [${enemy.config.traits.join('+')}]` : '';
+  const haste = enemy.hasteUntil > now ? ' HASTE' : '';
+  return `${enemy.id} ${enemy.state} ${Math.ceil(enemy.health.current)}${traits}${haste}`;
 }
 
 function setPoints(geometry: BufferGeometry, points: number[]): void {

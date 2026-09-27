@@ -1,33 +1,46 @@
 /**
- * Placeholder zombie visuals (D-030 blockout, D-042): each enemy is drawn from its own hitbox rig,
- * so what you see is where the hit volumes are (D-007). No final art or animation.
+ * Placeholder zombie visuals (D-030 blockout, D-042, D-043): each enemy is drawn from its own
+ * hitbox rig, so what you see is where the hit volumes are (D-007). No final art or animation.
  *
  * - Silhouette: head, torso, legs and arms in one skinned mesh with two bones (the body, pivoting
  *   at the feet, and the arms, pivoting at the shoulders), so each enemy is one draw call plus one
  *   shadow draw (the D-041 rule: at 64 Walkers, a mesh for the body and one for the arms had
- *   measured 272 draw calls, over the Low budget of 250). Zone colours (pale head and arms, dark
- *   shirt and trousers) keep the hit zones readable; yellow eyes show where it faces.
- * - Movement: a shambling bob and sway while it walks; it turns to face its heading.
- * - Attack tell: during the wind-up the arms rise to reach forward (matching the attack pose of
- *   its rig) and the body glows orange, strongest just before the strike; the arms swing down on
- *   the strike.
+ *   measured 272 draw calls, over the Low budget of 250). The rig gives each archetype its build
+ *   (the Runner slighter, the Tank huge, the Screamer tall with a big head); `config/enemyLooks`
+ *   its palette by zone, eyes, lean and features (the Screamer's gaping mouth).
+ * - Traits change the outline, not just the colour: plates on the chest, back and shoulders
+ *   (Armored), a steel dome on the head that is gone once the helmet breaks (Helmeted), bone
+ *   spikes on the shoulders and spine and pale hot eyes (Elite). They are built into the same
+ *   mesh: geometry is cached per archetype and set of visible attachments.
+ * - Movement: a shamble scaled by speed; it turns to face its heading.
+ * - Attack tell: during the wind-up the arms rise (reaching forward for a strike, overhead for a
+ *   scream, matching the rig's attack pose) and the body glows in its archetype's telegraph
+ *   colour, strongest just before the strike; a leap throws the body forward. A scream sends out
+ *   an expanding ring as far as it carries.
  * - Hit reaction: a white flash and a push away from the hit; a stagger rocks it back further.
  * - Death: it falls, lies there, and sinks into the floor before its body is removed.
  *
  * Presentation only: it reads the `EnemyManager` and listens to combat and enemy events.
- * Positions are interpolated between fixed steps. Visuals and materials are pooled; geometry is
- * shared per archetype.
+ * Positions are interpolated between fixed steps. Visuals and materials are pooled per archetype.
  */
 
 import {
+  AdditiveBlending,
   Bone,
+  BoxGeometry,
   CapsuleGeometry,
+  CircleGeometry,
   Color,
+  ConeGeometry,
+  DoubleSide,
   Float32BufferAttribute,
   Group,
   Matrix4,
+  Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Quaternion,
+  RingGeometry,
   Skeleton,
   SkinnedMesh,
   Sphere,
@@ -41,40 +54,34 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CombatSystem } from '../combat/CombatSystem';
 import type { HitboxShape, Point3 } from '../config/combat';
 import {
-  enemyConfig,
-  IMPLEMENTED_ENEMY_IDS,
-  type DamageZone,
-  type EnemyArchetypeConfig,
-} from '../config/enemies';
+  ELITE_EYES,
+  ENEMY_LOOKS,
+  REACH_ARMS,
+  TRAIT_LOOKS,
+  type EnemyLook,
+} from '../config/enemyLooks';
+import { enemyConfig, IMPLEMENTED_ENEMY_IDS, type EnemyArchetypeConfig } from '../config/enemies';
 import type { Enemy } from './Enemy';
 import type { EnemyManager } from './EnemyManager';
 
-/** Zombie palette by zone (none reads as the red of the signal beacon). */
-const ZONE_COLORS: Readonly<Record<DamageZone, number>> = {
-  HEAD: 0x9db38a,
-  TORSO: 0x5a5048,
-  ARM_LEFT: 0x8aa07a,
-  ARM_RIGHT: 0x8aa07a,
-  LEG_LEFT: 0x3b4454,
-  LEG_RIGHT: 0x3b4454,
-};
-const EYE_COLOR = 0xffe36b;
 const FLASH_TIME = 0.1;
 const FALL_TIME = 0.5;
 /** Seconds before removal during which a body sinks into the floor. */
 const SINK_TIME = 1;
-/**
- * Arm angle about x when reaching forward at shoulder height: the rig's attack pose. A positive
- * angle swings a hanging arm forward (toward −z, where it faces).
- */
-const REACH = 1.45;
+/** Seconds a scream's ring takes to reach its full radius and fade. */
+const RING_TIME = 0.7;
+const RING_POOL = 4;
 /**
  * Culling sphere around the feet that holds the body in any pose, standing or lying down. The
  * skinned mesh's own sphere is taken from the pose of its first frame, which a fall leaves.
  */
-const POSE_BOUNDS = new Sphere(new Vector3(0, 0.9, 0), 2.2);
+const POSE_BOUNDS = new Sphere(new Vector3(0, 1, 0), 2.6);
 const BODY_BONE = 0;
 const ARMS_BONE = 1;
+/** Bits of a look key: which attachments are drawn. */
+const ARMOR_BIT = 1;
+const HELMET_BIT = 2;
+const ELITE_BIT = 4;
 const _up = new Vector3(0, 1, 0);
 const _dir = new Vector3();
 const _q = new Quaternion();
@@ -89,13 +96,17 @@ interface Visual {
   /** The enemy drawn; null while pooled. */
   enemy: Enemy | null;
   readonly config: EnemyArchetypeConfig;
+  readonly look: EnemyLook;
   readonly root: Group;
+  readonly mesh: SkinnedMesh;
   readonly skeleton: Skeleton;
   /** Pivots at the feet: tilts, lean and fall. */
   readonly body: Bone;
   /** Pivots at the shoulders. */
   readonly arms: Bone;
   readonly material: MeshStandardMaterial;
+  /** Which attachments its geometry has (look key bits). */
+  lookBits: number;
   flash: number;
   pushX: number;
   pushZ: number;
@@ -105,17 +116,35 @@ interface Visual {
   fall: number;
 }
 
+interface Ring {
+  readonly mesh: Mesh;
+  readonly material: MeshBasicMaterial;
+  age: number;
+  radius: number;
+}
+
+function lookOf(config: EnemyArchetypeConfig): EnemyLook {
+  const look = ENEMY_LOOKS[config.id] ?? ENEMY_LOOKS.walker;
+  if (!look) {
+    throw new Error('The Walker look is missing');
+  }
+  return look;
+}
+
 export class EnemyView {
   private readonly scene: Scene;
   private readonly manager: EnemyManager;
   private readonly visuals = new Map<string, Visual>();
   private readonly free = new Map<string, Visual[]>();
   private readonly looks = new Map<string, Look>();
+  private readonly rings: Ring[] = [];
+  private readonly ringGeometry = new RingGeometry(0.9, 1, 48);
   private readonly unsubscribe: (() => void)[] = [];
 
   constructor(scene: Scene, manager: EnemyManager, combat: CombatSystem) {
     this.scene = scene;
     this.manager = manager;
+    this.ringGeometry.rotateX(-Math.PI / 2);
     this.unsubscribe.push(
       combat.events.on('damaged', (e) => {
         const v = this.visuals.get(e.targetId);
@@ -130,11 +159,30 @@ export class EnemyView {
           v.lean = 0.35;
         }
       }),
+      manager.events.on('alarm', (alarm) => {
+        this.startRing(alarm.position, alarm.radius);
+      }),
     );
     // One pooled, hidden visual per archetype from the start: the start-up shader prewarm, which
     // includes hidden objects (D-041), then compiles the enemy materials before the first spawn.
     for (const id of IMPLEMENTED_ENEMY_IDS) {
       this.release(this.create(enemyConfig(id)));
+    }
+    for (let i = 0; i < RING_POOL; i++) {
+      const material = new MeshBasicMaterial({
+        color: 0xb46cff,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        side: DoubleSide,
+      });
+      const mesh = new Mesh(this.ringGeometry, material);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 10;
+      this.scene.add(mesh);
+      this.rings.push({ mesh, material, age: RING_TIME, radius: 0 });
     }
     this.sync();
   }
@@ -142,6 +190,11 @@ export class EnemyView {
   /** Enemies currently drawn (tests, debug). */
   get count(): number {
     return this.visuals.size;
+  }
+
+  /** Scream rings currently expanding (tests, debug). */
+  get activeRings(): number {
+    return this.rings.filter((r) => r.age < RING_TIME).length;
   }
 
   /** Whether an enemy is drawn lying down (tests, debug). */
@@ -155,6 +208,16 @@ export class EnemyView {
     return v ? v.material.emissiveIntensity : 0;
   }
 
+  /** The attachments an enemy is drawn with (tests, debug). */
+  attachments(id: string): string[] {
+    const bits = this.visuals.get(id)?.lookBits ?? 0;
+    return [
+      ...(bits & ARMOR_BIT ? ['plates'] : []),
+      ...(bits & HELMET_BIT ? ['helmet'] : []),
+      ...(bits & ELITE_BIT ? ['spikes'] : []),
+    ];
+  }
+
   /**
    * Once per frame. `alpha`: interpolation between the last two fixed steps; `dt`: simulated
    * seconds this frame (0 while paused, so everything holds still).
@@ -163,6 +226,17 @@ export class EnemyView {
     this.sync();
     for (const v of this.visuals.values()) {
       this.animate(v, alpha, dt);
+    }
+    for (const ring of this.rings) {
+      if (ring.age >= RING_TIME) {
+        continue;
+      }
+      ring.age += dt;
+      const t = Math.min(1, ring.age / RING_TIME);
+      const r = Math.max(0.5, ring.radius * (1 - (1 - t) * (1 - t)));
+      ring.mesh.scale.set(r, 1, r);
+      ring.material.opacity = 0.8 * (1 - t);
+      ring.mesh.visible = t < 1;
     }
   }
 
@@ -184,6 +258,22 @@ export class EnemyView {
       look.geometry.dispose();
     }
     this.looks.clear();
+    for (const ring of this.rings) {
+      ring.mesh.removeFromParent();
+      ring.material.dispose();
+    }
+    this.ringGeometry.dispose();
+  }
+
+  private startRing(position: readonly number[], radius: number): void {
+    const ring =
+      this.rings.find((r) => r.age >= RING_TIME) ??
+      this.rings.reduce((oldest, r) => (r.age > oldest.age ? r : oldest));
+    ring.age = 0;
+    ring.radius = radius;
+    ring.mesh.position.set(position[0] ?? 0, (position[1] ?? 0) + 0.08, position[2] ?? 0);
+    ring.mesh.scale.set(0.5, 1, 0.5);
+    ring.mesh.visible = true;
   }
 
   private sync(): void {
@@ -210,8 +300,8 @@ export class EnemyView {
   }
 
   private acquire(enemy: Enemy): Visual {
-    const reused = this.free.get(enemy.config.id)?.pop();
-    const v = reused ?? this.create(enemy.config);
+    const reused = this.free.get(enemy.archetype.id)?.pop();
+    const v = reused ?? this.create(enemy.archetype);
     v.enemy = enemy;
     v.root.name = `enemy:${enemy.id}`;
     v.root.visible = true;
@@ -223,11 +313,12 @@ export class EnemyView {
     v.lean = 0;
     v.fall = enemy.health.isDead ? 1 : 0;
     v.material.emissiveIntensity = 0;
+    this.applyLook(v, enemy);
     return v;
   }
 
   private create(config: EnemyArchetypeConfig): Visual {
-    const look = this.lookFor(config);
+    const look = this.lookFor(config, 0);
     const material = new MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.9,
@@ -251,11 +342,14 @@ export class EnemyView {
     return {
       enemy: null,
       config,
+      look: lookOf(config),
       root,
+      mesh,
       skeleton,
       body,
       arms,
       material,
+      lookBits: 0,
       flash: 0,
       pushX: 0,
       pushZ: 0,
@@ -266,6 +360,20 @@ export class EnemyView {
     };
   }
 
+  /** Swaps in the geometry for the enemy's current attachments (traits, an intact helmet). */
+  private applyLook(v: Visual, enemy: Enemy): void {
+    const traits = enemy.config.traits;
+    const helmet = enemy.plates.find((plate) => plate.id === 'helmet');
+    const bits =
+      (traits.includes('armored') ? ARMOR_BIT : 0) |
+      (traits.includes('helmeted') && helmet && !helmet.broken ? HELMET_BIT : 0) |
+      (traits.includes('elite') ? ELITE_BIT : 0);
+    if (bits !== v.lookBits || v.mesh.geometry !== this.lookFor(v.config, bits).geometry) {
+      v.lookBits = bits;
+      v.mesh.geometry = this.lookFor(v.config, bits).geometry;
+    }
+  }
+
   private destroy(v: Visual): void {
     v.root.removeFromParent();
     v.skeleton.dispose();
@@ -273,10 +381,11 @@ export class EnemyView {
   }
 
   private animate(v: Visual, alpha: number, dt: number): void {
-    const { enemy, material } = v;
+    const { enemy, material, look } = v;
     if (!enemy) {
       return;
     }
+    this.applyLook(v, enemy);
     const motor = enemy.motor;
     // Position and facing, interpolated between the last two fixed steps.
     v.root.position.lerpVectors(motor.previousPosition, motor.position, alpha);
@@ -294,19 +403,26 @@ export class EnemyView {
     v.pushZ *= decay;
     v.lean *= Math.exp(-dt * 5);
 
-    // Arms: rest, reaching and rising through the wind-up, swinging down on the strike.
+    // Arms: rest, rising through the wind-up (forward to strike, overhead to scream), swinging
+    // down on the strike. The body leans into a strike, throws itself forward in a leap and rears
+    // back to scream.
     let armTarget = 0;
     let telegraph = 0;
     let lean = 0;
     const attack = enemy.config.attack;
+    const raised = look.windupArms > REACH_ARMS + 0.01;
     if (enemy.state === 'ATTACK' && enemy.attackPhase === 'windup') {
       const progress = 1 - enemy.attackTimer / attack.windup;
-      armTarget = REACH + 0.45 * progress;
+      armTarget = look.windupArms + (raised ? 0 : 0.45 * progress);
       telegraph = 0.15 + 0.55 * progress * progress;
-      lean = 0.12 * progress;
+      lean += (raised ? 0.18 : 0.12) * progress;
+    } else if (enemy.state === 'ATTACK' && enemy.attackPhase === 'lunge') {
+      armTarget = REACH_ARMS;
+      telegraph = 0.7;
+      lean -= 0.35;
     } else if (enemy.state === 'ATTACK' && enemy.attackPhase === 'recovery') {
-      armTarget = REACH - 0.5;
-      lean = -0.18;
+      armTarget = raised ? look.windupArms * 0.6 : REACH_ARMS - 0.5;
+      lean += raised ? 0.05 : -0.18;
     } else if (enemy.state === 'STAGGER') {
       armTarget = 0.9;
     }
@@ -335,7 +451,7 @@ export class EnemyView {
     v.arms.rotation.set(v.arm + swing + 0.12, 0, 0);
 
     const glow = Math.max(v.flash > 0 ? 0.6 : 0, telegraph);
-    material.emissive.setHex(v.flash > 0 ? 0xffffff : 0xff8c1a);
+    material.emissive.setHex(v.flash > 0 ? 0xffffff : look.telegraph);
     material.emissiveIntensity = enemy.health.isDead ? 0 : glow;
   }
 
@@ -348,48 +464,117 @@ export class EnemyView {
     v.pushZ -= _dir.x * amount;
   }
 
-  /** Shared geometry per archetype: body (head, torso, legs, eyes) and arms (shoulder pivot). */
-  private lookFor(config: EnemyArchetypeConfig): Look {
-    const cached = this.looks.get(config.id);
+  /** Shared geometry per archetype and set of attachments. */
+  private lookFor(config: EnemyArchetypeConfig, bits: number): Look {
+    const key = `${config.id}:${bits}`;
+    const cached = this.looks.get(key);
     if (cached) {
       return cached;
     }
+    const look = lookOf(config);
     const parts: BufferGeometry[] = [];
     let shoulder: Point3 = [0, 1.42, 0];
     let head: HitboxShape | undefined;
+    let torso: HitboxShape | undefined;
+    const armTops: Point3[] = [];
     for (const shape of config.rig.shapes) {
+      const color = look.zoneColors[shape.zone];
       if (shape.zone === 'ARM_LEFT' || shape.zone === 'ARM_RIGHT') {
         if (shape.kind === 'capsule') {
           shoulder = [0, shape.a[1], shape.a[2]];
+          armTops.push(shape.a);
         }
-        parts.push(skin(shapeGeometry(shape, ZONE_COLORS[shape.zone]), ARMS_BONE));
+        parts.push(skin(shapeGeometry(shape, color), ARMS_BONE));
       } else {
-        parts.push(skin(shapeGeometry(shape, ZONE_COLORS[shape.zone]), BODY_BONE));
+        parts.push(skin(shapeGeometry(shape, color), BODY_BONE));
         if (shape.zone === 'HEAD') {
           head = shape;
+        } else if (shape.zone === 'TORSO') {
+          torso = shape;
         }
       }
     }
     if (head?.kind === 'sphere') {
       // Eyes on the front (−z) of the head.
+      const r = head.radius;
       for (const side of [-1, 1]) {
-        const eye = new SphereGeometry(0.022, 6, 4);
+        const eye = new SphereGeometry(r * 0.17, 6, 4);
         eye.translate(
-          head.center[0] + side * 0.045,
-          head.center[1] + 0.015,
-          head.center[2] - head.radius * 0.93,
+          head.center[0] + side * r * 0.35,
+          head.center[1] + r * 0.12,
+          head.center[2] - r * 0.93,
         );
-        colorize(eye, EYE_COLOR);
+        colorize(eye, bits & ELITE_BIT ? ELITE_EYES : look.eyes);
         parts.push(skin(eye, BODY_BONE));
+      }
+      if (look.mouth) {
+        const mouth = new CircleGeometry(r * look.mouth.size, 12);
+        mouth.scale(0.8, 1.2, 1);
+        mouth.rotateY(Math.PI);
+        mouth.translate(head.center[0], head.center[1] - r * 0.4, head.center[2] - r * 0.86);
+        colorize(mouth, look.mouth.color);
+        parts.push(skin(mouth, BODY_BONE));
+      }
+      if (bits & HELMET_BIT) {
+        const dome = new SphereGeometry(r * 1.2, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.55);
+        dome.translate(head.center[0], head.center[1] - r * 0.05, head.center[2]);
+        colorize(dome, TRAIT_LOOKS.helmeted.color);
+        parts.push(skin(dome, BODY_BONE));
+      }
+    }
+    if (torso?.kind === 'capsule') {
+      const r = torso.radius;
+      const top = Math.max(torso.a[1], torso.b[1]) + r * 0.6;
+      const bottom = Math.min(torso.a[1], torso.b[1]) - r * 0.2;
+      if (bits & ARMOR_BIT) {
+        for (const side of [-1, 1]) {
+          // Chest (−z) and back (+z) plates.
+          const plate = new BoxGeometry(r * 1.9, top - bottom, r * 0.35);
+          plate.translate(0, (top + bottom) / 2, side * r * 0.95);
+          colorize(plate, TRAIT_LOOKS.armored.color);
+          parts.push(skin(plate, BODY_BONE));
+        }
+        for (const at of armTops) {
+          const pad = new BoxGeometry(r * 1.2, r * 0.45, r * 1.3);
+          pad.translate(at[0] * 1.05, at[1] + r * 0.25, at[2]);
+          colorize(pad, TRAIT_LOOKS.armored.color);
+          parts.push(skin(pad, BODY_BONE));
+        }
+      }
+      if (bits & ELITE_BIT) {
+        const spike = (x: number, y: number, z: number, tiltX: number, tiltZ: number) => {
+          const cone = new ConeGeometry(r * 0.2, r * 1.1, 5);
+          cone.translate(0, r * 0.55, 0);
+          cone.rotateX(tiltX);
+          cone.rotateZ(tiltZ);
+          cone.translate(x, y, z);
+          colorize(cone, TRAIT_LOOKS.elite.color);
+          parts.push(skin(cone, BODY_BONE));
+        };
+        for (const at of armTops) {
+          const side = Math.sign(at[0]) || 1;
+          for (let i = 0; i < 3; i++) {
+            spike(
+              at[0] * (1.1 - i * 0.2),
+              at[1] + r * 0.3,
+              at[2] + (i - 1) * r * 0.4,
+              0,
+              -side * 0.5,
+            );
+          }
+        }
+        for (let i = 0; i < 3; i++) {
+          spike(0, top - r * 0.3 - i * r * 0.9, r * 0.9, 1.2, 0);
+        }
       }
     }
     const geometry = mergeGeometries(parts);
     for (const part of parts) {
       part.dispose();
     }
-    const look = { geometry, shoulder };
-    this.looks.set(config.id, look);
-    return look;
+    const result = { geometry, shoulder };
+    this.looks.set(key, result);
+    return result;
   }
 }
 

@@ -1,5 +1,5 @@
 /**
- * The Phase 4 test encounter (D-042): places the configured Walkers when a run starts and puts
+ * The test encounter (D-042, D-043): places the configured enemies when a run starts and puts
  * each one back a while after its body is removed. Temporary validation content, like the dummy
  * range: it is not a wave spawner (no budget, pacing or difficulty), and the wave system
  * (Phase 6) replaces it. It uses only `EnemyManager.spawn`, the same entry point waves will use.
@@ -88,8 +88,8 @@ export class TrainingEncounter implements FixedUpdateSystem {
   }
 
   private place(slot: Slot): void {
-    const { archetype, position, yaw, patrol } = slot.placement;
-    const enemy = this.enemies.spawn(archetype, position, { yaw, patrol });
+    const { archetype, position, yaw, patrol, traits } = slot.placement;
+    const enemy = this.enemies.spawn(archetype, position, { yaw, patrol, traits: traits ?? [] });
     slot.enemyId = enemy?.id ?? null;
     slot.wait = enemy ? 0 : this.respawnDelay; // at the cap: try again later
   }

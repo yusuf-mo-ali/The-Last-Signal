@@ -31,6 +31,7 @@ import { createCamera } from './render/camera';
 import { Renderer } from './render/Renderer';
 import { detectWebGL2 } from './render/webglSupport';
 import { CombatFeedback } from './ui/CombatFeedback';
+import { AlarmPulse } from './ui/AlarmPulse';
 import { HealthHud } from './ui/HealthHud';
 import { LockPrompt } from './ui/LockPrompt';
 import { StatusScreen } from './ui/StatusScreen';
@@ -199,6 +200,7 @@ function boot(app: HTMLElement): () => void {
   const pickupView = new PickupView(view.scene, pickups);
   const hud = new WeaponHud(app);
   const healthHud = new HealthHud(app, playerHealth);
+  const alarmPulse = new AlarmPulse(app, enemies.events, () => player.motor.position);
   const feedback = new CombatFeedback(app, combat.events);
   view.prewarm(camera);
 
@@ -225,6 +227,7 @@ function boot(app: HTMLElement): () => void {
       training.reset();
       pickups.clear();
       feedback.reset();
+      alarmPulse.reset();
       cameraController.bob.reset();
     }),
   );
@@ -332,6 +335,7 @@ function boot(app: HTMLElement): () => void {
       });
       feedback.update(simDt, camera, hudVisible);
       healthHud.update(simDt, hudVisible);
+      alarmPulse.update(simDt);
       view.render(alpha, camera);
     },
   });
@@ -381,6 +385,7 @@ function boot(app: HTMLElement): () => void {
           pickupView,
           enemyView,
           healthHud,
+          alarmPulse,
         },
       }).dispose;
     });
@@ -404,6 +409,7 @@ function boot(app: HTMLElement): () => void {
     dummyView.dispose();
     enemyView.dispose();
     healthHud.dispose();
+    alarmPulse.dispose();
     pickupView.dispose();
     hud.dispose();
     feedback.dispose();

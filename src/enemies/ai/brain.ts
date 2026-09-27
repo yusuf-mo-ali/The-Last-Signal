@@ -8,6 +8,9 @@
  *   attack wind-up and strike) and the steering outputs the manager turns into movement.
  * - `onDamaged` / `onStaggered`: reactions to combat events, applied immediately.
  *
+ * Shared pieces (perception, navigation, idle and patrol, stagger) live in `common.ts`, so every
+ * behaviour sits on the same state machine and the same limited-rate decisions (D-043).
+ *
  * Brains are stateless objects: all state lives on the `Enemy`, so one brain serves every enemy.
  */
 
@@ -44,6 +47,15 @@ export interface EnemyBrain {
   /** Took damage from `attacker` (the likely attacker, when known). */
   onDamaged(enemy: Enemy, ctx: BrainContext, attacker: EnemyTarget | null): void;
   onStaggered(enemy: Enemy, ctx: BrainContext): void;
-  /** Made aware of a target from outside, for good (waves: "the horde knows where you are"). */
-  alert(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void;
+  /**
+   * Made aware of a target from outside, for `duration` seconds (default: for good; waves: "the
+   * horde knows where you are"; an alarm: its alert duration).
+   */
+  alert(enemy: Enemy, ctx: BrainContext, target: EnemyTarget, duration?: number): void;
+  /**
+   * Starts its attack (or ability) at its current target now, ignoring the cooldown (debug tools).
+   * Returns whether it did: it needs a target and must be free to act (not staggered, not already
+   * attacking).
+   */
+  forceAttack(enemy: Enemy, ctx: BrainContext): boolean;
 }

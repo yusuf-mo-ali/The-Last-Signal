@@ -18,12 +18,20 @@
  *      archetype's rate; the hit volumes follow.
  * Combat's `damaged` (alert) and `staggered` events reach the brain immediately.
  *
+ * Traits (D-043): an enemy is spawned with a trait set (`applyTraits` folds it into the archetype)
+ * and traits can be added or removed while it lives (`setTraits`); combat is re-configured with
+ * the new damage profile (per-zone armor, breakable plates, stagger).
+ *
+ * Alarms (D-043): a behaviour can raise an `alarm` (the Screamer's scream). The prototype response
+ * here: every other living enemy within its radius is told where the target is for the alarm's
+ * alert duration and moves faster for a while. Waves, mutations and effects can listen too.
+ *
  * Deterministic: fixed steps, step-counted think turns, seeded randomness; nothing depends on the
  * render frame rate. Browser-independent.
  */
 
 import { Vector3 } from 'three';
-import type { CombatSystem, KilledEvent } from '../combat/CombatSystem';
+import type { CombatSystem, DamageProfile, KilledEvent } from '../combat/CombatSystem';
 import { DROP_TABLES } from '../config/drops';
 import {
   ENEMY_RULES,
@@ -33,6 +41,7 @@ import {
   type EnemyArchetypeId,
   type EnemyRules,
 } from '../config/enemies';
+import { applyTraits, normalizeTraits, type EnemyConfig } from '../config/traits';
 import { EventBus } from '../core/EventBus';
 import type { FixedUpdateSystem } from '../core/Game';
 import { bodyFits } from '../navigation/clearance';
@@ -48,9 +57,9 @@ import type { LevelDefinition } from '../world/levels/types';
 import type { PickupManager } from '../world/PickupManager';
 import type { BrainContext, EnemyBrain } from './ai/brain';
 import { BRAINS } from './ai/brains';
-import { angleDelta, horizontalDistance } from './ai/meleeBrain';
+import { angleDelta, horizontalDistance } from './ai/common';
 import { Enemy } from './Enemy';
-import type { EnemyEvents } from './events';
+import type { AlarmEvent, EnemyEvents } from './events';
 import type { EnemyTarget } from './types';
 
 export interface SpawnOptions {
@@ -59,6 +68,8 @@ export interface SpawnOptions {
   readonly patrol?: boolean;
   /** Knows about this target from the start (waves: the horde is drawn to the player). */
   readonly alertTo?: EnemyTarget;
+  /** Traits to spawn with (e.g. `['armored', 'elite']`), in any order. */
+  readonly traits?: readonly string[];
 }
 
 export interface EnemyManagerOptions {
@@ -159,6 +170,9 @@ export class EnemyManager implements FixedUpdateSystem {
           this.brainOf(enemy).onStaggered(enemy, this.context);
         }
       }),
+      this.events.on('alarm', (alarm) => {
+        this.respondToAlarm(alarm);
+      }),
     );
   }
 
@@ -198,11 +212,19 @@ export class EnemyManager implements FixedUpdateSystem {
     if (this.aliveCount >= this.rules.maxAlive) {
       return null;
     }
-    const config = enemyConfig(archetype);
-    const enemy = this.poolFor(config).acquire();
+    const base = enemyConfig(archetype);
+    const config = applyTraits(base, options.traits ?? []);
+    const enemy = this.poolFor(base).acquire();
     const number = ++this.counter;
     const at = position instanceof Vector3 ? position : new Vector3(...position);
-    enemy.prepare(`${config.id}-${number}`, number, at, options.yaw ?? 0, options.patrol ?? true);
+    enemy.prepare(
+      `${base.id}-${number}`,
+      number,
+      at,
+      options.yaw ?? 0,
+      options.patrol ?? true,
+      config,
+    );
     enemy.idleTimer = this.rng.range(config.patrol.pauseMin, config.patrol.pauseMax);
     this.byId.set(enemy.id, enemy);
     this.list = [...this.list, enemy];
@@ -210,10 +232,7 @@ export class EnemyManager implements FixedUpdateSystem {
       id: enemy.id,
       rig: enemy.rig,
       health: enemy.health,
-      ...(config.zoneMultipliers ? { zoneMultipliers: config.zoneMultipliers } : {}),
-      armor: config.armor,
-      resistance: config.resistance,
-      staggerThreshold: config.staggerThreshold,
+      ...damageProfile(enemy),
       onKilled: (event) => {
         this.onKilled(enemy, event);
       },
@@ -240,6 +259,63 @@ export class EnemyManager implements FixedUpdateSystem {
       bodyFits(this.level.brushes, at.x, at.y, at.z, body, this.rules.maxRise) &&
       this.lines.hasGround(at)
     );
+  }
+
+  /**
+   * Replaces a living enemy's traits (any order; unknown ids throw). Health keeps its fraction; a
+   * plate it still wears keeps its damage. Returns whether the enemy was found alive.
+   */
+  setTraits(id: string, traits: readonly string[]): boolean {
+    const enemy = this.byId.get(id);
+    if (!enemy?.alive) {
+      return false;
+    }
+    const config = applyTraits(enemy.archetype, traits);
+    enemy.setConfig(config);
+    this.combat.configure(id, damageProfile(enemy));
+    this.events.emit('traitsChanged', { id, traits: config.traits });
+    return true;
+  }
+
+  addTrait(id: string, trait: string): boolean {
+    const enemy = this.byId.get(id);
+    return enemy
+      ? this.setTraits(id, [...enemy.config.traits, ...normalizeTraits([trait])])
+      : false;
+  }
+
+  removeTrait(id: string, trait: string): boolean {
+    const enemy = this.byId.get(id);
+    const [removed] = normalizeTraits([trait]);
+    return enemy
+      ? this.setTraits(
+          id,
+          enemy.config.traits.filter((t) => t !== removed),
+        )
+      : false;
+  }
+
+  /**
+   * Debug: makes an enemy use its attack (or ability) now, at its target (told where the nearest
+   * target is if it has none), ignoring its cooldown. Returns whether it started.
+   */
+  forceAttack(id: string): boolean {
+    const enemy = this.byId.get(id);
+    if (!enemy?.alive) {
+      return false;
+    }
+    const brain = this.brainOf(enemy);
+    if (!enemy.target) {
+      const target = this.nearestTarget(enemy);
+      if (!target) {
+        return false;
+      }
+      brain.alert(enemy, this.context, target);
+    }
+    if (enemy.state === 'DETECT') {
+      enemy.fsm.transition('CHASE');
+    }
+    return brain.forceAttack(enemy, this.context);
   }
 
   /** Makes an enemy aware of a target it has not seen. */
@@ -417,10 +493,55 @@ export class EnemyManager implements FixedUpdateSystem {
       archetype: enemy.config.id,
       position: [p.x, p.y, p.z],
     });
-    const table = enemy.config.drops;
-    if (table && this.pickups) {
-      for (const pickup of rollDrops(DROP_TABLES[table], this.rng)) {
-        this.pickups.spawn(pickup, [p.x, p.y + 0.2, p.z]);
+    const tables = [
+      ...(enemy.config.drops ? [enemy.config.drops] : []),
+      ...enemy.config.bonusDrops,
+    ];
+    if (this.pickups) {
+      for (const table of tables) {
+        for (const pickup of rollDrops(DROP_TABLES[table], this.rng)) {
+          this.pickups.spawn(pickup, [p.x, p.y + 0.2, p.z]);
+        }
+      }
+    }
+  }
+
+  /**
+   * The prototype response to an alarm (D-043): every other living enemy within its radius (and
+   * roughly on the same level) is told where the target is and, if the alarm carries haste, moves
+   * faster for a while. Enemies that already have another target keep it, but are still hastened.
+   */
+  private respondToAlarm(alarm: AlarmEvent): void {
+    const [x, y, z] = alarm.position;
+    const target =
+      alarm.targetId === null
+        ? null
+        : (this.context.targets.find((t) => t.id === alarm.targetId && t.isAlive()) ??
+          this.targets().find((t) => t.id === alarm.targetId && t.isAlive()) ??
+          null);
+    for (const enemy of this.list) {
+      if (!enemy.alive || enemy.id === alarm.sourceId) {
+        continue;
+      }
+      const p = enemy.motor.position;
+      if (Math.hypot(p.x - x, p.z - z) > alarm.radius || Math.abs(p.y - y) > alarm.radius / 2) {
+        continue;
+      }
+      if (target && alarm.alertDuration > 0) {
+        this.brainOf(enemy).alert(enemy, this.context, target, alarm.alertDuration);
+      }
+      if (alarm.haste && alarm.haste.multiplier > 1 && alarm.haste.duration > 0) {
+        const now = this.simTime;
+        const active = enemy.haste(now) > 1;
+        enemy.hasteMultiplier = active
+          ? Math.max(enemy.hasteMultiplier, alarm.haste.multiplier)
+          : alarm.haste.multiplier;
+        enemy.hasteUntil = Math.max(active ? enemy.hasteUntil : now, now + alarm.haste.duration);
+        this.events.emit('hasted', {
+          id: enemy.id,
+          multiplier: enemy.hasteMultiplier,
+          until: enemy.hasteUntil,
+        });
       }
     }
   }
@@ -467,7 +588,12 @@ export class EnemyManager implements FixedUpdateSystem {
 
   /** Pushes overlapping enemies apart, and enemies off their targets (velocity, not position). */
   private separate(list: readonly Enemy[]): void {
-    const { separationDistance: reach, separationStrength: strength } = this.rules;
+    const {
+      separationDistance: reach,
+      separationStrength: strength,
+      separationSpeedFactor: speedFactor,
+      separationAnticipation: anticipation,
+    } = this.rules;
     for (const enemy of list) {
       enemy.separation.set(0, 0, 0);
     }
@@ -489,7 +615,16 @@ export class EnemyManager implements FixedUpdateSystem {
         let dx = pb.x - pa.x;
         let dz = pb.z - pa.z;
         let d = Math.hypot(dx, dz);
-        if (d >= reach) {
+        // Big bodies need more room than the rule's default distance.
+        const room = Math.max(reach, a.config.body.radius + b.config.body.radius + 0.1);
+        // Closing fast (a sprinting Runner meeting another body), they start pushing earlier and
+        // harder, so the fast one steers round instead of running through: a body cannot brake
+        // or turn instantly (acceleration limits), so the push has to come before the overlap.
+        // `closingD` is the closing speed × d (no square root needed to reject a pair).
+        const va = a.motor.velocity;
+        const vb = b.motor.velocity;
+        const closingD = Math.max(0, (va.x - vb.x) * dx + (va.z - vb.z) * dz);
+        if (d >= room && d * d >= room * d + closingD * anticipation) {
           continue;
         }
         if (d < 1e-4) {
@@ -502,7 +637,9 @@ export class EnemyManager implements FixedUpdateSystem {
           dx /= d;
           dz /= d;
         }
-        const push = ((reach - Math.min(d, reach)) / reach) * strength;
+        const closing = closingD / d; // d is 1 when they were exactly on top of each other
+        const space = room + closing * anticipation;
+        const push = ((space - Math.min(d, space)) / space) * (strength + closing * speedFactor);
         a.separation.x -= dx * push;
         a.separation.z -= dz * push;
         b.separation.x += dx * push;
@@ -560,8 +697,11 @@ export class EnemyManager implements FixedUpdateSystem {
     const sin = Math.sin(enemy.heading);
     const cos = Math.cos(enemy.heading);
     const s = enemy.separation;
-    const forward = enemy.moveSpeed * alignment + (-s.x * sin - s.z * cos) / config.moveSpeed;
-    const right = (s.x * cos - s.z * sin) / config.moveSpeed;
+    enemy.applySpeed(this.simTime);
+    // The push is in m/s: relative to this step's top speed (haste and a lunge included).
+    const top = Math.max(0.01, enemy.walkSpeed);
+    const forward = enemy.moveSpeed * alignment + (-s.x * sin - s.z * cos) / top;
+    const right = (s.x * cos - s.z * sin) / top;
     motor.step({ forward, right, sprint: false, crouch: false, jump: false }, enemy.heading, dt);
     enemy.syncRig();
     if (enemy.moveSpeed > 0) {
@@ -581,4 +721,18 @@ function wrapAngle(angle: number): number {
     a += Math.PI * 2;
   }
   return a;
+}
+
+/** How an enemy takes damage, for the `CombatSystem` (D-041, D-043). */
+function damageProfile(enemy: Enemy): DamageProfile {
+  const config: EnemyConfig = enemy.config;
+  return {
+    ...(config.zoneMultipliers ? { zoneMultipliers: config.zoneMultipliers } : {}),
+    armor: config.armor,
+    zoneArmor: config.zoneArmor,
+    plates: enemy.plates,
+    resistance: config.resistance,
+    staggerThreshold: config.staggerThreshold,
+    ...(config.staggerZones ? { staggerZones: config.staggerZones } : {}),
+  };
 }

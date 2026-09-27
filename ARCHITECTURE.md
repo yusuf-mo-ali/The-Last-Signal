@@ -455,10 +455,26 @@ presentation (every frame): TrainingDummyView (one merged mesh per dummy; flash,
 - **Determinism.** Damage has no randomness; drops use their own seeded `Rng` stream (`<seed>:drops`), separate from spread and recoil. Same seed and inputs give identical combat events (tested).
 - **Frozen time freezes combat:** stagger windows, respawns and pickup lifetimes run on fixed steps only.
 
+**Phase 5 additions (D-043): mitigation as a generic damage profile.** A target registers a `DamageProfile` (zone multipliers, flat `armor`, per-zone `zoneArmor`, breakable `plates`, `resistance`, `staggerThreshold`, `staggerZones`), and `CombatSystem.configure(id, profile)` replaces it at run time (traits added or removed). Nothing in combat names an archetype or a trait.
+
+```text
+applyHit: computeDamage(…, armor = armor + zoneArmor[zone], resistance)      [pure, unchanged]
+          → plates covering the zone absorb what they can (ArmorPlate.absorb)
+          → Health.damage → damaged {…, armorReduction, absorbed}
+          → a plate used up: armorBroken {plateId}; staggerOnBreak → staggered (unless killed)
+          stagger window: counts only damage to staggerZones (when set)
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `combat/armor.ts` | sim | `ArmorPlate`: zones covered, durability, absorb, broken, reset (state owned by the target's owner) |
+| `combat/CombatSystem.ts` | sim | `DamageProfile`, `configure`, plates and per-zone armor in `applyHit`, `armorBroken`, stagger zones |
+| `ui/CombatFeedback.ts` | presentation | + a steel "armored" hit marker when a hit was mitigated |
+
 ### 7.4 Enemies and AI (D-012)
 
 - **Each enemy is an archetype plus modifiers.**
-  - Archetypes (Walker, Runner, Tank, Climber, Screamer) are config.
+  - Archetypes (Walker, Runner, Tank, Climber, Screamer) are config. The v1 roster is Walker, Runner, Tank and Screamer; the Climber is deferred (D-043, O-3).
   - Modifiers (Armored, Helmeted, Elite) overlay stats and hitboxes.
   - This gives the adaptive system and BLOOD MOON the "armored", "protected-head" and "elite" enemies they need, without adding archetypes.
 - **AI states follow plan §11:** `IDLE, PATROL, DETECT, CHASE, ATTACK, STAGGER, DEAD`, as a per-enemy FSM.
@@ -512,7 +528,55 @@ presentation (every frame): EnemyView (one skinned mesh per enemy, interpolated)
 - **Order in the step:** world → player → enemies → test encounter → weapons (combat resolves inside the weapon events) → combat timers → training range → pickups.
 - **Determinism.** Fixed steps, step-counted think turns and a seeded `Rng` stream (`<seed>:enemies`: patrols, idle pauses and enemy drops): the same fight gives the same result at any render rate (tested at 30, 60 and 144 Hz).
 - **Enemy targets are generic** (`EnemyTarget`): the player now; decoys or allies later implement the same interface.
-- **Not yet:** modifiers and elites (Phase 5 with the other archetypes), the spawner (Phase 6), the `SpatialHash` (pairwise separation measured ~0.08 ms per step at 64), body blocking of the player.
+- **Not yet:** the spawner (Phase 6), the `SpatialHash` (pairwise separation measured ~0.08 ms per step at 64), body blocking of the player.
+
+**Phase 5 implementation (D-043).** The Runner, the Tank and the Screamer, and traits, on the same framework. There is still one state machine, one decision schedule, one navigation and one combat pipeline; archetypes differ by data and by one of two behaviours.
+
+```text
+EnemyConfig = applyTraits(archetype, traits)        [pure; canonical order; what every system reads]
+  archetype: EnemyArchetypeConfig (+ Phase 5 options: staggerZones, attack.lunge, weave,
+             preferredRange, ability)
+  traits:    ENEMY_TRAITS overlays (multipliers, zoneArmor, plates, bonus drops)
+
+behaviours (config.behavior → brain), both built on ai/common.ts:
+  melee    (Walker, Runner, Tank)  chase → [weave] → wind-up → [leap] → strike → recovery
+  screamer (Screamer)              keep preferredRange (approach / hold / back away)
+                                   → wind-up → release: emit alarm → recovery
+ai/common.ts: perceive, planChase, followPath, checkProgress, thinkIdle, updatePatrol, alertTo,
+              stagger, cancelAttack, transition, …   (everything the two behaviours share)
+
+alarm (enemy event bus): {sourceId, kind, position, radius, targetId, targetPosition,
+                          alertDuration, haste, time}
+  → EnemyManager.respondToAlarm (prototype): others within radius: alert(target, duration),
+                                             haste (multiplier until time) → hasted
+  → EnemyView: shockwave ring · ui/AlarmPulse: screen-edge pulse if the player is within radius
+  → later (no dependency now): wave reinforcements, SCREAM, adaptive metrics, audio
+
+run-time traits: EnemyManager.setTraits → Enemy.setConfig (health keeps its fraction, worn plates
+                 keep their damage) → CombatSystem.configure → traitsChanged
+per step speed:  motor walkSpeed = config.moveSpeed × brain speedScale (a leap) × haste
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `config/enemies.ts` | data | + Runner, Tank, Screamer data; `DEFAULT_ROSTER` (O-3); the Phase 5 archetype options; separation anticipation (`separationAnticipation`, `separationSpeedFactor`) |
+| `config/traits.ts` | data | `ENEMY_TRAITS` (Armored, Helmeted, Elite), `applyTraits`, `normalizeTraits`, `EnemyConfig` |
+| `config/combat.ts` | data | + `scaleRig` (builds per archetype), `armsRaisedPose` (the scream), `leanRig` (a lean or hunch in the rig) |
+| `config/enemyLooks.ts` | data | Placeholder looks per archetype and trait (palette, eyes, telegraph colour, mouth, wind-up arms) |
+| `enemies/ai/common.ts` | sim | The shared behaviour building blocks (extracted from Phase 4's melee brain) |
+| `enemies/ai/meleeBrain.ts` | sim | The melee chaser, + weave and leap options |
+| `enemies/ai/screamerBrain.ts` | sim | The support behaviour: positioning band, telegraphed ability, alarm |
+| `enemies/Enemy.ts` | sim | + `config: EnemyConfig` (mutable, per enemy), plates, haste, per-step speed and acceleration |
+| `enemies/EnemyManager.ts` | sim | + traits at spawn and at run time, `forceAttack`, the alarm response, bonus drops, separation that anticipates closing bodies and fits big ones |
+| `enemies/events.ts` | sim | + `alarm`, `hasted`, `traitsChanged`; `attackStarted.kind` (`strike` / `scream`) |
+| `enemies/EnemyView.ts` | presentation | Pooled visuals per archetype; geometry cached per archetype and attachment set; shockwave rings |
+| `ui/AlarmPulse.ts` | presentation | The player's side of an alarm |
+| `debug/EnemyDebugView.ts` | debug | + traits and haste in labels, `data-archetype`, the ability-radius ring |
+
+- **Behaviour options, not archetype code:** the Runner is the melee brain with `weave` and `attack.lunge`; the Tank is the melee brain with `staggerZones` and big numbers. A new melee archetype is data; a new kind of behaviour is a brain next to these two, reusing `common.ts`.
+- **The ability is the attack slot.** The Screamer's scream uses the attack's timing fields (wind-up, recovery, cooldown, range) and the same `attackStarted`/`attackCancelled` events (`kind: 'scream'`), so the state machine, stagger interruption and debug tools work unchanged.
+- **Pools stay per archetype** (a freed Runner is never reused as a Tank); traits are per life, reset by `prepare`.
+- **Posture belongs to the rig** (`leanRig`): the view builds each body from its rig, so hit volumes and drawn bodies agree. Only short animation leans (a wind-up, a leap) are drawn without the rig following.
 
 ### 7.5 Navigation (D-008)
 
@@ -529,7 +593,8 @@ presentation (every frame): EnemyView (one skinned mesh per enemy, interpolated)
 - **Route graph otherwise:** `LevelDefinition.navigation` (nodes at feet height and links a body can walk; the facility has 37 nodes and 48 links) → `RouteGraph` (A* on typed arrays, ties to the lower index, `nearest` preferring the same level). A route starts at the nearest node the enemy can walk to and ends at the target's goal node (nearest to the target with a straight walk to it; one per target per step, shared); re-plans start from the node being walked to; corners are cut when a later node is walkable.
 - **Stuck detection** (no progress for `stuckTime`): a failed straight walk means something the rays cannot see (a kerb below knee height, a beam above the chest), so the enemy follows the route link by link, without cutting corners, until the route ends or it reaches the target; a failed route is re-planned.
 - **Enemies collide like the player:** they move through `PlayerMotor` against the level octree, so walls and floors hold them even where navigation is wrong (the plan's nav-grid binding is not needed).
-- **Validation:** tests walk every link of the facility both ways with a Walker body through the real collision, and chase a target into every area.
+- **Validation:** tests walk every link of the facility both ways with each archetype's body (Walker, Runner, Tank, Screamer; Phase 5) through the real collision, and chase a target into every area.
+- **Climb links** (for the deferred Climber, D-043) are not in the level data yet; they arrive with the Climber if the adaptive system brings it in.
 - **Spawn validation:** `bodyFits` (level brush data: a body inside a brush counts as blocked even though it touches none of its faces) and `hasGround`, combined in `EnemyManager.canStand`, used by the debug spawn commands; the wave spawner will use it for its spawn points.
 - **The seam for later:** the brain only reads `lines`, `routes` and `goalNodeFor` from its context, so a flow field (D-008) or a navmesh can replace the route graph without touching behaviour.
 
@@ -632,7 +697,7 @@ Three sources change the world. They are layered rather than competing:
 
 - **`debug/` is dynamically imported behind `import.meta.env.DEV`,** so it is excluded from production bundles (Phase 0.5, verified: no debug chunk, code or CSS in `dist/`).
 - **`window.tls` is a structured command interface.** `tls.help()` lists every command.
-  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`; player and view commands (Phase 1); weapon commands (Phase 2); combat commands (Phase 3): `combat`, `dummies`, `spawnDummy`, `resetDummies`, `clearDummies`, `reviveDummies`, `aimAt`, `aimAtTarget`, `showHitboxes` (the hitbox visualiser), `damageNumbers`, `pickups`, `spawnPickup`; enemy and player-health commands (Phase 4): `playerHealth`, `healPlayer`, `setGodMode`, `damagePlayer`, `killPlayer`, `enemies`, `enemy`, `spawnEnemy`, `spawnWalkers` (the stress test: spots where a body fits, in rows in front of the player), `killEnemy`, `killAll`, `damageEnemy`, `setEnemyState`, `alertEnemies`, `clearEnemies`, `freezeEnemies`, `showAI` (the AI visualiser).
+  - Working now: `inspect`, `state`, `transition`, `pause`, `resume`, `stats`, `overlay`, `errors`, `loseContext`, `restoreContext`, `throwError`; player and view commands (Phase 1); weapon commands (Phase 2); combat commands (Phase 3): `combat`, `dummies`, `spawnDummy`, `resetDummies`, `clearDummies`, `reviveDummies`, `aimAt`, `aimAtTarget`, `showHitboxes` (the hitbox visualiser), `damageNumbers`, `pickups`, `spawnPickup`; enemy and player-health commands (Phase 4): `playerHealth`, `healPlayer`, `setGodMode`, `damagePlayer`, `killPlayer`, `enemies`, `enemy`, `spawnEnemy`, `spawnWalkers` (the stress test: spots where a body fits, in rows in front of the player), `killEnemy`, `killAll`, `damageEnemy`, `setEnemyState`, `alertEnemies`, `clearEnemies`, `freezeEnemies`, `showAI` (the AI visualiser); archetype and trait commands (Phase 5): `spawnEnemy(type, distance, traits)` for every archetype, `spawnMixed` (the roster in rows), `traits`, `setTraits`, `applyTrait`, `removeTrait`, `forceAbility` (use the attack or the scream now).
   - The plan §29 commands not built yet (`startWave`, `triggerMutation`, `spawnBoss`) are registered as stubs that name the phase implementing them.
 - **The overlay** shows FPS, frame interval, our per-frame cost (avg/p95/max), steps per frame, dropped time, draw calls, triangles, programs, viewport, context status, game state and pointer-lock state. It is toggled with Backquote or `tls.overlay()`. While it is hidden, the frame probe is detached. Since Phases 2–4 it also shows the held weapon, the combat targets alive with the last hit, and the enemies alive by AI state with the player's health.
 - **`analytics/`** provides an `Analytics.track(event, props)` interface. Production uses the `NullProvider` until a provider is chosen; dev uses `ConsoleProvider`. Event names come from plan §30, and no personal data is collected.
@@ -739,10 +804,15 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 - our CPU cost per frame ~1.6 ms with 4 Walkers, ~2.7 ms with 16, ~7 ms with 64 at software-rendering frame rates (up to 5 simulation steps per frame);
 - JS heap 29–35 MB from 0 to 64 Walkers (no growth).
 
+**Phase 5 baseline** (the mixed roster; a host about half as fast as Phase 4's, so compared within the session; TESTING.md §7.4):
+- simulation per fixed step at 64: 1.27 ms mixed vs 1.15 ms Walkers on the same host (+10 %: Runners and hastened enemies move further, so collision does more work); decisions still ⌈N ÷ 6⌉ per step at most; separation 0.16 ms at 64 with the anticipation of closing bodies;
+- draw calls unchanged: each enemy is still one skinned mesh whatever its archetype and traits (144 at 64); geometry is shared per archetype and set of attachments (25–27 geometries); traits add triangles (+31 % if every enemy has all three), not draw calls;
+- browser frame cost at 64: mixed 16.0 ms vs Walkers 17.0 ms on the same host (noise), JS heap 30–37 MB.
+
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);
 - Chrome's Rendering → *Frame Rendering Stats* and the Performance panel, which also work on production builds;
-- the stress-test debug command `tls.spawnWalkers(n)` (with `tls.setGodMode(true)` and `tls.alertEnemies()`), and `src/enemies/performance.test.ts` for the simulation alone (`PERF_REPORT=1`).
+- the stress-test debug commands `tls.spawnWalkers(n)` and `tls.spawnMixed(n, distance?, traits?)` (with `tls.setGodMode(true)` and `tls.alertEnemies()`), and `src/enemies/performance.test.ts` for the simulation alone (`PERF_REPORT=1`).
 
 ---
 
