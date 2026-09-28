@@ -127,6 +127,14 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 - **Tests must be able to fail.** For important behaviour, plant a realistic bug and confirm a test goes red.
   - Phases 0.2 and 0.4: 16 of 16 unit-level mutations were caught.
   - Phase 0.6: a planted e2e bug (refusal feedback removed) failed in both projects.
+  - Phase 6: 45 of 45 wave-system mutations caught, across:
+    - the curves: budget terms, the endless tail, max alive (and its endless cap), unlocks, caps, the trait ramp;
+    - the generator: the Elite limit, extras from any source (the Climber path), adaptive budget changes, unclamped budget scale and weights, introductions, the Walker floor, the remainder, heavies in the opening, repeated themes, the finale's heavies, trait costs, the ambush bonus;
+    - the runtime: max alive, completion counting debug spawns, victory and endless, the alarm pull-forward adding enemies, stats reset, breather, intro, first-group delay, relaxing the view rule, stragglers, alarms, spawning after death, headshots, spawned enemies not alerted;
+    - spawn points: the view rule, line of sight, the view-cone margin, minimum distance, the reserved point, repeat penalty, bias, walkable group slots, body fit;
+    - deaths reporting traits.
+  - Phase 6 first run: 37 of 45 were caught. One survivor was equivalent (the trait gate one wave early, where the ramp already gives 0) and was replaced by a real ramp off-by-one. The other seven led to new tests: each spawn's cost against `applyTraits` (the cost was only checked against itself), a roster without Walkers still spending its budget, weights past the clamp giving the same wave, the view cone's margin, group slots cut off from their point, spawned enemies alerted the moment they spawn, deaths reporting traits (and Elite kills in the run stats). Every file was restored byte-identically (hash-checked).
+  - Phase 6, end-to-end: 8 of 8 planted HUD and wiring bugs were caught by `waves.spec`, run in a separate git worktree so the working tree stayed clean: the LEFT count showing only living enemies, no announcement banner, no breather countdown, victory showing the game-over prompt, end prompts without the wave reached, waves never attached in normal play, damage allowed between waves (D-029), and the `?endless=1` flag ignored.
   - Phase 5: 49 of 49 archetype and trait mutations caught, across:
     - the Runner: the weave never switching sides, weaving into walls, never weaving, the side never steered, no leap, a leap that never ends, a leap that tracks the target, a leap at running speed, no landing brake, a stagger not cancelling a leap;
     - the Tank: stagger zones ignored or not registered, body resistance lost;
@@ -441,6 +449,37 @@ Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *r
 - **Geometries:** one per archetype and set of attachments in use (25–27), shared by every enemy with that look; no per-enemy geometry.
 - **Frame cost** at these frame rates includes 5 simulation steps per frame; mixed and Walker-only crowds cost the same within noise. No optimisation was needed or made beyond the separation fix above.
 
+**Phase 6 baseline (2026-09-28, real waves, god mode).**
+
+*Simulation, headless (the waves wired as in `main.ts`, one temporary probe; each wave held at its concurrency cap, four enemies killed every 2 s once full, so corpses pile up as in a fight):*
+
+| Measure | Result |
+|---|---|
+| `generateWave` | 0.07 ms for wave 20; 0.86 ms averaged over waves 1–200 (endless waves hold 100+ enemies). Once per wave, in the intro. First version 3.1 ms: it recomputed each archetype's base cost through `applyTraits` on every draw; cached now |
+| `SpawnDirector.pick` | 0.35 ms for a group of four, 0.20 ms for one (status of all 13 points: 0.13 ms). First version 1.39 ms: it placed the group around every eligible point before choosing; it now draws a point first and places the group only there |
+| Wave 1 (6 alive) | step 0.07 ms average, 0.19 ms p95 |
+| Wave 10 (15 alive) | step 0.26 ms average, 0.45 ms p95 |
+| Wave 20 (24 alive, 12 corpses) | step 0.39 ms average, 0.71 ms p95 |
+| Endless 30 (26 alive) | step 0.36 ms average, 0.73 ms p95 |
+| Steps that spawn a group | 0.8–1.4 ms average, 2.9 ms worst: the pick, the spawn and its combat registration, inside the 4 ms step budget |
+
+Occasional single steps of 11–191 ms appeared in some runs and not in others. The same seed gives an identical simulation, and three identical wave-10 runs put their spikes at different steps (one had none over 5 ms), so they are host pauses (garbage collection, scheduling), not simulation cost.
+
+*Browser (development build, SwiftShader, `?endless=1`, `tls.startWave(n)` then play; "spawn phase" is the worst frame over the first 6 s of spawning; the rest is 6 s of strafing once the wave is at or near its cap):*
+
+| Scenario | Spawn phase max (ms) | FPS (SwiftShader) | Our frame cost avg / p95 / max (ms) | Alive | Draw calls | Triangles | Geometries | JS heap (MB) |
+|---|---|---|---|---|---|---|---|---|
+| Wave 1, 1366×768 High | 9.5 | 5.8 | 2.43 / 4.2 / 6.3 | 2 / 6 | 26 | 13,460 | 20 | 30.2 |
+| Wave 10, 1366×768 High | 11.2 | 5.0 | 4.38 / 8.0 / 9.5 | 15 / 15 | 46 | 37,316 | 21 | 30.4 |
+| Wave 20, 1366×768 High | 17.2 | 4.5 | 6.61 / 11.1 / 15.8 | 22 / 24 | 68 | 61,976 | 27 | 34.0 |
+| Endless 30, 1366×768 High | 10.1 | 4.6 | 6.28 / 9.9 / 12.0 | 25 / 26 | 70 | 70,508 | 25 | 33.6 |
+| Wave 20, 1920×1080 High | 3.4 | 3.5 | 4.65 / 8.4 / 8.4 | 14 / 24 | 40 | 32,570 | 25 | 30.7 |
+| Wave 20, 1920×1080 Low | 6.1 | 4.3 | 6.25 / 10.3 / 10.6 | 19 / 24 | 56 | 49,862 | 27 | 31.7 |
+
+- **Waves cost what their crowd costs:** wave 20 at 22 alive is in line with Phase 5's 24 mixed (8.7 ms at 1080p on that host). Draw calls stay two per enemy plus the level (68 at wave 20, 70 at endless 30), far inside the 250 budget. Corpses are drawn until their corpse time ends. At 1080p on this host the simulation ran slower than real time (3.5 FPS; at most 5 steps per frame), so those waves had not reached their cap in the measuring window.
+- **Prewarm pays for itself:** in the sandbox, the first spawn of four looks nobody had used yet (Tank, Runner, Screamer and Walker, all three traits) cost a 21.0 ms frame; spawning the same four again cost 6.3 ms. That ~15 ms of geometry building is what the wave intro now does before the wave starts (`EnemyView.prewarm` and the pool reserve), so the spawn-phase worst frames above (3–17 ms) include no look building.
+- **No leaks across waves:** the JS heap stays at 30–34 MB, with 20–27 geometries (one per look in use).
+
 **Phase 1 details:**
 - **Player simulation (Node, headless):** 5.0 µs per step standing, 6.0 µs sprinting in the open, 10.3 µs pushing into a wall. At 60 steps/s that is under 0.1 % of a frame. Level collision: 480 triangles; world build ≈ 50 ms once at startup (including JIT warm-up).
 - **Reading:** our CPU work is ~1 ms per frame. SwiftShader's CPU rasteriser is the entire bottleneck (7 FPS at 1080p), so these rates say nothing about the GTX 750. The blockout is far inside every budget (draw calls 11 of 250).
@@ -451,7 +490,7 @@ Software rendering (SwiftShader, 4 vCPU Xeon @ 2.1 GHz) with no GPU, so frame *r
 
 ## 8. Known gaps
 
-- **Wall-clock-sensitive e2e tests.** Four Phase 1–3 development-build tests (`player.spec` WASD / jump / collision, `combat.spec` body-shot marker) hold keys or watch for a marker over a fixed real time. They assume ~10 FPS of software rendering; below ~7 FPS simulated time falls behind (at most 5 steps per frame) and they fail. Seen on the slower host of the Phase 4 final run, reproduced on the unchanged Phase 3 commit on that host, and passing on the earlier host. Seen again in Phase 5 on a host at 2–6 FPS, where two more fail for the same reason (`player.spec` sprint/crouch and `smoke.spec`'s fixed-step loop check, both timed in real time). All six fail identically on the unchanged Phase 4 commit on that host (control run). The Phase 4–5 enemy specs wait on simulated state with generous timeouts, so they pass at those frame rates. Fix when CI arrives: drive them by simulated time (as `enemies.spec` does) or run the suite at a smaller viewport.
+- **Wall-clock-sensitive e2e tests.** Four Phase 1–3 development-build tests (`player.spec` WASD / jump / collision, `combat.spec` body-shot marker) hold keys or watch for a marker over a fixed real time. They assume ~10 FPS of software rendering; below ~7 FPS simulated time falls behind (at most 5 steps per frame) and they fail. Seen on the slower host of the Phase 4 final run, reproduced on the unchanged Phase 3 commit on that host, and passing on the earlier host. Seen again in Phase 5 on a host at 2–6 FPS, where two more fail for the same reason (`player.spec` sprint/crouch and `smoke.spec`'s fixed-step loop check, both timed in real time). All six fail identically on the unchanged Phase 4 commit on that host (control run). The Phase 4–5 enemy specs wait on simulated state with generous timeouts, so they pass at those frame rates. In the Phase 6 run, `combat.spec`'s headshot-marker test joined them (the marker is visible for about 120 ms and the page ran at 2–5 FPS); it and the body-shot test fail identically on the unchanged Phase 5 commit on the same host (control run), and the Phase 0 fixed-step check passed. Fix when CI arrives: drive them by simulated time (as `enemies.spec` does) or run the suite at a smaller viewport.
 - **No CI yet.** Recommended next infrastructure step: a GitHub Actions workflow running `npm ci`, `npm run check`, `npm run build` and `npm run test:e2e` on every PR. That would make "green" objective for every change.
 - **Vercel preview not reachable from the Claude Code container.** Its network policy denies `*.vercel.app`; allowing it would let the e2e suite run against each preview (`E2E_BASE_URL`).
 - **Manual QA (§6) pending** in real Chrome, Edge and Firefox.

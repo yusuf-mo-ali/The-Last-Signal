@@ -3,16 +3,18 @@
 > The working state of the project. Every session reads this file first and updates it last, so
 > work can be resumed safely (plan §36).
 >
-> **Last updated:** 2026-09-27 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
+> **Last updated:** 2026-09-28 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
 > (open PR into `main`: yusuf-mo-ali/The-Last-Signal#1)
 
 ---
 
 ## Current Phase
 
-**Phase 5: Zombie Archetypes. Complete** (plan §12, D-043). O-3 is resolved: the v1 default roster is **Walker, Runner, Tank and Screamer**; the Climber is deferred and kept as possible adaptive content. The Runner (a fast weaving chase and a committed leap), the Tank (a slow wall that only headshots stagger) and the Screamer (keeps its distance, a telegraphed, interruptible scream that raises a generic `alarm`: nearby zombies are alerted and hastened) run on the Phase 4 framework as data plus two behaviours. Composable traits (Armored, Helmeted, Elite) work on any archetype, through a generic combat damage profile (per-zone armor, breakable plates, stagger zones). See "Phase 5 acceptance review" below. Phase 6 (wave system) has not started and is awaiting approval.
+**Phase 6: Wave System. Complete** (plan §13, D-044). Runs are now wave-driven: each wave is generated from a seeded threat budget (6 → 77 over waves 1–20, an endless tail after), composed from the default roster with unlocks, caps, themes and trait schedules (never the Climber), and spawned at fair spawn points (≥ 12 m, out of the player's view) under a concurrency cap. The runtime drives `WAVE_START → WAVE_ACTIVE → WAVE_COMPLETE → UPGRADE_SELECTION → WAVE_START` with a 3 s announcement and a 10 s breather; clearing wave 20 wins the run (`?endless=1` continues). A Screamer's alarm pulls the next group in early without adding enemies; stragglers are moved; run stats are collected. Mutations, bosses, the adaptive system and upgrades have clean slots and are not implemented. See "Phase 6 acceptance review" below. Phase 7 (Signal Mutations) has not started and is awaiting approval.
 
-- Phases 0 (Project Foundation), 1 (First Person Foundation), 2 (Weapon Framework), 3 (Combat System) and 4 (Zombie Foundation) are complete: see their acceptance reviews.
+- Phase 5 (Zombie Archetypes) is complete (D-043): the v1 roster Walker, Runner, Tank and Screamer, composable traits and the generic alarm event.
+
+- Phases 0 (Project Foundation), 1 (First Person Foundation), 2 (Weapon Framework), 3 (Combat System), 4 (Zombie Foundation) and 5 (Zombie Archetypes) are complete: see their acceptance reviews.
 
 - Decisions marked *Proposed* in `DECISIONS.md` apply by default unless overridden.
 
@@ -242,28 +244,47 @@
     - Performance (TESTING.md §7.4): 64 mixed cost 1.27 ms per step headless against 1.15 ms for 64 Walkers on the same host, the same 144 draw calls in the browser and the same frame cost. Traits add triangles, not draw calls. One cost regression was found and fixed with measurements: the first anticipation bound doubled separation to 325 µs at 64; an exact rejection brought it to 158 µs.
   - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
 
+- [x] **Phase 6: Wave System** (plan §13, D-044).
+  - **Data:** `WAVE_RULES` in `config/waves.ts` (budget curve, concurrency, spawn rate, group size, unlocks, caps, tier weights, themes, guarantees, trait schedule and Elite limit, modifier clamps, timings, spawn and straggler rules); the plan's `WaveDefinition` extended with `tier`, `theme`, `finale`, `boss`, the ordered `spawns`, `budgetSpent`, `groupSize`, `spawnBias` and `modifiers`; 13 facility spawn points with compass regions (the catwalk one reserved).
+  - **`waves/`:**
+    - `WaveDifficulty` (pure curves, any wave number) and `WaveGenerator` (seeded per run and wave; spend within 1 of the budget; roster only, never the Climber; first appearance = 1; Walkers ≥ 30 %; finale heavies; heavies out of the opening).
+    - `WaveMutation` (the Phase 7 selection slot, returns `null`).
+    - `SpawnDirector` (distance, view cone + line of sight, body fit, walkable group slots; weighted by distance band, recent use and bias; relaxed view rule only after 3 s of retries).
+    - `WaveManager` (the wave cycle on fixed-step timers, pacing under `maxAlive`, completion by wave ids, breather, victory / endless, alarm pull-forward, stragglers, debug jumps), `WaveEvents`, `RunStats`.
+  - **Plug-in channel:** `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, budgetMultiplier, spawnBias}`: adaptive (Phase 8) and mutations (Phase 7) shape waves through it; every value is clamped and adaptation never changes the budget (D-026).
+  - **Enemies:** `EnemyManager.reserve` (pools readied during the intro), `died` carries the traits, `EnemyView.prewarm` builds a wave's looks before it starts.
+  - **Run flow and presentation:** `main.ts` wires the wave runtime (stepped before the enemies); the Phase 3–5 sandbox (dummies, encounter, open-ended wave) moves behind `?sandbox=1`; `?endless=1`; `WaveHud` (`WAVE 7 · 12 LEFT`, announcement and breather banners); `LockPrompt` victory mode and the wave reached on both end prompts.
+  - **Debug (dev only):** `startWave`, `completeWave`, `skipWaveTimer`, `wave`, `previewWave`, `waveTable`, `setEndless`, `pauseSpawning`, `runStats`, `spawnPoints`, `showSpawns` (`SpawnDebugView` rings), an overlay line.
+  - Verified:
+    - 69 new unit, property and integration tests (1116 in the suite): the curves (the exact budget table), the generator over waves 1–200 × 30 seeds, spawn points, the runtime (timings to the step, pacing, completion, victory / endless, death, pause, alarm, stragglers, fallback, stats, determinism), and waves in the full loop (waves 1–3, D-029, death, the same spawns at 30 / 60 / 144 Hz).
+    - Planted bugs: 45 of 45 unit-level (37 on the first run; the survivors led to 7 new tests and one equivalent mutant was replaced) and 8 of 8 end-to-end bugs caught (TESTING.md §4).
+    - `npm run check` passes; `npm run build` has no warnings (game 161.4 kB, 52.5 kB gzipped); no debug code in `dist/`; the plan's hash is unchanged.
+    - `npm run test:e2e`: 136 tests; 83 passed, 47 skipped by design. The new `waves.spec` (6 tests: the wave cycle with fair spawns and D-029, victory and a new run, endless, death on the wave reached, the debug tools, the DOM-only HUD in every build) passes in dev and prod, as do all production tests and every enemy, archetype and debug spec. 6 dev tests failed, all wall-clock-sensitive (TESTING.md §8): 4 `player.spec` tests and 2 `combat.spec` marker tests; the two combat ones fail identically on the unchanged Phase 5 commit on this host (control run).
+    - Performance (TESTING.md §7.4): wave 20 at its full 24 costs 0.39 ms per step headless; steps that spawn a group 0.8–1.4 ms; in the browser 6.6 ms per frame with 68 draw calls. Two costs were found and fixed with measurements: a spawn pick 1.39 → 0.35 ms, wave generation 3.1 → 0.86 ms. The intro's prewarm removes a ~15 ms first-spawn hitch (21 ms → 6 ms).
+  - Live Vercel preview: builds pass for every push; still not reachable from the container (proxy 403 for `*.vercel.app`).
+
 ## Active Task
 
-None. Phase 5 is complete; waiting for approval to start **Phase 6**.
+None. Phase 6 is complete; waiting for approval to start **Phase 7**.
 
 ## Known Bugs
 
-- **Test infrastructure, not the game:** 4 Phase 1–3 end-to-end tests (6 on the slowest hosts, adding Phase 0–1 real-time checks) are wall-clock-sensitive and fail when software rendering drops below ~7 FPS (TESTING.md §8). The player can walk through enemies (a known Phase 4 limitation, not a bug: D-042). Enemies can overlap briefly in a crowd (at most ~0.2 s, tested): separation is a push that anticipates closing bodies, not a hard constraint (D-043).
+- **Test infrastructure, not the game:** 4 Phase 1–3 end-to-end tests (6 on the slowest hosts, adding a Phase 1 real-time check and either `combat.spec`'s headshot marker or Phase 0's fixed-step check) are wall-clock-sensitive and fail when software rendering drops below ~7 FPS (TESTING.md §8). The player can walk through enemies (a known Phase 4 limitation, not a bug: D-042). Enemies can overlap briefly in a crowd (at most ~0.2 s, tested): separation is a push that anticipates closing bodies, not a hard constraint (D-043).
 
 ## Next Task
 
-**Phase 6: Wave System (plan §13).** Each wave has a number, an enemy budget, a spawn rate, a composition, a mutation slot, a special-event slot and a boss flag; difficulty follows a controlled curve (waves 1–3 introduction, 4–7 variety, 8–12 pressure, 13–19 combinations, 20 boss), and the generator supports unlimited waves. Suggested steps, each a small commit:
-1. **Wave data and generator** (`config/waves.ts` already has the tiers): a pure, seeded `generateWave(n)` → budget from the curve, composition drawn from `DEFAULT_ROSTER` by threat cost (the Runner from wave 3, the Screamer from 4–5, the Tank from 6–7, GAME_DESIGN §3), traits by tier (Armored / Helmeted from 8, Elite from 13), `maxAlive`, spawn rate. Unit tests for the curve, budgets, determinism and unlimited waves.
-2. **Spawn points and the spawner:** level spawn points (D-013), `EnemyManager.canStand` validation, never in the player's view or too close (GAME_DESIGN §7 fairness), a spawn queue under `maxAlive`, spawned enemies told where the player is (the horde is drawn to the signal).
-3. **Wave flow:** `WaveManager` drives `WAVE_START → WAVE_ACTIVE → WAVE_COMPLETE` (replacing the placeholder open-ended wave and the test encounter; the training range leaves normal play), a breather, the wave counter in the HUD. Mutation, special-event and boss slots stay empty (Phases 7, 12, 13).
-4. **Alarm consumers (optional, D-043):** reinforcements toward a Screamer's alarm, as data on the wave.
-5. **Verify:** wave tests through the real loop, E2E of a wave start → clear → next wave, performance at the default `maxAlive` (24) with the mixed roster.
+**Phase 7: Signal Mutation System (plan §14).** Every normal wave receives one mutation that changes the rules (BLACKOUT, HUNGER, STATIC, SCREAM, HIVE, BLOOD MOON, LOW GRAVITY, OVERLOAD); mutations are data-driven and never hard-coded into the `WaveManager`. The Phase 6 slots are ready:
+1. **Selection (D-024):** fill `WaveMutation.selectMutation(n, previous, rng)`: mutation-free waves 1–3 (O-7 default), one per wave from 4 to 19, never the same twice in a row, weighted by tier; wave 20 by the boss rules. It already lands in `WaveDefinition.mutation`.
+2. **Application:** a `SignalMutationSystem` that applies a mutation on `waveStarted` and reverts it on `waveCompleted` (and on a new run), through the modifier / trigger system (D-009).
+3. **Composition effects** go through the `CompositionModifier` channel with `source: 'mutation'` (the only source allowed a clamped `budgetMultiplier`, e.g. HIVE; BLOOD MOON raises the Elite trait chance). SCREAM can emit the existing generic `alarm` on deaths.
+4. **O-4:** which 6 of the 8 ship in v1 (default: BLACKOUT, HUNGER, STATIC, SCREAM, HIVE, BLOOD MOON).
+5. **Verify:** selection properties, apply / revert symmetry, every mutation through the real loop, HUD announcement, E2E, performance (BLACKOUT lighting).
 
 **Needed from you:**
-- Approval to start Phase 6.
-- A manual QA pass of TESTING.md §6 in real browsers, including the new "Archetypes and traits" section: the Runner's leap, the Tank's weight and the Screamer's scream can only be judged by hand.
-- O-5 (boss placement vs "unlimited waves") and O-7 (mutation-free intro waves) apply to Phase 6/7; the defaults apply otherwise.
-- Run the performance measurement on the reference machine (TESTING.md §7.2, now with `tls.spawnMixed(24)`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
+- Approval to start Phase 7.
+- A manual QA pass of TESTING.md §6 in real browsers, including the new "Waves" section: pacing, fairness of spawns and the feel of the curve can only be judged by hand.
+- O-4 (which 6 mutations) and O-7 (mutation-free intro waves) apply to Phase 7; the defaults apply otherwise.
+- Run the performance measurement on the reference machine (TESTING.md §7.2, now with `?endless=1` and `tls.startWave(20)`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -291,9 +312,9 @@ None. Phase 5 is complete; waiting for approval to start **Phase 6**.
   - Helmets (per-zone armor that breaks), boss weak points (a crit flag on shapes), armored modifiers (D-012).
   - A settings toggle for damage numbers (settings phase); blood, gore, hit and kill sounds (VFX and audio phases); a kill feed.
   - Other pickup kinds (health, components) and the ammo economy (progression / economy phases).
-  - Training dummies removed from normal play when waves arrive (`TRAINING_RANGE.enabled`); they do not collide with the player.
+  - Training dummies removed from normal play (done in Phase 6: they appear only with `?sandbox=1`); they do not collide with the player.
 - **From 4:**
-  - The wave spawner, spawn points and the wave flow (Phase 6) replace the placeholder run flow and the test encounter (`TRAINING_ENEMIES.enabled`).
+  - ~~The wave spawner, spawn points and the wave flow~~ done in Phase 6 (the placeholder run flow and the test encounter moved to `?sandbox=1`).
   - Body blocking: the player can walk through enemies (they stop short and push away from the player, but the player's motor does not collide with them).
   - A flow field (D-008) or a spatial hash for separation, only if a measurement with bigger hordes asks for it (at 64 Walkers the AI costs well under a millisecond per step).
   - Distance-based think rates ("distant enemies think less often"), not needed at the measured cost.
@@ -301,10 +322,17 @@ None. Phase 5 is complete; waiting for approval to start **Phase 6**.
   - Final zombie models and animation (D-030).
 - **From 5:**
   - The Climber (deferred, D-043): its data, a climbing behaviour and climb links in the level's navigation, if the adaptive system (Phase 8) brings it in against high-ground play.
-  - Alarm consumers: wave reinforcements (Phase 6), SCREAM (Phase 7), adaptive metrics (Phase 8), scream audio (Phase 11).
+  - Alarm consumers: wave reinforcements (done in Phase 6: the next group is pulled forward), SCREAM (Phase 7), adaptive metrics (Phase 8), scream audio (Phase 11).
   - Hard enemy–enemy collision (separation is a push; brief brush-throughs are accepted and bounded by a test).
   - Short animation leans (a wind-up, a leap) are drawn without the hit volumes following; resting postures are in the rigs.
   - Trait visuals beyond placeholders; audio for the helmet breaking.
+
+- **From 6:**
+  - Mutations (Phase 7), the adaptive modifiers (Phase 8), the upgrade screen and Supply Terminal in `UPGRADE_SELECTION` (Phase 9) and the boss on wave 20 (Phase 13) plug into the slots D-044 left.
+  - Endless health scaling (if ever, capped) and a wave-clear heal (if runs prove too short): balancing Pass 2.
+  - An endless-mode option in the menu (UI phase); for now `?endless=1` or `tls.setEndless(true)`.
+  - The real end screens with run stats (UI phase); `RunStats` already collects them.
+  - More spawn points with the Phase 10 facility; climb links and the Climber via the adaptive channel.
 
 ## Blocked Tasks
 
@@ -379,6 +407,28 @@ Reviewed 2026-09-25 against the code on this branch.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
 - O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 6 acceptance review (plan §13)
+
+Reviewed 2026-09-28 against the code on this branch, with the scope the project owner set for Phase 6 (the wave system with slots for mutations, bosses, adaptation and upgrades; the Climber excluded; none of those systems implemented).
+
+| Plan §13 / Phase 6 requirement | Status | Evidence |
+|---|---|---|
+| Each wave has `waveNumber, enemyBudget, spawnRate, enemyComposition, mutation, specialEvent, bossFlag` | Done | `WaveDefinition` (plus `maxAlive`, `tier`, `theme`, `finale`, `boss`, `spawns`, …); `WaveGenerator.test.ts` |
+| Controlled difficulty curve: 1–3 introduction, 4–7 variety, 8–12 pressure, 13–19 combinations, 20 boss / major event; not ever-growing HP | Done | Budget, concurrency, unlocks, caps, tier weights, themes, trait schedule (BALANCING §2.14); no HP scaling; wave 20 is a `finale` until the boss (Phase 13); `WaveDifficulty.test.ts` (exact table) |
+| Unlimited waves | Done | Every curve has an endless tail; property tests to wave 200, finite to 10 000; `?endless=1` in the browser |
+| Enemy budget and composition; Walker / Runner / Tank / Screamer; Climber excluded from normal waves | Done | Seeded generator, roster only, extras only from adaptive modifiers for implemented archetypes; "never the Climber" tested from every modifier source |
+| Spawn pacing and fair spawn points | Done | `SpawnDirector` (≥ 12 m, out of view with line of sight, bodies fit, walkable slots, spread, bias, relaxed fallback); `WaveManager` pacing under `maxAlive`; unit, integration and E2E checks |
+| Wave start / active / complete transitions; interaction with player health and game over | Done | The FSM cycle with an intro and a breather; D-029 (no damage between waves, unit + E2E); death → `GAME_OVER` with the wave reached; victory after wave 20 |
+| Screamer alarms interact with waves | Done | The next queued group is pulled forward toward the alarm, no extra budget (tested) |
+| XP / Scrap interaction (without implementing them) | Slot | `waveCompleted`, `died` with traits, `RunStats` (kills per archetype, Elite kills, headshots, damage, wave times) |
+| Mutation and boss slots; adaptive plug-in | Slot | `selectMutation` (returns `null`), `definition.mutation`, `bossFlag` / `boss`, `WAVE_START → BOSS`; `CompositionModifier` channel with clamps and the D-026 budget rule (tested) |
+| Debug commands | Done | `startWave`, `completeWave`, `skipWaveTimer`, `wave`, `previewWave`, `waveTable`, `setEndless`, `pauseSpawning`, `runStats`, `spawnPoints`, `showSpawns`, overlay line; absent from `dist/` |
+| Tests, planted bugs, E2E, performance | Done | See "Completed Tasks → Phase 6" and TESTING.md §3, §4, §7.4 |
+
+**Open items that do not block Phase 7:** manual feel check of the pacing in real browsers; reference-machine measurement; Vercel preview not reachable from the container; no CI yet; the known wall-clock-sensitive E2E tests.
 
 ---
 
@@ -509,8 +559,8 @@ Reviewed 2026-09-25 against the code on this branch.
 
 | Milestone (plan §34) | Phases | Definition of done | Status |
 |---|---|---|---|
-| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | In progress: Phases 0–4 complete (a player can shoot zombies and die; waves remain) |
-| **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | In progress: Phase 5 (archetypes and traits) complete |
+| **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | Done in code with Phase 6 (a player can enter the map, shoot zombies, survive waves, die and restart); sign-off waits on the manual QA pass (TESTING.md §6) |
+| **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | In progress: Phase 5 (archetypes and traits) and Phase 6 (waves: scaling, fair spawns, victory at 20, endless) done; 3 weapons, menus and settings persistence to come |
 | **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | Not started |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
 | **M5 Polish** | 16 audio · 17 VFX · lighting · UI polish · 18 performance · 21 stability · deployment | Feels like a finished indie browser game | Not started |
@@ -527,5 +577,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed) |
-| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation |
+| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed; Phase 6: wave curves, generator properties, spawn fairness, runtime and full-loop wave coverage, planted bugs, manual QA, wave performance) |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation; Phase 6 waves (budget curve, concurrency, pacing, unlocks, caps, themes, traits, spawn rules) |
