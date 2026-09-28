@@ -52,6 +52,8 @@ test.describe('waves (development build)', () => {
   test('wave 1: banner, fair spawns, cleared, breather, then wave 2', async ({ page, issues }) => {
     test.setTimeout(90_000);
     await play(page);
+    // D-029: no damage during the announcement.
+    expect((await page.evaluate(() => window.tls!.damagePlayer(10))).health).toBe(100);
     await page.evaluate(() => window.tls!.setGodMode(true));
     await recordSpawns(page);
 
@@ -94,6 +96,9 @@ test.describe('waves (development build)', () => {
     expect(hud.phase).toBe('cleared');
     expect(hud.banner).toMatch(/^WAVE 1 CLEARED · NEXT WAVE IN \d+$/);
     expect(await page.evaluate(() => window.tls!.runStats().wavesCleared)).toBe(1);
+    // D-029: none during the breather either.
+    await page.evaluate(() => window.tls!.setGodMode(false));
+    expect((await page.evaluate(() => window.tls!.damagePlayer(10))).health).toBe(100);
 
     // The breather ends (skipped here) and wave 2 is announced.
     await page.evaluate(() => window.tls!.skipWaveTimer());
