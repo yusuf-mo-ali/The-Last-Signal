@@ -158,6 +158,22 @@ describe('WaveManager: the wave cycle', () => {
     expect(spawned.every((s) => !s.relaxed)).toBe(true);
   });
 
+  it('every wave enemy knows where the player is the moment it spawns, and does not patrol', () => {
+    const h = harness();
+    const checked: string[] = [];
+    h.waves.events.on('enemySpawned', (e) => {
+      const enemy = h.t.manager.get(e.id);
+      expect(enemy?.target?.id).toBe(h.target.id);
+      expect(enemy?.patrols).toBe(false);
+      checked.push(e.id);
+    });
+    h.startRun();
+    h.waves.startWave(5);
+    h.until(() => h.state.current === 'WAVE_ACTIVE');
+    h.clearWave();
+    expect(checked.length).toBe(h.waves.definition?.spawns.length);
+  });
+
   it('spawns out of the player’s view and never close to them', () => {
     const h = harness();
     h.startRun();
@@ -397,6 +413,17 @@ describe('WaveManager: stats and determinism', () => {
       headshots: 1,
     });
     expect(h.waves.stats.waveTimes).toHaveLength(1);
+  });
+
+  it('counts Elite kills from the traits a death reports', () => {
+    const h = harness();
+    h.startRun();
+    h.waves.startWave(20);
+    h.until(() => h.state.current === 'WAVE_ACTIVE');
+    const elites = h.waves.definition?.spawns.filter((s) => s.traits.includes('elite')).length;
+    expect(elites).toBeGreaterThan(0);
+    h.clearWave(600);
+    expect(h.waves.stats.eliteKills).toBe(elites);
   });
 
   it('the same seed gives the same spawns: what, where and when', () => {

@@ -105,6 +105,15 @@ describe('EnemyManager: death and cleanup', () => {
     expect(t.of('died')).toHaveLength(1);
   });
 
+  it('a death reports the enemy’s traits (rewards and run stats read them)', () => {
+    const t = enemyTestWorld({ targets: [new TestTarget(25, 25)] });
+    const tank = t.manager.spawn('tank', [0, 0, 0], { traits: ['elite', 'armored'] });
+    expect(t.manager.kill(tank?.id ?? '')).toBe(true);
+    expect(t.of('died')).toEqual([
+      expect.objectContaining({ archetype: 'tank', traits: ['armored', 'elite'] }),
+    ]);
+  });
+
   it('despawning twice cleans up once; a despawned id stays gone', () => {
     const t = enemyTestWorld();
     t.manager.spawn('walker', [0, 0, 0]);

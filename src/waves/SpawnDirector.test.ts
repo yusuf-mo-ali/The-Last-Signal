@@ -65,6 +65,21 @@ describe('SpawnDirector: eligibility', () => {
     expect(spawns.inView(byId('control-nw'), viewer(0, 14, 0))).toBe(false);
   });
 
+  it('the view cone includes a margin beyond half the field of view', () => {
+    const { spawns } = director();
+    const yardNw = byId('yard-nw'); // in plain sight when faced from the spawn
+    const toward = Math.atan2(14, 23);
+    const deg = Math.PI / 180;
+    const half = 100 / 2; // the helper's FOV
+    // Turned away by more than half the FOV but inside the margin: still counts as seen.
+    const insideMargin = (half + WAVE_RULES.spawn.viewMarginDeg / 2) * deg;
+    expect(spawns.status(yardNw, viewer(0, 14, toward + insideMargin))).toBe('inView');
+    expect(spawns.status(yardNw, viewer(0, 14, toward - insideMargin))).toBe('inView');
+    // Beyond the margin: out of view.
+    const beyond = (half + WAVE_RULES.spawn.viewMarginDeg + 5) * deg;
+    expect(spawns.status(yardNw, viewer(0, 14, toward + beyond))).toBe('eligible');
+  });
+
   it('a relaxed pick ignores the view rule, never the distance', () => {
     const { spawns } = director();
     const yardNw = byId('yard-nw');
@@ -115,6 +130,20 @@ describe('SpawnDirector: picks', () => {
         }
       }
     }
+  });
+
+  it('group members only stand where they could walk from the point (no slot behind a wall)', () => {
+    const { t } = director();
+    const blocked = new SpawnDirector({
+      points: FACILITY_SPAWN_POINTS,
+      canStand: (a, at) => t.manager.canStand(a, at),
+      lineOfSight: (from, to) => t.manager.lines.lineOfSight(from, to),
+      walkable: () => false, // every ring slot is cut off from its point
+      rng: new Rng('walls'),
+    });
+    // A single enemy stands on the point itself; a pair needs a ring slot, and none is reachable.
+    expect(blocked.pick(['walker'], viewer(0, 14, 0))).not.toBeNull();
+    expect(blocked.pick(['walker', 'walker'], viewer(0, 14, 0))).toBeNull();
   });
 
   it('spreads groups out: the same point rarely twice in a row', () => {

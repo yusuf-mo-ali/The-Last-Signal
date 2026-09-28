@@ -5,7 +5,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ROSTER, type ImplementedEnemyId } from '../config/enemies';
+import { DEFAULT_ROSTER, ENEMY_STATS, type ImplementedEnemyId } from '../config/enemies';
+import { applyTraits } from '../config/traits';
 import { FINAL_WAVE, WAVE_RULES, type WaveDefinition } from '../config/waves';
 import { generateWave, spawnCost, waveTheme } from './WaveGenerator';
 import { eliteMax, waveBudget, waveCap } from './WaveDifficulty';
@@ -33,6 +34,32 @@ describe('wave generator: properties over waves 1–200 × 30 seeds', () => {
       expect(def.enemyBudget - spent, `${seed} wave ${n}`).toBeGreaterThan(-1e-9);
       expect(def.enemyBudget - spent, `${seed} wave ${n}`).toBeLessThan(1);
       expect(def.enemyBudget).toBe(waveBudget(n));
+    }
+  });
+
+  it('each enemy costs its archetype’s threat with its traits folded in', () => {
+    let traited = 0;
+    for (const [seed, n, def] of allWaves()) {
+      for (const spawn of def.spawns) {
+        const expected = applyTraits(ENEMY_STATS[spawn.archetype], spawn.traits).threatCost;
+        expect(spawn.cost, `${seed} wave ${n}`).toBeCloseTo(expected, 9);
+        if (spawn.traits.length > 0) {
+          traited++;
+          expect(spawn.cost).toBeGreaterThan(ENEMY_STATS[spawn.archetype].threatCost);
+        }
+      }
+    }
+    expect(traited).toBeGreaterThan(100);
+  });
+
+  it('a roster without Walkers still spends its budget to within one point', () => {
+    const roster: ImplementedEnemyId[] = ['runner', 'tank'];
+    for (const seed of SEEDS) {
+      for (const n of [3, 6, 9, 14, 20, 33]) {
+        const def = generateWave(n, { seed, roster });
+        expect(def.enemyBudget - def.budgetSpent, `${seed} wave ${n}`).toBeLessThan(1);
+        expect(def.enemyBudget - def.budgetSpent).toBeGreaterThan(-1e-9);
+      }
     }
   });
 
@@ -218,8 +245,21 @@ describe('wave generator: the modifier channel (future adaptive and mutation sys
       seed: 's',
       modifiers: [{ source: 'adaptive', archetypeWeights: { runner: 1000 } }],
     });
-    // Clamped to ×2: Walkers still appear.
+    // Clamped to ×2: Walkers still appear, and any weight past the clamp gives the same wave.
     expect(count(def, 'walker')).toBeGreaterThan(0);
+    const atClamp = generateWave(12, {
+      seed: 's',
+      modifiers: [
+        { source: 'adaptive', archetypeWeights: { runner: WAVE_RULES.modifierClamp.weight[1] } },
+      ],
+    });
+    expect(def.spawns).toEqual(atClamp.spawns);
+    const floor = (w: number) =>
+      generateWave(12, {
+        seed: 's',
+        modifiers: [{ source: 'adaptive', archetypeWeights: { runner: w } }],
+      });
+    expect(floor(0.001).spawns).toEqual(floor(WAVE_RULES.modifierClamp.weight[0]).spawns);
     const traited = generateWave(9, {
       seed: 's',
       modifiers: [{ source: 'adaptive', traitChance: { armored: 1 } }],
