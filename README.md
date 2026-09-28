@@ -2,13 +2,13 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 5 (zombie archetypes) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and fight the v1 zombie roster:
+> **Status: Phase 6 (wave system) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and survive **waves** of the v1 zombie roster:
 > - the **Walker**: slow and durable, with a swipe you can dodge;
-> - the **Runner**: fast and fragile; it zig-zags in the open and leaps at you;
-> - the **Tank**: a slow wall that soaks body shots and must be shot in the head;
-> - the **Screamer**: keeps its distance and screams to call and hasten the others; shoot it first.
+> - the **Runner** (from wave 3): fast and fragile; it zig-zags in the open and leaps at you;
+> - the **Screamer** (from wave 4): keeps its distance and screams to call and hasten the others, and to pull the next group in early; shoot it first;
+> - the **Tank** (from wave 6): a slow wall that soaks body shots and must be shot in the head.
 >
-> Any zombie can also be **Armored**, **Helmeted** or **Elite**, and you can see it on the body. You have 100 health; when it runs out the run ends and a click starts a new one. One of each archetype (with each trait) is placed every run as a temporary test encounter, next to the Phase 3 training dummies; waves come in Phase 6 (awaiting approval). The Climber is deferred: it may come later as the horde's answer to camping on high ground.
+> Each wave is announced, arrives from out of sight at spawn points around the facility, and is followed by a 10 s breather. Waves grow in size and mix (swarms, heavy waves, ambushes), and from wave 8 zombies can be **Armored** or **Helmeted**, from wave 13 **Elite**. Clearing wave 20 transmits the signal and wins the run; `?endless=1` keeps going. You have 100 health and no healing yet; when it runs out the run ends on the wave reached, and a click starts a new one. The Phase 3–5 training range and test encounter are still available with `?sandbox=1`. Mutations, upgrades and bosses come in later phases.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -67,7 +67,7 @@ npm run check        # typecheck + lint + format check + tests; run before every
 npm run test:e2e     # browser tests against the dev server and a production build (see TESTING.md)
 ```
 
-The game currently opens on the Phase 1 blockout map: a compact facility with a yard, a control room, a crawl duct, a corridor, a generator hall, a catwalk and a loading dock. Three training dummies stand in the yard facing you: the one straight ahead is in your sights from the start (a headshot), and the one on the left has its hit zones painted. Further up the yard, a helmeted Walker and an armored Tank stand guard to either side, a Runner wanders the north-east corner, a Screamer waits by the north wall and an Elite Walker wanders the north-west; walk towards them and they come for you. Click to capture the mouse and start; Esc releases it and pauses. Add `?quality=low|medium|high|ultra` to the URL to pick a graphics preset (default High).
+The game opens on the Phase 1 blockout map: a compact facility with a yard, a control room, a crawl duct, a corridor, a generator hall, a catwalk and a loading dock. Click to capture the mouse and start wave 1; Esc releases it and pauses. The wave and what is left of it show top left. URL options: `?quality=low|medium|high|ultra` picks a graphics preset (default High); `?endless=1` keeps going past wave 20; `?sandbox=1` opens the Phase 3–5 sandbox instead of waves (three training dummies facing you and one of each archetype with each trait placed around the yard).
 
 **Target browsers:** desktop Chrome, Edge and Firefox. Keyboard and mouse required.
 
@@ -88,7 +88,9 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
   - `tls.transition('LOADING')` requests a game state change.
   - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
   - `tls.throwError()` shows the error screen.
-- The plan's remaining gameplay commands (`startWave`, `triggerMutation`, `spawnBoss`) are listed already. They report which phase will implement them.
+  - `tls.wave()` shows the current wave (state, theme, budget, queued, alive, timers); `tls.startWave(12)` jumps to a wave, `tls.skipWaveTimer()` ends the announcement or breather, `tls.completeWave()` clears the wave, `tls.pauseSpawning(true)` holds spawns, `tls.setEndless(true)` goes past wave 20, and `tls.runStats()` shows the run's tallies.
+  - `tls.waveTable(1, 25)` prints the difficulty curve; `tls.previewWave(20)` lists what a wave will contain; `tls.spawnPoints()` and `tls.showSpawns()` show where the next group could enter (green) and why not (red: in view, orange: too close, grey: no room, violet: reserved).
+- The plan's remaining gameplay commands (`triggerMutation`, `spawnBoss`) are listed already. They report which phase will implement them.
 
 ## Controls
 
