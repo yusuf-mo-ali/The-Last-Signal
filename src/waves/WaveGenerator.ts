@@ -155,6 +155,8 @@ export function generateWave(
     caps.set(a, introduced ? 1 : waveCap(a, wave, rules));
   }
   let extrasLeft = rules.extraArchetypeMax;
+  // Base (trait-free) cost of each candidate, looked up on every draw.
+  const baseCost = new Map(candidates.map((a) => [a, spawnCost(a, [])] as const));
 
   // Trait chances: the schedule plus clamped modifiers.
   const chances = new Map<EnemyModifierId, number>();
@@ -236,7 +238,7 @@ export function generateWave(
     let total = 0;
     const open: [ImplementedEnemyId, number][] = [];
     for (const [a, w] of weights) {
-      if (underCap(a) && spawnCost(a, []) <= remaining + EPSILON) {
+      if (underCap(a) && (baseCost.get(a) ?? Infinity) <= remaining + EPSILON) {
         open.push([a, w]);
         total += w;
       }

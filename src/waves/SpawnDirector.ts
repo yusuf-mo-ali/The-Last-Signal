@@ -131,15 +131,11 @@ export class SpawnDirector {
     relaxView = false,
   ): SpawnPick | null {
     const s = this.rules.spawn;
-    const options: { point: SpawnPointDefinition; positions: Vector3[]; weight: number }[] = [];
+    const options: { point: SpawnPointDefinition; weight: number }[] = [];
     let total = 0;
     for (const point of this.points) {
       const lead = group[0] ?? 'walker';
       if (this.status(point, viewer, lead, relaxView) !== 'eligible') {
-        continue;
-      }
-      const positions = this.place(point, group);
-      if (!positions) {
         continue;
       }
       const [x, , z] = point.position;
@@ -156,29 +152,38 @@ export class SpawnDirector {
       if (bias.includes(point.region)) {
         weight *= s.biasWeight;
       }
-      options.push({ point, positions, weight });
+      options.push({ point, weight });
       total += weight;
     }
-    if (options.length === 0) {
-      return null;
-    }
-    let r = this.rng.next() * total;
-    let chosen = options[options.length - 1];
-    for (const option of options) {
-      r -= option.weight;
-      if (r < 0) {
-        chosen = option;
-        break;
+    // Draw a point, then place the group around it; a point the whole group does not fit is
+    // dropped and the draw repeated (placing is the costly part, so only drawn points pay it).
+    while (options.length > 0) {
+      let r = this.rng.next() * total;
+      let index = options.length - 1;
+      for (let i = 0; i < options.length; i++) {
+        r -= options[i]?.weight ?? 0;
+        if (r < 0) {
+          index = i;
+          break;
+        }
       }
+      const chosen = options[index];
+      if (!chosen) {
+        return null;
+      }
+      const positions = this.place(chosen.point, group);
+      if (!positions) {
+        options.splice(index, 1);
+        total -= chosen.weight;
+        continue;
+      }
+      this.recent.push(chosen.point.id);
+      if (this.recent.length > s.repeatMemory) {
+        this.recent.shift();
+      }
+      return { point: chosen.point, positions, relaxed: relaxView };
     }
-    if (!chosen) {
-      return null;
-    }
-    this.recent.push(chosen.point.id);
-    if (this.recent.length > s.repeatMemory) {
-      this.recent.shift();
-    }
-    return { point: chosen.point, positions: chosen.positions, relaxed: relaxView };
+    return null;
   }
 
   /** Feet positions for each member: the point itself, then a ring around it (null if too few fit). */
