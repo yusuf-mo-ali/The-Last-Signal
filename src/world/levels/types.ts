@@ -5,6 +5,8 @@
  * Axes: x east, y up, z south (yaw 0 faces north, −z). Units: metres.
  */
 
+import type { SpawnRegionId } from '../../config/waves';
+
 export type Vec3 = readonly [number, number, number];
 
 /** Visual/material class of a brush; gameplay code never depends on it. */
@@ -63,6 +65,19 @@ export interface NavGraphDefinition {
   readonly links: readonly NavLink[];
 }
 
+/**
+ * Where a wave's enemies enter (D-013 "spawn points", D-044): on walkable ground, at feet height,
+ * with room for the biggest body around it. The wave's spawn director picks among them at run
+ * time (out of the player's view, not too close).
+ */
+export interface SpawnPointDefinition {
+  readonly id: string;
+  readonly position: Vec3;
+  readonly region: SpawnRegionId;
+  /** `elevated` points are kept out of normal waves (reserved for adaptive content, D-043). */
+  readonly tags?: readonly ('indoor' | 'elevated')[];
+}
+
 export interface LevelDefinition {
   readonly name: string;
   /** Where the player starts, standing on the ground, and the direction they face. */
@@ -72,4 +87,6 @@ export interface LevelDefinition {
   readonly brushes: readonly Brush[];
   /** Route graph for enemies; without one they can only walk straight at their target. */
   readonly navigation?: NavGraphDefinition;
+  /** Where wave enemies enter; without any, waves cannot spawn. */
+  readonly spawnPoints?: readonly SpawnPointDefinition[];
 }

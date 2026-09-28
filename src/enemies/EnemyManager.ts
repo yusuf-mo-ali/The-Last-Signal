@@ -452,6 +452,16 @@ export class EnemyManager implements FixedUpdateSystem {
 
   // ---- internals --------------------------------------------------------------------------------
 
+  /**
+   * Makes sure `count` idle enemies of `archetype` are ready (waves call this before a wave, so the
+   * first spawns of an archetype never build objects mid-fight). Returns how many are idle.
+   */
+  reserve(archetype: EnemyArchetypeId, count: number): number {
+    const pool = this.poolFor(enemyConfig(archetype));
+    pool.prewarm(Math.min(count, this.rules.maxAlive));
+    return pool.available;
+  }
+
   private brainOf(enemy: Enemy): EnemyBrain {
     return BRAINS[enemy.config.behavior];
   }
@@ -491,6 +501,7 @@ export class EnemyManager implements FixedUpdateSystem {
     this.events.emit('died', {
       id: enemy.id,
       archetype: enemy.config.id,
+      traits: enemy.config.traits,
       position: [p.x, p.y, p.z],
     });
     const tables = [

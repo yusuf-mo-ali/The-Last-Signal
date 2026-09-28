@@ -85,7 +85,9 @@ describe('EnemyManager: death and cleanup', () => {
     expect(headshot()?.killed).toBe(false);
     expect(headshot()?.killed).toBe(true);
     expect(walker?.state).toBe('DEAD');
-    expect(t.of('died')).toEqual([{ id: 'walker-1', archetype: 'walker', position: [0, 0, 0] }]);
+    expect(t.of('died')).toEqual([
+      { id: 'walker-1', archetype: 'walker', traits: [], position: [0, 0, 0] },
+    ]);
     // Dead: further hits are ignored, and shots pass through the body.
     expect(headshot()).toBeNull();
     expect(t.hitscan.cast(new Vector3(0, 1.63, 5), new Vector3(0, 0, -1), 20)?.kind).not.toBe(

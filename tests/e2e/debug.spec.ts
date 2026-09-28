@@ -5,7 +5,7 @@
 import { expect, isDev, openGame, test } from './helpers';
 
 /** Plan §29 commands whose systems arrive in later phases (registered as stubs until then). */
-const PLAN_29_STUBS = ['startWave', 'triggerMutation', 'spawnBoss'];
+const PLAN_29_STUBS = ['triggerMutation', 'spawnBoss'];
 
 test('development build: tls commands, plan §29 stubs and the stats overlay', async ({
   page,
@@ -71,12 +71,28 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'applyTrait',
     'removeTrait',
     'forceAbility',
+    // Phase 6 wave tools.
+    'startWave',
+    'wave',
+    'completeWave',
+    'skipWaveTimer',
+    'previewWave',
+    'waveTable',
+    'setEndless',
+    'pauseSpawning',
+    'runStats',
+    'spawnPoints',
+    'showSpawns',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
-  expect(await page.evaluate(() => window.tls!.startWave())).toMatchObject({
+  expect(
+    await page.evaluate(() =>
+      (window.tls as unknown as Record<string, () => unknown>).triggerMutation?.(),
+    ),
+  ).toMatchObject({
     ok: false,
-    reason: expect.stringContaining('Phase 6') as unknown as string,
+    reason: expect.stringContaining('Phase 7') as unknown as string,
   });
   expect(
     await page.evaluate(() => typeof (window as unknown as Record<string, unknown>).__TLS_DEV__),

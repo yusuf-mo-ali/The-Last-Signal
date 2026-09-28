@@ -47,11 +47,23 @@ import type { WeaponManager } from '../weapons/WeaponManager';
 import type { Renderer } from '../render/Renderer';
 import type { CombatFeedback } from '../ui/CombatFeedback';
 import type { PickupManager } from '../world/PickupManager';
+import { FINAL_WAVE } from '../config/waves';
+import type { SpawnViewer } from '../waves/SpawnDirector';
+import {
+  waveBudget,
+  waveGroupMax,
+  waveMaxAlive,
+  waveSpawnRate,
+  waveTier,
+} from '../waves/WaveDifficulty';
+import { generateWave, waveTheme } from '../waves/WaveGenerator';
+import type { WaveManager } from '../waves/WaveManager';
 import { DebugCommands, type DebugApi } from './DebugCommands';
 import { DebugOverlay } from './DebugOverlay';
 import { FrameStats, type FrameStatsSnapshot } from './FrameStats';
 import { EnemyDebugView } from './EnemyDebugView';
 import { HitboxDebugView } from './HitboxDebugView';
+import { SpawnDebugView } from './SpawnDebugView';
 
 /** Everything the debug tools may inspect. Passed in from the composition root. */
 export interface DebugContext {
@@ -78,6 +90,10 @@ export interface DebugContext {
   /** Player health, for `tls.playerHealth()`, `tls.healPlayer()`, `tls.setGodMode()`, … */
   readonly playerHealth?: PlayerHealth;
   readonly playerTarget?: EnemyTarget;
+  /** The wave runtime, for `tls.wave()`, `tls.startWave()`, `tls.showSpawns()`, … */
+  readonly waves?: WaveManager;
+  /** Where the player looks from (spawn point status). */
+  readonly spawnViewer?: () => SpawnViewer;
   /** View settings access, for `tls.view()`. */
   readonly getView?: () => ViewSettings;
   readonly applyView?: (settings: ViewSettings) => ViewSettings;
@@ -99,7 +115,6 @@ declare global {
 
 /** Plan §29 commands whose systems arrive in later phases. */
 const PLANNED_COMMANDS: readonly (readonly [string, string, string])[] = [
-  ['startWave', 'Start a given wave number', 'Phase 6 (wave system)'],
   ['triggerMutation', 'Apply a Signal Mutation', 'Phase 7 (mutations)'],
   ['spawnBoss', 'Spawn a boss', 'Phase 13 (bosses)'],
 ];
@@ -167,6 +182,7 @@ export function installDebug(context: DebugContext): DebugTools {
     ...(context.enemies ? { enemies: context.enemies } : {}),
     ...(context.encounter ? { encounter: context.encounter } : {}),
     ...(context.playerHealth ? { playerHealth: context.playerHealth } : {}),
+    ...(context.waves ? { waves: context.waves } : {}),
     ...(context.combat ? { combat: context.combat } : {}),
     ...(context.training ? { training: context.training } : {}),
     ...(context.pickups ? { pickups: context.pickups } : {}),
@@ -254,6 +270,7 @@ export function installDebug(context: DebugContext): DebugTools {
   registerWeaponCommands(commands, context);
   const disposeCombat = registerCombatCommands(commands, context);
   const disposeEnemies = registerEnemyCommands(commands, context);
+  const disposeWaves = registerWaveCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -272,6 +289,7 @@ export function installDebug(context: DebugContext): DebugTools {
       game.setFrameProbe(null);
       disposeCombat();
       disposeEnemies();
+      disposeWaves();
       overlay.dispose();
       if (win.tls === api) {
         delete win.tls;
@@ -627,6 +645,7 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     ...(weapons ? [formatWeapons(weapons)] : []),
     ...(context.combat ? [formatCombat(context.combat, lastHit)] : []),
     ...(context.enemies ? [formatEnemies(context.enemies, context.playerHealth)] : []),
+    ...(context.waves?.isAttached ? [formatWaves(context.waves)] : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
 }
@@ -970,6 +989,169 @@ function formatEnemies(enemies: EnemyManager, health: PlayerHealth | undefined):
     ? `  player ${Math.ceil(health.current)}/${health.max}${health.godMode ? ' god' : ''}`
     : '';
   return `enemies ${enemies.aliveCount} alive${states ? ` (${states})` : ''}${player}`;
+}
+
+function registerWaveCommands(commands: DebugCommands, context: DebugContext): () => void {
+  const { waves, spawnViewer, scene, game } = context;
+  if (!waves) {
+    return () => undefined;
+  }
+  const disposers: (() => void)[] = [];
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const status = () => ({ ...waves.status, timer: round(waves.status.timer) });
+  const requireAttached = () => {
+    if (!waves.isAttached) {
+      throw new Error('The wave system is off in the sandbox mode (?sandbox=1)');
+    }
+  };
+
+  commands.register('wave', 'Current wave: state, theme, budget, queued, alive, timers', () => ({
+    ...status(),
+    composition: waves.definition?.enemyComposition ?? null,
+    groupSize: waves.definition?.groupSize ?? null,
+  }));
+  commands.register(
+    'startWave',
+    `Jump to a wave (its intro starts; the current wave's enemies are removed): tls.startWave(n) (1–${FINAL_WAVE}, more with endless)`,
+    (n: number) => {
+      requireAttached();
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error('startWave(n) needs a wave number ≥ 1');
+      }
+      if (!waves.startWave(n)) {
+        throw new Error(`Cannot start a wave in ${game.state.current} (start a run first)`);
+      }
+      return status();
+    },
+  );
+  commands.register(
+    'completeWave',
+    'Clear the current wave now (its enemies die, nothing more spawns)',
+    () => {
+      requireAttached();
+      return waves.completeWave();
+    },
+  );
+  commands.register('skipWaveTimer', 'End the wave intro or the breather now', () => {
+    requireAttached();
+    return waves.skipTimer();
+  });
+  commands.register(
+    'previewWave',
+    'What a wave would contain (this run, or a seed): tls.previewWave(n, seed?)',
+    (n: number, seed?: string | number) => {
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error('previewWave(n) needs a wave number ≥ 1');
+      }
+      const def = generateWave(n, { seed: seed ?? (waves.seed || 'preview') });
+      return {
+        wave: def.waveNumber,
+        tier: def.tier,
+        theme: def.theme,
+        budget: def.enemyBudget,
+        spent: round(def.budgetSpent),
+        maxAlive: def.maxAlive,
+        spawnRate: round(def.spawnRate),
+        groupSize: def.groupSize,
+        composition: def.enemyComposition,
+        spawns: def.spawns.map((s) =>
+          s.traits.length > 0 ? `${s.archetype}+${s.traits.join('+')}` : s.archetype,
+        ),
+      };
+    },
+  );
+  commands.register(
+    'waveTable',
+    'The difficulty curve: tls.waveTable(from?, to?) (budget, max alive, spawn rate, group size)',
+    (from = 1, to = FINAL_WAVE) => {
+      const rows: Record<number, unknown> = {};
+      for (let n = Math.max(1, Math.floor(from)); n <= Math.min(Math.floor(to), 1000); n++) {
+        rows[n] = {
+          tier: waveTier(n),
+          theme: waveTheme(n, waves.seed || 'preview'),
+          budget: waveBudget(n),
+          maxAlive: waveMaxAlive(n),
+          spawnRate: round(waveSpawnRate(n)),
+          groupMax: waveGroupMax(n),
+        };
+      }
+      return rows;
+    },
+  );
+  commands.register(
+    'setEndless',
+    'Keep going past the final wave instead of winning: tls.setEndless(true)',
+    (enabled?: boolean) => {
+      waves.endless = enabled ?? !waves.endless;
+      return waves.endless;
+    },
+  );
+  commands.register(
+    'pauseSpawning',
+    'Stop new wave spawns (the wave still clears when its enemies are gone): tls.pauseSpawning(true)',
+    (paused?: boolean) => {
+      waves.spawningPaused = paused ?? !waves.spawningPaused;
+      return waves.spawningPaused;
+    },
+  );
+  commands.register('runStats', 'This run: waves, kills per archetype, headshots, damage', () =>
+    waves.stats.snapshot(),
+  );
+  if (spawnViewer) {
+    commands.register(
+      'spawnPoints',
+      'Spawn points and whether a group could enter there now (eligible, inView, tooClose, blocked, reserved)',
+      () => {
+        const viewer = spawnViewer();
+        return waves.spawns.all.map((point) => ({
+          id: point.id,
+          region: point.region,
+          position: [...point.position],
+          distance: round(
+            Math.hypot(point.position[0] - viewer.eye.x, point.position[2] - viewer.eye.z),
+          ),
+          status: waves.spawns.status(point, viewer),
+        }));
+      },
+    );
+    let view: SpawnDebugView | null = null;
+    let removeFrame: (() => void) | null = null;
+    const setSpawns = (visible: boolean): boolean => {
+      if (visible && !view && scene) {
+        const created = new SpawnDebugView(scene, waves.spawns);
+        view = created;
+        removeFrame = game.addFrameSystem({
+          frameUpdate: () => {
+            created.update(spawnViewer());
+          },
+        });
+      } else if (!visible && view) {
+        removeFrame?.();
+        view.dispose();
+        view = null;
+      }
+      return view !== null;
+    };
+    commands.register(
+      'showSpawns',
+      'Draw spawn points (green eligible, red in view, orange too close, grey no room, violet reserved): tls.showSpawns(false) hides them',
+      (visible?: boolean) => setSpawns(visible ?? view === null),
+    );
+    disposers.push(() => setSpawns(false));
+  }
+
+  return () => {
+    for (const dispose of disposers) {
+      dispose();
+    }
+  };
+}
+
+function formatWaves(waves: WaveManager): string {
+  const s = waves.status;
+  const timer = s.timer > 0 ? `  ${s.timer.toFixed(1)} s` : '';
+  const flags = `${s.endless ? ' endless' : ''}${s.spawningPaused ? ' spawns-paused' : ''}`;
+  return `wave ${s.wave} ${s.state} ${s.remaining} left · queued ${s.queued} · alive ${s.alive}/${s.maxAlive}${timer}${flags}`;
 }
 
 function formatPlayer(player: Player): string {

@@ -75,6 +75,8 @@ export interface EnemyEvents {
   died: {
     readonly id: string;
     readonly archetype: EnemyArchetypeId;
+    /** Its traits (rewards and stats: an Elite kill, D-044). */
+    readonly traits: readonly EnemyModifierId[];
     readonly position: Vec3Tuple;
   };
   /** Removed from the world (body cleared, pool release). Exactly once per spawn. */

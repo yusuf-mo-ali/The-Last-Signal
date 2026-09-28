@@ -225,7 +225,7 @@ Overlays on any archetype (GAME_DESIGN §7.6). Applied in a fixed order (Armored
 | Value | Setting | Why |
 |---|---|---|
 | Maximum health | 100 | GAME_DESIGN §4.2 |
-| Damage window | `WAVE_ACTIVE` and `BOSS` only | D-029; a run is one open-ended wave until the wave system (Phase 6) |
+| Damage window | `WAVE_ACTIVE` and `BOSS` only | D-029; no damage during a wave's intro or the breather after it (Phase 6) |
 | Regeneration | none | GAME_DESIGN §4.2 [Proposed]; healing arrives with upgrades and pickups |
 
 ### 2.12 Shared enemy rules (`ENEMY_RULES`, Phases 4–5)
@@ -242,7 +242,38 @@ Overlays on any archetype (GAME_DESIGN §7.6). Applied in a fixed order (Armored
 
 ### 2.13 Test encounter (`src/config/training.ts`, Phases 4–5, temporary)
 
-Five enemies: a Helmeted Walker and an Armored Tank as sentries 14–15 m from the spawn; a Runner patrolling the north-east yard; a Screamer by the north wall; an Elite Walker patrolling the north-west yard. Each stands beyond its own detection range (plus its patrol radius) from the spawn (tested) and comes back 10 s after its body is removed. Validation values, not balance: the wave system replaces them.
+Five enemies: a Helmeted Walker and an Armored Tank as sentries 14–15 m from the spawn; a Runner patrolling the north-east yard; a Screamer by the north wall; an Elite Walker patrolling the north-west yard. Each stands beyond its own detection range (plus its patrol radius) from the spawn (tested) and comes back 10 s after its body is removed. Validation values, not balance. Since Phase 6 the encounter and the training range appear only in the sandbox (`?sandbox=1`); normal runs are wave-driven (§2.14).
+
+### 2.14 Waves (`src/config/waves.ts` `WAVE_RULES`, Phase 6, D-044)
+
+Difficulty rises through the threat budget, the mix, traits and concurrency. Enemy health never scales with the wave (waves 1–20), so the time-to-kill intents in §2.6–2.10 hold at every wave.
+
+| Value | Setting | Why |
+|---|---|---|
+| Threat budget B(n) | `round(6 + 2.2(n−1) + 0.08(n−1)²)` to wave 20; then +5.2 per wave | Wave 1 = six Walkers (about 45 s at their pace, GAME_DESIGN §3); wave 20 = 77 threat, about 35–45 enemies over about 90 s. The gentle quadratic term makes the late waves feel steeper without a cliff. The endless tail continues at the wave-20 slope |
+| Budget table (1–20) | 6, 8, 11, 13, 16, 19, 22, 25, 29, 32, 36, 40, 44, 48, 52, 57, 62, 67, 72, 77 | Tested exactly |
+| Most wave enemies alive | `min(24, 5 + n)`; endless `min(32, 24 + ⌊(n−20)/5⌋)` | 6 at wave 1 (one screen of Walkers), 24 from wave 19 (the plan's default). Endless creeps up slowly, well under the hard cap of 64 |
+| Spawn rate | `min(2, 0.5 + 0.05n)` enemies/s | A steady trickle early, a flood late; the cap on alive enemies does the rest |
+| Group size | 1 … `min(4, 1 + ⌊n/6⌋)`; ambush +1 | Singles early; packs of 3–4 late; ambushes arrive in bigger groups |
+| Unlocks | Walker 1, Runner 3, Screamer 4, Tank 6 | GAME_DESIGN §3 teaching order: one new threat at a time |
+| First appearance | exactly one of the new archetype | A readable introduction |
+| Caps per wave | Screamers `1 + ⌊(n−4)/5⌋`; Tanks `1 + ⌊(n−6)/4⌋` | Two Screamers screaming together, or a wall of Tanks, before the player has seen them singly would be unreadable |
+| Walker floor | ≥ 30% of the budget | The horde stays a horde; specials punctuate it |
+| Finale (wave 20) | ≥ 2 Tanks and ≥ 2 Screamers; theme ×1.2 on both | "Major event" until the boss (Phase 13) |
+| Tier weights (Walker / Runner / Screamer / Tank) | intro 1 / 0.35 / – / –; variety 1 / 0.5 / 0.2 / 0.15; pressure 1 / 0.6 / 0.25 / 0.25; complex and wave 20 1 / 0.7 / 0.3 / 0.35 | Plan §13 tiers |
+| Themes (from wave 4, seeded rotation, never repeated back to back) | mixed (base); swarm Runner ×1.8, Walker ×1.2, Tank ×0.3; heavy Tank ×2, Walker ×1.2, Runner ×0.6; ambush Runner ×1.4, Screamer ×1.5 (+1 group size) | GAME_DESIGN §8 "swarm, heavy, mixed, ambush" |
+| Opening | no Tank or Screamer in the first 15% of the spawn order | A wave opens with the familiar before the heavy |
+| Armored / Helmeted chance | from wave 8: 4% per wave, at most 25% each | "Pressure" tier adds protection that rewards headshots |
+| Elite chance | from wave 13: 3% per wave, at most 12%; at most 1 (13–15), 2 (16–19), 3 (20); endless `1 + ⌊n/8⌋` | Elites are events, not the norm |
+| Modifier clamps | weights ×0.5–2; trait chance ±0.2; budget ×0.5–1.5 (mutations only); ≤ 2 extra (adaptive) enemies | D-026: adaptation shapes the mix, never the size |
+| Intro / first group / breather | 3 s / 2 s into the wave / 10 s | Time to read the banner, reload and reposition; the breather is also the future upgrade and Supply Terminal slot |
+| Spawn distance | ≥ 12 m; full weight at 16–30 m | Far enough to react; near enough to arrive |
+| "In view" | within FOV/2 + 15° **and** in line of sight to head height | Nothing appears in plain sight; points behind walls in front of the player are fine |
+| Repeat penalty | ×0.3 for the last two groups' points | Pressure comes from several directions |
+| Fallback | retry every 0.5 s; relax the view rule after 3 s (never the distance) | A wave cannot stall on geometry; counted in the run stats |
+| Alarm pull-forward | the next queued group spawns now, favouring the alarm's region; no extra budget | The scream calls the horde in: pressure without inflation |
+| Stragglers | ≤ 2 left, no progress for 40 s, farther than 25 m → moved to a fresh point | A wave never stalls on a stuck body |
+| Healing between waves | none | GAME_DESIGN §4.2; if runs prove too short, Pass 2 may add a small wave-clear heal |
 
 ---
 
@@ -257,3 +288,4 @@ Five enemies: a Helmeted Walker and an Armored Tank as sentries 14–15 m from t
 | 2026-09-26 | Walker, player health, shared enemy rules, Walker drops, test encounter | Initial Pass-1 values | Phase 4 (D-042). Verified by automated tests only (time-to-kill both ways, attack timing, dodging the wind-up, stagger); not play-tested by hand |
 | 2026-09-27 | Runner, Tank, Screamer, traits, their drops, test encounter | Initial Pass-1 values | Phase 5 (D-043). Verified by automated tests only (time-to-kill, attack timing, the leap, head-only stagger, the scream and its response, trait damage); not play-tested by hand |
 | 2026-09-27 | Separation | room = max(0.8 m, both radii + 0.1 m) + closing speed × 0.5 s; push + closing speed × 1.5 | Phase 5 head-on tests: a Runner ran through oncoming enemies with the flat push. A first try (push ≥ 1.5 × the faster body's speed) did not help head-on (planted-bug run) and was replaced |
+| 2026-09-28 | Waves: budget curve, concurrency, pacing, unlocks, caps, themes, trait schedule, spawn rules, timings | Initial Pass-1 values | Phase 6 (D-044). Verified by automated tests only (the budget table, property tests over 200 waves × 30 seeds, spawn fairness, pacing, completion, timings); not play-tested by hand |

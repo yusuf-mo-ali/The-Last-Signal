@@ -18,7 +18,14 @@
  *        x=-24                                      x=+24
  */
 
-import type { Brush, LevelDefinition, NavGraphDefinition, SurfaceKind, Vec3 } from './types';
+import type {
+  Brush,
+  LevelDefinition,
+  NavGraphDefinition,
+  SpawnPointDefinition,
+  SurfaceKind,
+  Vec3,
+} from './types';
 
 const box = (min: Vec3, max: Vec3, surface: SurfaceKind): Brush => ({
   kind: 'box',
@@ -241,12 +248,40 @@ export const FACILITY_NAVIGATION: NavGraphDefinition = {
   ],
 };
 
+/**
+ * Where wave enemies enter (D-044): the edges and rooms of the map, on route nodes (so every
+ * archetype's body fits and can reach the graph; `facility.test.ts` checks both), all at least
+ * 12 m from the player's spawn. The catwalk point is `elevated`: reserved for adaptive content (a
+ * future Climber), never used by normal waves.
+ */
+export const FACILITY_SPAWN_POINTS: readonly SpawnPointDefinition[] = [
+  { id: 'control-nw', position: [-7, 0, -22], region: 'north', tags: ['indoor'] },
+  { id: 'control-ne', position: [7, 0, -22], region: 'north', tags: ['indoor'] },
+  { id: 'annex', position: [-12.5, 0, -18], region: 'northwest' },
+  { id: 'stairs-foot', position: [-22.25, 0, -17], region: 'northwest' },
+  { id: 'hall-ne', position: [22.5, 0, -22.5], region: 'northeast', tags: ['indoor'] },
+  { id: 'hall-se', position: [23, 0, -7], region: 'east' },
+  { id: 'yard-far-e', position: [19, 0, 2], region: 'east' },
+  { id: 'yard-nw', position: [-14, 0, -9], region: 'west' },
+  { id: 'yard-sw', position: [-18, 0, 8], region: 'west' },
+  { id: 'bay-e', position: [17, 0, 20.5], region: 'southeast' },
+  { id: 'bay-w', position: [-10, 0, 21.5], region: 'south' },
+  { id: 'sw-corner', position: [-19, 0, 21.5], region: 'southwest' },
+  {
+    id: 'catwalk',
+    position: [-22.25, CATWALK_HEIGHT, 1],
+    region: 'west',
+    tags: ['elevated'],
+  },
+];
+
 export const FACILITY: LevelDefinition = {
   name: 'Facility (blockout)',
   spawn: { position: [0, 0, 14], yaw: 0 }, // facing the tower and its beacon
   killPlaneY: -20,
   brushes: [...perimeter, ...yard, ...controlRoom, ...eastWing, ...catwalk, ...loadingBay],
   navigation: FACILITY_NAVIGATION,
+  spawnPoints: FACILITY_SPAWN_POINTS,
 };
 
 /** Where the signal beacon sits: on top of the tower. */

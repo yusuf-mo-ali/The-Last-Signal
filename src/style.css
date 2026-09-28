@@ -340,6 +340,39 @@ body {
   display: none;
 }
 
+/* Wave readout and banner (Phase 6 placeholder). */
+.wave-hud {
+  position: absolute;
+  top: 1.25rem;
+  left: 1.5rem;
+  color: var(--color-text);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  pointer-events: none;
+}
+
+.wave-hud[hidden],
+.wave-banner[hidden] {
+  display: none;
+}
+
+.wave-banner {
+  position: absolute;
+  top: 28%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--color-text);
+  font-size: clamp(1.25rem, 3vw, 2.25rem);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  white-space: nowrap;
+  text-shadow: 0 2px 6px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
 .health-hud__label {
   font-size: 0.8rem;
   letter-spacing: 0.15em;

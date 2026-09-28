@@ -57,6 +57,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-041 | Phase 3 combat: hitbox rigs, pure damage, reusable Health, one-time death, feedback, drops, training dummies | Accepted |
 | D-042 | Phase 4 zombie foundation: generic enemy framework, the Walker, AI state machine, limited-rate decisions, route-graph navigation, melee, player health | Accepted |
 | D-043 | Phase 5 archetypes: the v1 roster (resolves O-3), the Runner, the Tank and the Screamer, composable traits, and a generic alarm event | Accepted |
+| D-044 | Phase 6 wave system: budget curve, seeded composition, fair spawn points, the wave cycle and slots for mutations, bosses and adaptation | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -965,6 +966,95 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 
 ---
 
+## D-044 — Phase 6 wave system: budget curve, seeded composition, fair spawn points, the wave cycle and slots for mutations, bosses and adaptation
+**Status:** Accepted · **Date:** 2026-09-28 · **Implements:** plan §13 (Phase 6), GAME_DESIGN §3, §8 · **Applies:** O-5 (default), D-024, D-026, D-029, D-043 · **Notes:** O-7 for Phase 7
+
+**Context.** Until Phase 5 a run was a placeholder: one open-ended `WAVE_ACTIVE` with a fixed test encounter and the training dummies. Plan §13 asks for waves with `waveNumber, enemyBudget, spawnRate, enemyComposition, mutation, specialEvent, bossFlag`, a controlled difficulty curve (1–3 introduction, 4–7 variety, 8–12 pressure, 13–19 complex, 20 boss / major event) instead of ever-growing health, and support for unlimited waves. Mutations (Phase 7), the Adaptive system (Phase 8), upgrades and currencies (Phase 9) and bosses (Phase 13) do not exist yet, but each needs a place to plug in. The Climber must stay out of normal waves (D-043).
+
+**Decision.**
+
+1. **Modules (`src/waves/`, all simulation, all headless-testable).**
+   - `WaveDifficulty` (pure): the curves as functions of the wave number (budget, max alive, spawn rate, group size, tier, unlocks, caps, trait chances, Elite limit). Defined for any wave number; out-of-range input is clamped to wave 1.
+   - `WaveGenerator` (pure, seeded): `generateWave(n, {seed, modifiers, mutation, roster})` → a `WaveDefinition` with the plan's fields plus `tier`, `theme`, `finale`, `boss`, an ordered `spawns` list (archetype, traits, cost), `budgetSpent`, `groupSize`, `spawnBias` and the applied `modifiers`.
+   - `WaveMutation`: the selection slot (D-024). Returns `null` in Phase 6.
+   - `SpawnDirector`: picks a fair spawn point for a group and places its members.
+   - `WaveManager`: the runtime. It drives the state machine, paces spawns, detects completion, runs the breather, victory and endless, moves stragglers, answers alarms, and owns `WaveEvents` and `RunStats`.
+   - All numbers live in `config/waves.ts` (`WAVE_RULES`), and spawn points in the level data (`FACILITY.spawnPoints`, D-013).
+2. **Difficulty through budget, composition, traits and concurrency, never health (no HP scaling on waves 1–20).**
+   - Threat budget: `B(n) = round(6 + 2.2(n−1) + 0.08(n−1)²)` up to wave 20 (6, 8, 11, … 72, 77), then +5.2 per wave.
+   - Concurrency: at most `min(24, 5 + n)` wave enemies alive; after wave 20, `min(32, 24 + ⌊(n−20)/5⌋)`. This stays under the enemy manager's hard cap of 64.
+   - Spawn rate: `min(2, 0.5 + 0.05n)` enemies per second while under the cap.
+   - Groups: 1 to `min(4, 1 + ⌊n/6⌋)` enemies (+1 on ambush waves).
+   - Traits: Armored and Helmeted from wave 8 (+4% per wave, at most 25% each). Elite from wave 13 (+3% per wave, at most 12%), with at most 1 Elite per wave on waves 13–15, 2 on 16–19, 3 on wave 20, and `1 + ⌊n/8⌋` in endless.
+   - The tested time-to-kill intents (BALANCING §2.6–2.10) therefore stay true at every wave. Endless health scaling is deferred (capped if ever added).
+3. **Composition (seeded per run and wave; `${runSeed}:wave:${n}`).**
+   - **Themes** (GAME_DESIGN §8): `intro` on waves 1–3; a rotation of `mixed / swarm / heavy / ambush` from a seeded start (never the same theme twice in a row); `finale` on wave 20.
+   - **Unlocks:** Walker from wave 1, Runner from 3, Screamer from 4, Tank from 6. Only `DEFAULT_ROSTER` archetypes are drawn.
+   - **Weights** = tier base × theme multiplier × the product of modifier weights (clamped to [0.5, 2]).
+   - **Caps:** Screamers `1 + ⌊(n−4)/5⌋`, Tanks `1 + ⌊(n−6)/4⌋`.
+   - **Guarantees:**
+     - An archetype's first wave has exactly one of it (a readable introduction).
+     - Walkers are at least 30% of the budget.
+     - The finale has at least 2 Tanks and 2 Screamers.
+   - **Fill:** draw an affordable archetype, roll its traits (a trait that makes it unaffordable is dropped), pay its trait-adjusted threat cost (`applyTraits`), and finish with Walkers. The spend is always within 1 of the budget (tested).
+   - **Order:** a seeded shuffle, then Tanks and Screamers are kept out of the first 15% of spawns so a wave opens readably.
+4. **The Climber cannot appear in normal waves.**
+   - Only roster archetypes are drawn.
+   - `extraArchetypes` are accepted only from `source: 'adaptive'` modifiers, only for implemented archetypes, and at most two per wave. The Climber is not implemented.
+   - Tested over waves 1–200 × 30 seeds, with and without modifiers from every source.
+5. **Spawning (`SpawnDirector`).**
+   - The facility declares 13 spawn points, each with a compass region; the catwalk point is tagged `elevated` and reserved for adaptive content.
+   - A point is eligible when all of these hold:
+     - it is at least 12 m from the player (horizontally);
+     - the player cannot see it, i.e. it is outside the view cone (half the horizontal FOV + 15°) **or** a wall blocks the line from the eye to head height at the point;
+     - every member of the group can stand around it: the point plus a ring of six slots 1.2 m out, each walkable from the point.
+   - The draw is weighted:
+     - full weight at 16–30 m, less outside that band;
+     - ×0.3 for the points of the last two groups;
+     - ×2 for favoured regions.
+   - With no eligible point, the group waits and retries every 0.5 s. After 3 s the view rule is relaxed (never the distance), and this is counted in the stats.
+   - Spawned enemies know where the player is (`alertTo`, the horde is drawn to the signal) and do not patrol. They spawn facing the player.
+6. **The wave cycle (fixed-step timers; nothing moves while paused).**
+   - `PLAYING` (a new run) → `startRun()`: wave 0, fresh stats, fresh streams (`${seed}:run:${k}`).
+   - `WAVE_START`: generate the wave, reserve the pools, prewarm the looks (no first-spawn hitch), announce the wave, and wait out a 3 s intro. Then `WAVE_ACTIVE` (or `BOSS` when `bossFlag` is set, which Phase 13 will do).
+   - `WAVE_ACTIVE`: the first group arrives 2 s in, then groups follow at the spawn rate under the concurrency cap. The wave completes when the queue is empty and no wave enemy is alive. Debug spawns and sandbox enemies never count.
+   - `WAVE_COMPLETE`: on the final wave (not endless) → `VICTORY`, with the cursor released and a "Signal transmitted · Wave 20 cleared" prompt. Otherwise a 10 s breather → `UPGRADE_SELECTION`.
+   - `UPGRADE_SELECTION`: passes straight through to `WAVE_START` until Phase 9.
+   - Death is unchanged (`GAME_OVER`); the prompt now names the wave reached.
+   - Health persists between waves with no healing (GAME_DESIGN §4.2), and D-029 still applies: no damage in the intro or the breather.
+7. **Alarms and stragglers.**
+   - **Alarm (a Screamer's scream) during `WAVE_ACTIVE` with enemies still queued:** the next group is pulled forward (it spawns now) and favours the region of the spawn point nearest the alarm. It adds no budget: extra enemies are a mutation's business (SCREAM, HIVE).
+   - **Stragglers:** with the queue empty, ≤ 2 wave enemies left, and no wave enemy dying or hurt for 40 s, each one farther than 25 m is moved to a fresh eligible point, keeping its traits. A wave cannot stall on a stuck body.
+8. **Slots for later phases.**
+   - **Mutations (Phase 7):** `selectMutation` fills `definition.mutation` (waves 1–3 stay mutation-free, O-7). A mutation's composition effects arrive as a `CompositionModifier` with `source: 'mutation'`, the only source allowed a (clamped, ×0.5–1.5) `budgetMultiplier`.
+   - **Adaptive (Phase 8):** `WaveManager` takes `modifiers()` and hands them to the next `generateWave`. Archetype weights, trait chances (±0.2) and spawn bias are clamped. Adaptation never changes the budget (D-026). The applied modifiers are carried in the definition for the "SIGNAL ANALYSIS" line.
+   - **Bosses (Phase 13):** `definition.boss` / `bossFlag` and `WAVE_START → BOSS`. In Phase 6, wave 20 is a `finale` normal wave (the largest budget, guaranteed heavies).
+   - **Rewards (Phase 9):** `waveCompleted {wave, duration, kills, stats}`, `died` now carries the enemy's traits, and `RunStats` (kills per archetype, Elite kills, headshots, damage taken, wave times) are what XP and Scrap will read. No currency is added now.
+9. **O-5 (default applied):** a standard run ends in victory after wave 20. `?endless=1` (or `tls.setEndless(true)`) keeps going with the endless tail of every curve. A menu option comes with the UI phase.
+10. **The Phase 3–5 sandbox leaves normal play.** The training range, the test encounter and the one open-ended wave are kept behind `?sandbox=1` (any build) for manual testing and the Phase 2–5 end-to-end specs.
+11. **Presentation (placeholders):** `WaveHud` shows "WAVE 7 · 12 LEFT" (queued + alive) top-left, a "WAVE 7" banner during the intro and "WAVE 7 CLEARED · NEXT WAVE IN 8" during the breather. `LockPrompt` gains a `victory` mode and shows the wave reached.
+12. **Debug (development only):**
+    - Wave control: `startWave(n)` (replaces the Phase 0 stub), `completeWave()`, `skipWaveTimer()`, `wave()`, `setEndless()`, `pauseSpawning()`, `runStats()`.
+    - Planning: `previewWave(n, seed?)`, `waveTable(from?, to?)`.
+    - Spawn points: `spawnPoints()` (the status of each for the current view) and `showSpawns()` (coloured rings: green eligible, red in view, orange too close, grey no room, violet reserved).
+    - An overlay line: `wave 7 WAVE_ACTIVE 12 left · queued 8 · alive 4/12`.
+
+**Why.**
+- A budget in threat points (with traits folded into each enemy's cost) makes waves comparable, however they are composed. The curve, caps and guarantees keep them readable and escalating without health inflation, and the seeded generator makes every wave reproducible for tests, balancing and bug reports.
+- Authored spawn points with a view-and-distance rule are cheap (evaluated only when a group is due), predictable to design around and fair: nothing appears in the player's face or in plain sight.
+- One modifier channel, with every value clamped and the budget protected, lets mutations and adaptation shape waves without owning them (D-024, D-026) and makes "no Climber" a property that can be tested.
+
+**Consequences.**
+- Balance values are logged in BALANCING.md §2.14.
+- Measured costs are in TESTING.md §7.4.
+- Open for later:
+  - endless health scaling (if ever);
+  - a wave-clear heal if runs prove too short;
+  - more spawn points per level with the Phase 10 facility;
+  - a real boss on wave 20 (Phase 13).
+
+---
+
 ## Open questions
 
 None of these block Phase 0. Each lists the phase that needs the answer and the default that applies if there is no answer.
@@ -975,7 +1065,7 @@ None of these block Phase 0. Each lists the phase that needs the answer and the 
 | ~~**O-2**~~ | ~~How does the player get the Assault Rifle and Shotgun during a run?~~ **Resolved 2026-09-26 → D-039:** loadout of Melee (Bare Hands), Primary (Pistol) and Secondary (locked); weapons bought with Scrap at the Supply Terminal between waves | — | — |
 | ~~**O-3**~~ | ~~Which 4 of the 5 archetypes ship in v1 (plan §12 lists 5, §42 targets 4)?~~ **Resolved 2026-09-27 → D-043:** Walker, Runner, Tank and Screamer are the default roster; the Climber is deferred and kept as possible adaptive content (a response to high-ground camping), not part of normal waves | — | — |
 | **O-4** | Which 6 of the 8 mutations ship in v1? | Phase 7 (Mutations) | BLACKOUT, HUNGER, STATIC, SCREAM, HIVE, BLOOD MOON; defer LOW GRAVITY and OVERLOAD |
-| **O-5** | Boss placement, and what "unlimited waves" means next to a wave-20 victory. | Phase 6 / Phase 13 | Siren at wave 20 (final); the generator supports unlimited waves; endless mode after victory is a later nice-to-have |
+| **O-5** | Boss placement, and what "unlimited waves" means next to a wave-20 victory. | Phase 6 / Phase 13 | Siren at wave 20 (final); the generator supports unlimited waves; endless mode after victory is a later nice-to-have. (**Default applied by D-044:** victory after wave 20; the generator and every curve are defined for any wave; `?endless=1` continues past 20; the boss itself is Phase 13.) |
 | **O-6** | The controls lack **interact**, and no **utility/trap** system exists, yet Technician and signal objectives depend on them. (**Melee answered by D-039:** always-available quick melee, default key V.) | Phase 12 (interact) | Interact = E. Keep Technician out of the pool until a utility item is designed |
 | **O-7** | "Every normal wave receives one mutation" (§14) vs "mutations become noticeable at 10–15 min" (§33). | Phase 7 | Waves 1–3 mutation-free; waves 4–19 one each; wave 20 boss rules |
 | **O-8** | Where do the 3D models, animations, sounds and music come from, and under what licences? | Milestone 2 (first real assets) | CC0 sources (e.g. Kenney, Quaternius, CC0 sound libraries), with a CREDITS file; blockout until then (D-030) |

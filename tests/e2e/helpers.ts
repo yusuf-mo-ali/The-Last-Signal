@@ -27,6 +27,8 @@ import type { TrainingEncounter } from '../../src/enemies/TrainingEncounter';
 import type { EnemyView } from '../../src/enemies/EnemyView';
 import type { PlayerHealth } from '../../src/player/PlayerHealth';
 import type { HealthHud } from '../../src/ui/HealthHud';
+import type { WaveHud } from '../../src/ui/WaveHud';
+import type { WaveManager } from '../../src/waves/WaveManager';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -52,6 +54,52 @@ export interface DevHandles {
   readonly playerHealth: PlayerHealth;
   readonly enemyView: EnemyView;
   readonly healthHud: HealthHud;
+  readonly waves: WaveManager;
+  readonly waveHud: WaveHud;
+}
+
+/** What `tls.wave()` returns. */
+export interface WaveSnapshot {
+  readonly wave: number;
+  readonly state: string;
+  readonly theme: string | null;
+  readonly budget: number;
+  readonly queued: number;
+  readonly alive: number;
+  readonly remaining: number;
+  readonly spawned: number;
+  readonly killed: number;
+  readonly maxAlive: number;
+  readonly timer: number;
+  readonly activeTime: number;
+  readonly endless: boolean;
+  readonly spawningPaused: boolean;
+  readonly composition: Record<string, number> | null;
+}
+
+/** One entry of `tls.spawnPoints()`. */
+export interface SpawnPointSnapshot {
+  readonly id: string;
+  readonly region: string;
+  readonly position: [number, number, number];
+  readonly distance: number;
+  readonly status: 'eligible' | 'tooClose' | 'inView' | 'blocked' | 'reserved';
+}
+
+/** What the wave HUD shows (DOM only: any build). */
+export async function waveHud(page: Page) {
+  return page.evaluate(() => {
+    const hud = document.querySelector<HTMLElement>('.wave-hud');
+    const banner = document.querySelector<HTMLElement>('.wave-banner');
+    return {
+      hidden: hud?.hidden ?? true,
+      phase: hud?.dataset.phase ?? null,
+      wave: Number(hud?.dataset.wave ?? 0),
+      remaining: Number(hud?.dataset.remaining ?? 0),
+      text: hud?.textContent ?? '',
+      banner: banner && !banner.hidden ? (banner.dataset.text ?? '') : '',
+    };
+  });
 }
 
 /** One entry of `tls.dummies()`. */
@@ -156,7 +204,17 @@ export interface TlsApi {
   state(): unknown;
   stats(): { overlayVisible: boolean };
   giveAmmo(): WeaponsSnapshot;
-  startWave(): unknown;
+  startWave(n: number): WaveSnapshot;
+  wave(): WaveSnapshot;
+  completeWave(): number;
+  skipWaveTimer(): boolean;
+  previewWave(n: number, seed?: string | number): { budget: number; spawns: string[] };
+  waveTable(from?: number, to?: number): Record<number, { budget: number; maxAlive: number }>;
+  setEndless(enabled?: boolean): boolean;
+  pauseSpawning(paused?: boolean): boolean;
+  runStats(): { waveReached: number; wavesCleared: number; kills: number };
+  spawnPoints(): SpawnPointSnapshot[];
+  showSpawns(visible?: boolean): boolean;
   setInfiniteAmmo(enabled?: boolean): boolean;
   weapons(): WeaponsSnapshot;
   giveWeapon(id: string, category?: string): unknown;
@@ -258,9 +316,22 @@ export function isDev(testInfo: TestInfo): boolean {
   return testInfo.project.name === 'dev';
 }
 
-/** Opens the game (optionally with a query, e.g. `?quality=ultra`) and waits for a few frames. */
-export async function openGame(page: Page, query = ''): Promise<void> {
-  await page.goto(`/${query}`);
+/**
+ * Opens the game (optionally with a query, e.g. `?quality=ultra`) and waits for a few frames. By
+ * default in the sandbox mode (`?sandbox=1`: training range, test encounter, one open-ended wave),
+ * which the Phase 2–5 specs rely on; `{ waves: true }` opens the real wave-driven run (D-044).
+ */
+export async function openGame(
+  page: Page,
+  query = '',
+  options: { readonly waves?: boolean } = {},
+): Promise<void> {
+  const params = new URLSearchParams(query.startsWith('?') ? query.slice(1) : query);
+  if (!options.waves) {
+    params.set('sandbox', '1');
+  }
+  const search = params.toString();
+  await page.goto(`/${search ? `?${search}` : ''}`);
   await page.locator('canvas.game-canvas').waitFor();
   await frames(page, 10);
 }

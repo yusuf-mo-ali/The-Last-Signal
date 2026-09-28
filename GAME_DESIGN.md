@@ -1,8 +1,8 @@
 # Game Design — THE LAST SIGNAL
 
 > **Status:** Design baseline derived from `IMPLEMENTATION_PLAN.md`. Implemented so far: movement
-> (Phase 1), weapons (Phase 2) and combat against training dummies (Phase 3); each section notes
-> what exists.
+> (Phase 1), weapons (Phase 2), combat (Phase 3), the Walker and player health (Phase 4), the
+> Runner, Tank, Screamer and traits (Phase 5) and waves (Phase 6); each section notes what exists.
 >
 > - Numbers in this document are **design intents**: roles, time-to-kill goals, ranges.
 >   - Exact tunable values will live in `src/config/*`.
@@ -53,6 +53,8 @@ A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared a
 - Waves last about 45 s early, rising to about 90 s late.
 - Each wave ends with a short breather (about 10–15 s), the upgrade screen and the Supply Terminal (§5.3).
 - A full run is therefore roughly 25–35 minutes.
+
+**Implemented (Phase 6, D-044):** the introduction order in the table: Runner from wave 3, Screamer from 4, Tank from 6, Armored and Helmeted from 8, Elite from 13. The Climber is never part of a normal wave. There is a 3 s announcement and a 10 s breather. Until the Siren exists (Phase 13), wave 20 is a finale wave with guaranteed Tanks and Screamers. The signal phases, mutations and upgrades are not built yet.
 
 This maps onto the plan's first-session curve (§33):
 
@@ -318,6 +320,15 @@ Any archetype can carry any combination. Traits change the body's outline, so th
   - The generator and difficulty curve support any wave number.
   - A standard run ends in victory at wave 20.
   - Endless play after victory is a later nice-to-have.
+- **Implemented (Phase 6, D-044; values in BALANCING §2.14).**
+  - Budget 6 → 77 threat over waves 1–20, with no health scaling. Up to `5 + n` enemies alive (24 max).
+  - Unlocks: Runners from wave 3, Screamers from 4, Tanks from 6. Each archetype's first wave has exactly one.
+  - Armored and Helmeted enemies from wave 8, Elites from wave 13 (a few per wave).
+  - Themes: intro (waves 1–3), then a rotation of mixed, swarm, heavy and ambush; wave 20 is a finale with guaranteed Tanks and Screamers until the Siren exists (Phase 13).
+  - Enemies enter at authored spawn points at least 12 m away and out of the player's sight, and head for the player.
+  - A Screamer's scream pulls the next group in early, from its side of the map.
+  - Between waves: a 3 s announcement, then a 10 s breather after a clear (no damage in either, D-029), with no healing. Upgrades come in Phase 9.
+  - Endless play is available with `?endless=1`. Mutations are not implemented yet (Phase 7), so no wave has one.
 
 ---
 
@@ -517,6 +528,7 @@ Minimal. The player must understand the situation within one second (§22).
 - **Phase 2 placeholder:** a centre dot crosshair and the held weapon's name and ammunition (`12 / ∞`, `RELOADING`) until the UI phase.
 - **Phase 3 placeholder:** a hit marker around the crosshair (hit, headshot, kill) and floating damage numbers (§6).
 - **Phase 4 placeholder:** health bottom left (`HEALTH 85` and a bar) and a brief red flash at the screen edges when the player is hit; "You died / Click to start a new run" at game over.
+- **Phase 6 placeholder:** `WAVE 7 · 12 LEFT` top left (queued + alive), a centred "WAVE 7" banner during the announcement and "WAVE 7 CLEARED · NEXT WAVE IN 8" during the breather.
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).
@@ -553,6 +565,7 @@ Audio should warn the player of danger before they see it (§23).
 
   This fulfils the plan's rule that the player always understands why they died. Restart is one click and should take about 2 s.
 - **Win:** clear wave 20 and transmit the signal, then `VICTORY`, showing run stats and signal strength.
+- **Implemented so far (Phase 6 placeholder):** the prompt names the wave reached ("You died · Wave 7 · Click to start a new run"; "Signal transmitted · Wave 20 cleared · Click to start a new run"). Run stats (kills per archetype, headshots, damage taken, wave times) are collected for the end screens of the UI phase.
 
 ---
 

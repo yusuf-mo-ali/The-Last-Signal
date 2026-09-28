@@ -6,6 +6,7 @@
  */
 
 import './style.css';
+import { Vector3 } from 'three';
 import { CombatSystem } from './combat/CombatSystem';
 import { TrainingDummyView } from './combat/training/TrainingDummyView';
 import { TrainingRange } from './combat/training/TrainingRange';
@@ -35,8 +36,11 @@ import { AlarmPulse } from './ui/AlarmPulse';
 import { HealthHud } from './ui/HealthHud';
 import { LockPrompt } from './ui/LockPrompt';
 import { StatusScreen } from './ui/StatusScreen';
+import { WaveHud } from './ui/WaveHud';
 import { WeaponHud } from './ui/WeaponHud';
 import { Rng } from './utils/Rng';
+import { SpawnDirector, type SpawnViewer } from './waves/SpawnDirector';
+import { WaveManager } from './waves/WaveManager';
 import { Hitscan } from './weapons/hitscan';
 import { WeaponController } from './weapons/WeaponController';
 import { WeaponManager } from './weapons/WeaponManager';
@@ -99,9 +103,13 @@ function boot(app: HTMLElement): () => void {
 
   // Graphics quality preset (D-037): the configured default, or `?quality=low|medium|high|ultra`
   // until the settings menu exists.
+  const params = new URLSearchParams(location.search);
   const presetId =
-    parseGraphicsPreset(new URLSearchParams(location.search).get('quality')) ??
-    ENGINE_CONFIG.graphics.defaultPreset;
+    parseGraphicsPreset(params.get('quality')) ?? ENGINE_CONFIG.graphics.defaultPreset;
+  // `?sandbox=1`: the Phase 3–5 sandbox (training range, test encounter, one open-ended wave)
+  // instead of the wave system; `?endless=1`: waves go on past the final wave (D-044, O-5).
+  const sandbox = params.get('sandbox') === '1';
+  const endless = params.get('endless') === '1';
   let renderer: Renderer;
   try {
     renderer = new Renderer(app, { quality: ENGINE_CONFIG.graphics.presets[presetId] });
@@ -169,10 +177,39 @@ function boot(app: HTMLElement): () => void {
     pickups,
     strict: import.meta.env.DEV,
   });
+  // Waves (D-044): the run's waves, entering at fair spawn points. The wave runtime steps before
+  // the enemies, so a group spawned this step moves with everyone else.
+  const spawns = new SpawnDirector({
+    points: FACILITY.spawnPoints ?? [],
+    canStand: (archetype, at) => enemies.canStand(archetype, at),
+    lineOfSight: (from, to) => enemies.lines.lineOfSight(from, to),
+    walkable: (from, to, radius) => enemies.lines.walkable(from, to, radius),
+    rng: new Rng(`${seed}:spawn-points`),
+  });
+  const waves = new WaveManager({
+    state: game.state,
+    enemies,
+    spawns,
+    target: () => playerTarget,
+    viewer: () => spawnViewer(),
+    seed,
+    combat: combat.events,
+    player: playerHealth.events,
+    endless,
+    onPrepare: (definition) => {
+      enemyView.prewarm(definition.spawns);
+    },
+  });
+  if (!sandbox) {
+    cleanups.push(waves.attach());
+  }
+  game.addSystem(waves);
   game.addSystem(enemies);
-  // Phase 4 test encounter: Walkers placed in the yard until waves exist (Phase 6).
+  // The Phase 4–5 test encounter: only in the sandbox (`?sandbox=1`) now that waves exist.
   const encounter = new TrainingEncounter({ enemies, active: playing });
-  encounter.reset();
+  if (sandbox) {
+    encounter.reset();
+  }
   game.addSystem(encounter);
   const weaponController = new WeaponController(stepActions);
   const weaponSystem = new WeaponSystem({
@@ -185,9 +222,11 @@ function boot(app: HTMLElement): () => void {
   });
   game.addSystem(weaponSystem);
   game.addSystem(combat);
-  // Training dummies: temporary validation targets (D-041).
+  // Training dummies: temporary validation targets (D-041), in the sandbox only.
   const training = new TrainingRange({ combat, rng: new Rng(`${seed}:drops`), pickups });
-  training.reset();
+  if (sandbox) {
+    training.reset();
+  }
   game.addSystem(training);
   game.addSystem(pickups);
   const camera = createCamera();
@@ -200,6 +239,20 @@ function boot(app: HTMLElement): () => void {
   const pickupView = new PickupView(view.scene, pickups);
   const hud = new WeaponHud(app);
   const healthHud = new HealthHud(app, playerHealth);
+  const waveHud = new WaveHud(app, waves);
+  // Where the player looks from, for fair spawns: the eye, the look yaw and the camera's horizontal
+  // field of view.
+  const eye = new Vector3();
+  const spawnViewer = (): SpawnViewer => {
+    const p = player.motor.position;
+    const vertical = (camera.fov * Math.PI) / 180;
+    const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
+    return {
+      eye: eye.set(p.x, p.y + player.motor.eyeHeight, p.z),
+      yaw: player.look.yaw,
+      fovDeg: (horizontal * 180) / Math.PI,
+    };
+  };
   const alarmPulse = new AlarmPulse(app, enemies.events, () => player.motor.position);
   const feedback = new CombatFeedback(app, combat.events);
   view.prewarm(camera);
@@ -218,28 +271,43 @@ function boot(app: HTMLElement): () => void {
   cleanups.push(
     game.state.onEnter('PLAYING', () => {
       // A new run (not a resume): back to the spawn point at full health, with the starting
-      // loadout, a fresh training range and the test encounter's enemies.
+      // loadout and no enemies (the wave runtime starts wave 1; the sandbox restores the
+      // training range and the test encounter instead).
       player.respawn();
       playerHealth.reset();
       weapons.reset();
       enemies.clear();
-      encounter.reset();
-      training.reset();
+      if (sandbox) {
+        encounter.reset();
+        training.reset();
+      } else {
+        encounter.clear();
+        training.clear();
+      }
       pickups.clear();
       feedback.reset();
       alarmPulse.reset();
       cameraController.bob.reset();
     }),
   );
-  // Placeholder run flow until the wave system (Phase 6): a run opens straight into one
-  // open-ended wave, so D-029's damage window already applies. Dying ends the run (GAME_OVER).
+  // The run flow: the wave runtime drives WAVE_START → WAVE_ACTIVE → WAVE_COMPLETE → … (D-044).
+  // The sandbox keeps the Phase 4 placeholder: one open-ended wave. Dying ends the run
+  // (GAME_OVER); clearing the final wave wins it (VICTORY). Either way the cursor comes back and
+  // the prompt offers a new run.
+  if (sandbox) {
+    cleanups.push(
+      game.state.onEnter('WAVE_START', () => {
+        game.state.transition('WAVE_ACTIVE');
+      }),
+    );
+  }
   cleanups.push(
-    game.state.onEnter('WAVE_START', () => {
-      game.state.transition('WAVE_ACTIVE');
-    }),
     playerHealth.events.on('died', () => {
       game.state.transition('GAME_OVER');
       pointerLock.exit(); // the cursor back, and the "You died" prompt
+    }),
+    game.state.onEnter('VICTORY', () => {
+      pointerLock.exit(); // the cursor back, and the "Signal transmitted" prompt
     }),
   );
   cleanups.push(
@@ -272,8 +340,15 @@ function boot(app: HTMLElement): () => void {
     void pointerLock.request().then((result) => {
       if (!result.locked) {
         prompt.show('refused');
-      } else if (game.state.current === 'MAIN_MENU' || game.state.current === 'GAME_OVER') {
-        // A new run (from the menu, or after dying).
+      } else if (
+        game.state.current === 'MAIN_MENU' ||
+        game.state.current === 'GAME_OVER' ||
+        game.state.current === 'VICTORY'
+      ) {
+        // A new run (from the menu, after dying or after winning).
+        if (game.state.current === 'VICTORY') {
+          game.state.transition('MAIN_MENU');
+        }
         game.state.transition('LOADING');
         game.state.transition('PLAYING');
       } else {
@@ -283,15 +358,16 @@ function boot(app: HTMLElement): () => void {
   });
   cleanups.push(
     pointerLock.onLockChange((locked) => {
-      prompt.show(
-        locked
-          ? 'hidden'
-          : game.state.current === 'GAME_OVER'
-            ? 'game-over'
-            : game.state.isRunActive
-              ? 'paused'
-              : 'start',
-      );
+      const reached = waves.isAttached && waves.wave > 0 ? `Wave ${waves.wave}` : undefined;
+      if (locked) {
+        prompt.show('hidden');
+      } else if (game.state.current === 'GAME_OVER') {
+        prompt.show('game-over', reached);
+      } else if (game.state.current === 'VICTORY') {
+        prompt.show('victory', reached ? `${reached} cleared` : undefined);
+      } else {
+        prompt.show(game.state.isRunActive ? 'paused' : 'start');
+      }
     }),
   );
 
@@ -335,6 +411,7 @@ function boot(app: HTMLElement): () => void {
       });
       feedback.update(simDt, camera, hudVisible);
       healthHud.update(simDt, hudVisible);
+      waveHud.update(hudVisible);
       alarmPulse.update(simDt);
       view.render(alpha, camera);
     },
@@ -366,6 +443,8 @@ function boot(app: HTMLElement): () => void {
         encounter,
         playerHealth,
         playerTarget,
+        waves,
+        spawnViewer,
         scene: view.scene,
         applyView,
         getView: () => cameraController.getSettings(),
@@ -385,6 +464,7 @@ function boot(app: HTMLElement): () => void {
           pickupView,
           enemyView,
           healthHud,
+          waveHud,
           alarmPulse,
         },
       }).dispose;
@@ -409,6 +489,8 @@ function boot(app: HTMLElement): () => void {
     dummyView.dispose();
     enemyView.dispose();
     healthHud.dispose();
+    waveHud.dispose();
+    waves.detach();
     alarmPulse.dispose();
     pickupView.dispose();
     hud.dispose();

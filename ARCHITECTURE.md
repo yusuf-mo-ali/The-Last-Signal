@@ -208,6 +208,14 @@ stateDiagram-v2
 - **Timers and subscriptions created inside a state will be state-scoped** and cancelled on exit. This handles boss death during a special event and restart while paused. The hooks exist now (Phase 0.2); the scoped timers arrive with the first system that needs them.
 - **Implementation:** a small hand-written typed FSM. State IDs are an `as const` object plus a union type, with no TS `enum` (D-027).
 - **Phase 4 run flow (D-042, placeholder until the wave system):** entering `WAVE_START` moves straight on to `WAVE_ACTIVE`, one open-ended wave in which the player can be hurt (D-029). The player's death (`PlayerHealth` `died`) requests `GAME_OVER` and releases the mouse; clicking the "You died" prompt goes `GAME_OVER → LOADING → PLAYING`, a new run that resets the player, the enemies, the dummies, the pickups and the weapons. Nothing moves in `GAME_OVER`: enemies only step while a run is being played.
+- **Phase 6 run flow (D-044):** the `WaveManager` drives the run through `onEnter` hooks and its own fixed-step timers:
+  - `PLAYING` starts a run (wave 0, fresh stats and streams);
+  - `WAVE_START` generates and announces the next wave, then after a 3 s intro → `WAVE_ACTIVE` (→ `BOSS` once Phase 13 sets `bossFlag`);
+  - `WAVE_ACTIVE` spawns until the wave is cleared → `WAVE_COMPLETE`;
+  - `WAVE_COMPLETE` → `VICTORY` after the final wave (not endless), otherwise a 10 s breather → `UPGRADE_SELECTION`;
+  - `UPGRADE_SELECTION` → `WAVE_START` at once (a placeholder until Phase 9).
+  
+  Clicking the "Signal transmitted" prompt goes `VICTORY → MAIN_MENU → LOADING → PLAYING`. The Phase 4 placeholder (an open-ended wave) survives only in the sandbox (`?sandbox=1`).
 
 ---
 
@@ -528,7 +536,7 @@ presentation (every frame): EnemyView (one skinned mesh per enemy, interpolated)
 - **Order in the step:** world → player → enemies → test encounter → weapons (combat resolves inside the weapon events) → combat timers → training range → pickups.
 - **Determinism.** Fixed steps, step-counted think turns and a seeded `Rng` stream (`<seed>:enemies`: patrols, idle pauses and enemy drops): the same fight gives the same result at any render rate (tested at 30, 60 and 144 Hz).
 - **Enemy targets are generic** (`EnemyTarget`): the player now; decoys or allies later implement the same interface.
-- **Not yet:** the spawner (Phase 6), the `SpatialHash` (pairwise separation measured ~0.08 ms per step at 64), body blocking of the player.
+- **Not yet:** the `SpatialHash` (pairwise separation measured ~0.08 ms per step at 64), body blocking of the player.
 
 **Phase 5 implementation (D-043).** The Runner, the Tank and the Screamer, and traits, on the same framework. There is still one state machine, one decision schedule, one navigation and one combat pipeline; archetypes differ by data and by one of two behaviours.
 
@@ -595,7 +603,7 @@ per step speed:  motor walkSpeed = config.moveSpeed × brain speedScale (a leap)
 - **Enemies collide like the player:** they move through `PlayerMotor` against the level octree, so walls and floors hold them even where navigation is wrong (the plan's nav-grid binding is not needed).
 - **Validation:** tests walk every link of the facility both ways with each archetype's body (Walker, Runner, Tank, Screamer; Phase 5) through the real collision, and chase a target into every area.
 - **Climb links** (for the deferred Climber, D-043) are not in the level data yet; they arrive with the Climber if the adaptive system brings it in.
-- **Spawn validation:** `bodyFits` (level brush data: a body inside a brush counts as blocked even though it touches none of its faces) and `hasGround`, combined in `EnemyManager.canStand`, used by the debug spawn commands; the wave spawner will use it for its spawn points.
+- **Spawn validation:** `bodyFits` (level brush data: a body inside a brush counts as blocked even though it touches none of its faces) and `hasGround`, combined in `EnemyManager.canStand`, used by the debug spawn commands and by the wave `SpawnDirector` for every group member (§7.8).
 - **The seam for later:** the brain only reads `lines`, `routes` and `goalNodeFor` from its context, so a flow field (D-008) or a navmesh can replace the route graph without touching behaviour.
 
 ### 7.6 Physics and collision (D-006)
@@ -632,14 +640,41 @@ per step speed:  motor walkSpeed = config.moveSpeed × brain speedScale (a leap)
   - `World` (sim) builds the `CollisionWorld`; `WorldView` (presentation) merges the render triangles into one mesh per surface kind (6 meshes, ~1,100 triangles, flat shading).
   - Tags, spawn points, objective nodes, lights and nav data arrive with the phases that use them.
 
-### 7.8 Waves (D-024, D-026)
+### 7.8 Waves (D-024, D-026, D-044)
 
-- **`WaveGenerator.generate(waveNumber, ctx)` returns a `WaveDefinition`.** It is pure, seeded and unit-tested. The output has the plan §13 fields plus `maxAlive`: `waveNumber, enemyBudget, spawnRate, enemyComposition, mutation, specialEvent, bossFlag, maxAlive`.
-- **The budget is in threat points,** taken from a configurable curve that is piecewise by tier (§13). Each archetype has a threat cost. Difficulty rises through composition and modifiers before raw HP, and HP scaling is capped.
-- **Composition** = base weights for the tier × adaptive multipliers (bounded) × mutation multipliers. Archetypes unlock by wave number.
-- **`WaveMutation` selects the wave's mutation ID:** weighted, gated by tier, never the same twice in a row.
-- **`SignalMutationSystem` applies the mutation's effects** at wave start and reverts them at wave end. Selection and application are deliberately separate systems.
-- **`WaveManager` is the runtime:** spawn queue, pacing, `maxAlive`, completion detection and FSM transitions. The difficulty curve continues past wave 20, so waves are unlimited.
+- **`generateWave(n, {seed, modifiers, mutation, roster})` returns a `WaveDefinition`** (`waves/WaveGenerator.ts`). It is pure, seeded (`${runSeed}:wave:${n}`) and unit- and property-tested.
+  - Plan §13 fields: `waveNumber, enemyBudget, spawnRate, enemyComposition, mutation, specialEvent, bossFlag, maxAlive`.
+  - Phase 6 additions: `tier, theme, finale, boss`, the ordered `spawns` (archetype, traits, cost), `budgetSpent`, `groupSize`, `spawnBias` and the applied `modifiers`.
+- **The curves are pure functions of the wave number** (`waves/WaveDifficulty.ts`): budget, concurrency, spawn rate, group size, tier, unlocks, caps, trait chances and the Elite limit. They are defined for any wave (an endless tail after 20). Values live in `WAVE_RULES` (`config/waves.ts`).
+- **The budget is in threat points,** with traits folded into each enemy's cost (`applyTraits(...).threatCost`). Difficulty rises through budget, composition, traits and concurrency. There is no HP scaling on waves 1–20.
+- **Composition** = tier base weights × theme multipliers × modifier weights (each clamped).
+  - Unlocks and per-wave caps apply, plus guarantees: an archetype's first wave has exactly one of it, Walkers are ≥ 30% of the budget, and the finale has ≥ 2 Tanks and ≥ 2 Screamers.
+  - The spend is within 1 of the budget.
+  - Heavies are kept out of the opening 15% of the spawn order.
+  - Only `DEFAULT_ROSTER` archetypes are drawn; extras come only from adaptive modifiers for implemented archetypes (the Climber never appears).
+- **Plug-in channel: `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, budgetMultiplier, spawnBias}`.** Adaptive (Phase 8) and mutation (Phase 7) effects arrive this way. Adaptation never changes the budget (D-026); only a mutation's `budgetMultiplier` may, clamped.
+- **`WaveMutation.selectMutation` selects the wave's mutation ID** (returns `null` in Phase 6; waves 1–3 stay mutation-free). **`SignalMutationSystem` (Phase 7) applies it** at wave start and reverts it at wave end. Selection and application are deliberately separate systems.
+- **`SpawnDirector` picks a fair spawn point for each group** from the level's authored `spawnPoints`:
+  - a point must be ≥ 12 m away, out of view (FOV cone + 15°, with a line-of-sight check to head height) and have room for every body;
+  - the draw is weighted toward 16–30 m, away from recently used points and toward favoured regions;
+  - `elevated` points are reserved;
+  - the view rule is relaxed only after 3 s of failed retries.
+- **`WaveManager` is the runtime** (a `FixedUpdateSystem` stepped before the enemies):
+  - spawn queue, pacing under `maxAlive`, and completion (wave-spawned ids only);
+  - intro and breather timers, victory and endless, and FSM transitions;
+  - alarm pull-forward (the next group spawns now, toward the alarm, with no extra budget);
+  - straggler relocation;
+  - `WaveEvents` (`waveStarting`, `waveStarted`, `enemySpawned`, `spawnDeferred`, `waveProgress`, `waveCompleted`, `runVictory`, `stragglers`, `reinforcementsPulled`) and `RunStats`.
+  
+  During the intro it reserves enemy pools (`EnemyManager.reserve`) and prewarms looks (`EnemyView.prewarm`), so first spawns never allocate.
+
+```text
+WAVE_START:  selectMutation → generateWave(n, {runSeed, modifiers()}) → reserve + prewarm → waveStarting
+WAVE_ACTIVE: every step → due? room under maxAlive? → SpawnDirector.pick(group, viewer, bias)
+             → EnemyManager.spawn(…, {traits, alertTo: player, patrol: false}) → enemySpawned
+             died/despawned (wave ids) → waveProgress → queue empty and none alive → WAVE_COMPLETE
+alarm        → pull the next group forward toward the alarm's region (no extra budget)
+```
 
 ### 7.9 Adaptive system (D-026)
 

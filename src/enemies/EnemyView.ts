@@ -60,7 +60,13 @@ import {
   TRAIT_LOOKS,
   type EnemyLook,
 } from '../config/enemyLooks';
-import { enemyConfig, IMPLEMENTED_ENEMY_IDS, type EnemyArchetypeConfig } from '../config/enemies';
+import {
+  enemyConfig,
+  IMPLEMENTED_ENEMY_IDS,
+  type EnemyArchetypeConfig,
+  type EnemyArchetypeId,
+  type EnemyModifierId,
+} from '../config/enemies';
 import type { Enemy } from './Enemy';
 import type { EnemyManager } from './EnemyManager';
 
@@ -216,6 +222,32 @@ export class EnemyView {
       ...(bits & HELMET_BIT ? ['helmet'] : []),
       ...(bits & ELITE_BIT ? ['spikes'] : []),
     ];
+  }
+
+  /**
+   * Builds the looks a coming wave needs (archetype × visible attachments, a broken helmet
+   * included), so no geometry is merged mid-fight (D-044). Returns how many were new.
+   */
+  prewarm(
+    spawns: readonly {
+      readonly archetype: EnemyArchetypeId;
+      readonly traits: readonly EnemyModifierId[];
+    }[],
+  ): number {
+    let built = 0;
+    for (const s of spawns) {
+      const base =
+        (s.traits.includes('armored') ? ARMOR_BIT : 0) |
+        (s.traits.includes('elite') ? ELITE_BIT : 0);
+      const variants = s.traits.includes('helmeted') ? [base | HELMET_BIT, base] : [base];
+      for (const bits of variants) {
+        if (!this.looks.has(`${s.archetype}:${bits}`)) {
+          this.lookFor(enemyConfig(s.archetype), bits);
+          built++;
+        }
+      }
+    }
+    return built;
   }
 
   /**
