@@ -58,6 +58,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-042 | Phase 4 zombie foundation: generic enemy framework, the Walker, AI state machine, limited-rate decisions, route-graph navigation, melee, player health | Accepted |
 | D-043 | Phase 5 archetypes: the v1 roster (resolves O-3), the Runner, the Tank and the Screamer, composable traits, and a generic alarm event | Accepted |
 | D-044 | Phase 6 wave system: budget curve, seeded composition, fair spawn points, the wave cycle and slots for mutations, bosses and adaptation | Accepted |
+| D-045 | Phase 7 Signal Mutations: six v1 mutations as data, one effect runtime, DEATH CRY kept apart from the Screamer, and guardrails | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -1055,6 +1056,83 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 
 ---
 
+## D-045 — Phase 7 Signal Mutations: six v1 mutations as data, one effect runtime, DEATH CRY kept apart from the Screamer, and guardrails
+**Status:** Accepted · **Date:** 2026-09-29 · **Implements:** plan §14 (Phase 7), GAME_DESIGN §9 · **Resolves:** O-4, O-7 · **Updates:** O-10 · **Applies:** D-009, D-014, D-022, D-024, D-026, D-028, D-029, D-043, D-044
+
+**Context.** Plan §14: "Every normal wave receives one mutation… Mutations modify gameplay rules… must be data-driven. Do not hard-code them directly into WaveManager." Phase 6 left the slots (`selectMutation` returning `null`, `WaveDefinition.mutation`, the `source: 'mutation'` composition channel, an empty catalogue, the `tls.triggerMutation` stub). Nothing could yet apply a stat, trigger, environment or screen effect: the scene had two lights and no point lights, enemy eyes were not emissive, the muzzle flash was unlit. Three things had to stay separable for the player: the Screamer's scream (an archetype ability, D-043), the SCREAM mutation, and the future Adaptive system (Phase 8).
+
+**Decision.**
+
+1. **O-4 resolved: six mutations ship in v1.**
+   - Enabled: BLACKOUT, HUNGER, STATIC, SCREAM (shown to the player as **DEATH CRY**), HIVE and BLOOD MOON.
+   - Deferred: LOW GRAVITY and OVERLOAD. They stay in the catalogue with full effect data (`status: 'deferred'`) but their stat target (`world.gravity`, `weapon.recoil`) and trigger action (`environmentPulse`) are not registered. The effect router refuses them atomically and the selector and debug tools never offer them. Enabling one later = register its target or action, flip `status`.
+2. **O-7 resolved: when mutations happen.**
+   - Waves 1–3: none. Wave 20: none (finale / boss rules).
+   - Every other wave, endless included: exactly one.
+3. **Data model (`config/effects.ts`, `config/mutations.ts`, `config/environment.ts`).**
+   - A typed `Effect` union with the five D-009 kinds: `stat {target, op, value}`, `trigger {on, action, params}`, `spawnRule {composition?, surges?}`, `environment {overlay, priority, fadeIn, fadeOut}`, `screen {effect: 'static', params}`.
+   - A mutation is `{id, name, rule, hint, status, minWave, weights per tier, group?, accent, effects}`. `name`, `rule` and `hint` are what the player reads.
+   - Environment overlays are channel presets (`ambient, sun, tint, tintAmount, fog, emergency, eyeshine, muzzleLight`) over a base.
+   - Levels declare their emergency light fixtures (`LevelDefinition.lights`; three in the facility).
+4. **One effect runtime (`src/modifiers/`, simulation).**
+   - `StatRegistry`: modifiers per registered stat and source, `value = override ?? (base + Σadd) × Πmul`. Unknown stat → error.
+   - `TriggerRegistry`: event → named action. Unknown action → error.
+   - `ScreenEffects`: the STATIC burst schedule, seeded, in simulated time.
+   - `Environment` (`src/world/`, D-028): a base plus prioritised overlays that fade in and out in simulated time, then visibility floors.
+   - `EffectRouter`: `apply(sourceId, effects, {kinds})` / `remove(sourceId, {kinds, immediate})`. Apply is atomic (everything validated first) and clamps every value again, whatever the data says.
+5. **Selection (`waves/WaveMutation.ts`, pure, D-024).**
+   - Pool: enabled mutations whose `minWave` has come (HUNGER, BLACKOUT 4; SCREAM 5; STATIC 6; HIVE 7; BLOOD MOON 9) with a weight for the wave's tier.
+   - Never the previous wave's mutation; never two `vision` mutations (BLACKOUT, STATIC) back to back unless nothing else is left.
+   - Weighted draw, ×0.35 for a mutation used in the last 3 waves, from the stream `${runSeed}:mutation:${n}` (D-014).
+   - The history is the run's played sequence (kept by `WaveManager`); `mutationSchedule(seed, to)` previews it and matches normal play (tested).
+6. **Application (`signal/SignalMutationSystem.ts`), keyed by source id `mutation:<ID>`.**
+   - `WAVE_START`: announce (card and badge) and apply the **environment** effects, which fade in over the 3 s intro.
+   - `WAVE_ACTIVE`: apply **stat, trigger and screen** effects. Nothing that changes play acts during the announcement.
+   - `WAVE_COMPLETE`: lift everything; the lighting fades back over 2 s of the breather.
+   - `GAME_OVER`: stats, triggers and screen effects removed; the lighting is left as it was behind the prompt.
+   - `VICTORY`, `MAIN_MENU`, a new run: everything removed at once.
+   - `PAUSED`: nothing runs (push-down state, no fixed steps), so fades and bursts freeze.
+   - Composition effects (`spawnRule`) never pass through here: `generateWave` reads them from the data, so previews, debug jumps and play build the same wave.
+7. **The six mutations (values in BALANCING §2.15).**
+   - **BLACKOUT:** environment overlay. Ambient ×0.3, sun ×0.12, red emergency lights on, the muzzle flash lights the scene, enemy eyes glow. Fog distance unchanged.
+   - **HUNGER:** `enemy.moveSpeed` and `enemy.acceleration` ×1.2. An enemy is never pushed above max(its own speed, 0.9 × the player's sprint = 6.75 m/s); the Runner's lunge and the landing brake are unaffected.
+   - **STATIC:** a screen burst every 6–10 s for 0.4–0.7 s, at most 26 % opaque; the first ≥ 4 s into the wave.
+   - **DEATH CRY:** every death raises a small alarm (see 8).
+   - **HIVE:** budget ×1.3 (mutation-owned, clamped ≤ 1.5) and two announced surges at 40 % and 75 % of the queue.
+   - **BLOOD MOON:** Elite chance +0.15, Elite limit +1 (+1 more every 5 waves after 9, at most +3), at least one Elite (Walkers promoted inside the same budget), and a red sky.
+8. **Screamer vs DEATH CRY vs Adaptive (the overlap).**
+   - `AlarmEvent` gains `kind: 'scream' | 'deathCry'` and `reinforcements`.
+   - The Screamer's scream: `reinforcements: true`, 18 m, violet ring and screen pulse; the `WaveManager` pulls the next group forward (unchanged, D-043/D-044).
+   - DEATH CRY: `reinforcements: false`, 8 m, alert 6 s, haste ×1.2 for 2.5 s, a small **red** ring at the body, no screen pulse, **never** reinforcements. Haste from either keeps the larger value; it never stacks.
+   - Adaptive (Phase 8) changes composition between waves only, never raises alarms, never picks or suppresses mutations, and is explained after a wave ("SIGNAL ANALYSIS"). A mutation is always announced before its wave and badged during it. `RunStats` records each wave's mutation so adaptive metrics can discount mutation-caused events.
+9. **Generator integration (D-026 kept).**
+   - The mutation's composition arrives as a `CompositionModifier` with `source: 'mutation'` next to the adaptive ones, under the existing clamps.
+   - New mutation-only fields: `eliteMaxBonus` (≤ 3), `eliteMinimum` (≤ 2), `surges` (≤ 3 surges, +2 group size, groups ≤ 6, warning 1–4 s). Ignored from any other source.
+   - A mutation never changes `maxAlive`, the spawn rate, the spawn distance or view rule, the D-029 damage window, unlocks, or the roster.
+10. **Surges (HIVE, executed generically by `WaveManager`).** When the queue reaches a surge point, a fair spawn point is chosen and announced (`surgeWarning {region, pointId}`; "HIVE SURGE · EAST" with an arrow). After the warning the group spawns there, or in that region if the point is no longer fair, with `min(size, queued, room)` members: never above `maxAlive`, never breaking spawn rules.
+11. **Presentation (D-022: no light is ever added at runtime).**
+    - Three emergency `PointLight`s and one muzzle `PointLight` exist from load at intensity 0; `LightingController` changes only intensities, colours, fog and background, so no shader recompiles (the browser test checks the program count).
+    - `MutationHud`: an intro card (name, rule, counter-play hint), a badge for the whole wave (`◆ BLACKOUT`, `· ELITES ×N`, flicker with each STATIC burst), `BLACKOUT LIFTED` in the breather, and the surge cue.
+    - `StaticOverlay`: a DOM layer directly above the canvas and below every HUD element, with a clear centre, ≤ 3 Hz jitter, none with `prefers-reduced-motion`, no pointer events.
+    - The game-over prompt names the mutation ("Wave 7 · Blackout").
+12. **Guardrails (checked by data tests and enforced again at runtime).**
+    - Speed ×0.5–1.25 with the sprint cap; budget ≤ 1.5; alarms ≤ 10 m, haste ≤ 1.25 for ≤ 3 s, never reinforcing; ambient ≥ 0.25 and eyeshine ≥ 0.1 in the dark; STATIC ≤ 0.35 opaque, ≤ 0.8 s bursts, ≥ 5 s apart; fades ≤ 5 s.
+    - A balance tripwire: a scripted headless defender (no god mode) clears waves 6, 9 and 12 under every mutation and takes at most 1.6× the unmutated damage + 20.
+13. **O-10 updated: no flashlight in Phase 7.** BLACKOUT is playable with the emergency lights, the muzzle light and eyeshine. Revisit after a hands-on playtest.
+14. **Debug (development only):** `mutation()`, `mutations()`, `triggerMutation(id)` (replaces the stub), `startWave(n, id?)`, `clearMutation()`, `setMutations(bool)`, `mutationSchedule(from?, to?, seed?)`, `staticBurst()`, and an overlay line (`mutation STATIC active · burst in 3.2 s`).
+
+**Why.**
+- One typed effect vocabulary with one runtime keeps mutations as data, and the same runtime will carry upgrades (Phase 9) and signal events (Phase 12).
+- Splitting announcement (environment) from activation (play-changing effects) keeps D-029's promise that the intro and breather are safe, and lets the player read the rule before it acts.
+- Separate alarm kinds with separate looks make it always clear whether a zombie or the wave rule caused a rush.
+- Clamping twice (data tests and runtime) means a typo in the catalogue cannot make a wave impossible.
+
+**Consequences.**
+- Balance values: BALANCING §2.15. Measured costs: TESTING §7.4.
+- Open for later: the mutated-wave reward bonus (Phase 9), mutation audio (Phase 11), LOW GRAVITY and OVERLOAD, a flashlight (O-10).
+
+---
+
 ## Open questions
 
 None of these block Phase 0. Each lists the phase that needs the answer and the default that applies if there is no answer.
@@ -1064,13 +1142,13 @@ None of these block Phase 0. Each lists the phase that needs the answer and the 
 | **O-1** | What does XP buy, and does unspent Scrap buy anything persistent? (**Partly answered by D-039:** Scrap is the purchase currency at the Supply Terminal between waves.) | Phase 9 (Progression) | XP → profile level that unlocks new cards and purchasable weapons; unspent Scrap does not carry over between runs |
 | ~~**O-2**~~ | ~~How does the player get the Assault Rifle and Shotgun during a run?~~ **Resolved 2026-09-26 → D-039:** loadout of Melee (Bare Hands), Primary (Pistol) and Secondary (locked); weapons bought with Scrap at the Supply Terminal between waves | — | — |
 | ~~**O-3**~~ | ~~Which 4 of the 5 archetypes ship in v1 (plan §12 lists 5, §42 targets 4)?~~ **Resolved 2026-09-27 → D-043:** Walker, Runner, Tank and Screamer are the default roster; the Climber is deferred and kept as possible adaptive content (a response to high-ground camping), not part of normal waves | — | — |
-| **O-4** | Which 6 of the 8 mutations ship in v1? | Phase 7 (Mutations) | BLACKOUT, HUNGER, STATIC, SCREAM, HIVE, BLOOD MOON; defer LOW GRAVITY and OVERLOAD |
+| ~~**O-4**~~ | ~~Which 6 of the 8 mutations ship in v1?~~ **Resolved 2026-09-29 → D-045:** BLACKOUT, HUNGER, STATIC, SCREAM (shown as DEATH CRY), HIVE and BLOOD MOON; LOW GRAVITY and OVERLOAD deferred but kept representable in data | — | — |
 | **O-5** | Boss placement, and what "unlimited waves" means next to a wave-20 victory. | Phase 6 / Phase 13 | Siren at wave 20 (final); the generator supports unlimited waves; endless mode after victory is a later nice-to-have. (**Default applied by D-044:** victory after wave 20; the generator and every curve are defined for any wave; `?endless=1` continues past 20; the boss itself is Phase 13.) |
 | **O-6** | The controls lack **interact**, and no **utility/trap** system exists, yet Technician and signal objectives depend on them. (**Melee answered by D-039:** always-available quick melee, default key V.) | Phase 12 (interact) | Interact = E. Keep Technician out of the pool until a utility item is designed |
-| **O-7** | "Every normal wave receives one mutation" (§14) vs "mutations become noticeable at 10–15 min" (§33). | Phase 7 | Waves 1–3 mutation-free; waves 4–19 one each; wave 20 boss rules |
+| ~~**O-7**~~ | ~~"Every normal wave receives one mutation" (§14) vs "mutations become noticeable at 10–15 min" (§33).~~ **Resolved 2026-09-29 → D-045:** waves 1–3 mutation-free; one on every other wave (endless included); none on wave 20 (finale / boss rules) | — | — |
 | **O-8** | Where do the 3D models, animations, sounds and music come from, and under what licences? | Milestone 2 (first real assets) | CC0 sources (e.g. Kenney, Quaternius, CC0 sound libraries), with a CREDITS file; blockout until then (D-030) |
 | ~~**O-9**~~ | ~~What is the reference "weaker supported hardware" for the 30 FPS floor?~~ **Resolved 2026-09-25 → D-037:** i5-4440, 16 GB DDR3-1333, GTX 750; ~30 FPS at 1080p Low; ~60 FPS on capable hardware at High | — | — |
-| **O-10** | Does BLACKOUT need a player flashlight? | Phase 7 | Yes, as a simple toggle (F) using one of the ≤2 shadow-casting light slots, if playtests show BLACKOUT is frustrating |
+| **O-10** | Does BLACKOUT need a player flashlight? (**Updated by D-045:** no flashlight in Phase 7; BLACKOUT relies on emergency lights, the muzzle light and enemy eyeshine.) | After a hands-on playtest | A simple toggle (F) using one of the ≤2 shadow-casting light slots, only if playtests show BLACKOUT is frustrating |
 | **O-11** | Project licence (code) and asset licence policy. | Before any public release | Decide before the first public deployment |
 | **O-12** | Are signal objectives mandatory to progress, or optional but rewarded? | Phase 12 | Optional but rewarded: the phase advances with wave number; objectives add signal strength and rewards (no soft-locks) |
 | **O-13** | How is the Supply Terminal presented (a screen in the between-wave flow, or a terminal in the facility reached with Interact), and what unlocks the Secondary slot (a wave / signal milestone, an XP level, or a Scrap purchase)? | Phase 9 (Progression) / Phase 14 (Economy) | A terminal-styled screen right after the upgrade choice (time stays frozen, no walking between waves); Secondary unlocks at the first signal milestone (end of wave 5, "components collected") |

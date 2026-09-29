@@ -61,7 +61,7 @@ flowchart TB
 
 | Layer | May import | Must not import |
 |---|---|---|
-| `config/`, `utils/`, `modifiers/` | `utils/`, type-only imports | anything with side effects |
+| `config/`, `utils/` | `utils/`, type-only imports | anything with side effects |
 | Simulation | `core/`, `config/`, `utils/`, `modifiers/`, `three` **math classes only** (Vector3, Quaternion, Matrix4, Ray, Box3, Sphere, and the `Octree`/`Capsule` addons) | `render/`, `ui/`, `audio/`, `effects/`, `*View.ts`, `window`/`document`, renderers, materials, textures |
 | Presentation | anything (sim state is read-only) | mutating simulation state directly: use system methods (commands) |
 | Platform | `core/`, `utils/` | simulation internals |
@@ -71,6 +71,7 @@ flowchart TB
 - The rule against importing three.js renderers or materials in simulation code is enforced by code review, not lint.
 - The plan's domain folders mix sim and presentation files. Presentation files in those folders are marked by name: `*View.ts`, `player/CameraController.ts` and `world/LightingController.ts`.
 - `three`'s math classes are plain JavaScript and run in Node, so the simulation needs no separate math library.
+- `modifiers/` and `signal/` (Phase 7, D-045) are simulation folders under the same lint rules. The effect runtime lives in `modifiers/`, not `effects/`: the plan reserves `effects/` for visual effects, and the lint rules treat it as presentation.
 
 ---
 
@@ -216,6 +217,14 @@ stateDiagram-v2
   - `UPGRADE_SELECTION` → `WAVE_START` at once (a placeholder until Phase 9).
   
   Clicking the "Signal transmitted" prompt goes `VICTORY → MAIN_MENU → LOADING → PLAYING`. The Phase 4 placeholder (an open-ended wave) survives only in the sandbox (`?sandbox=1`).
+- **Phase 7 mutations on the same hooks (D-045):** `SignalMutationSystem` follows the cycle without owning it:
+  - `waveStarting` (in `WAVE_START`): announce the wave's mutation and apply its environment effects (they fade in during the intro);
+  - enter `WAVE_ACTIVE`: apply its stat, trigger and screen effects;
+  - enter `WAVE_COMPLETE`: lift everything (the lighting fades back in the breather);
+  - enter `GAME_OVER`: remove stats, triggers and screen effects, keep the lighting behind the prompt;
+  - enter `VICTORY`, `MAIN_MENU` or `PLAYING`: remove everything at once.
+  
+  `PAUSED` runs no hooks and no fixed steps, so fades, bursts and surge warnings freeze.
 
 ---
 
@@ -266,6 +275,7 @@ src/
 │   │                           values the plan/design already fix; balance numbers arrive with each system
 │   ├── weapons.ts  enemies.ts  waves.ts  mutations.ts  upgrades.ts  bosses.ts
 │   └── + adaptation.ts  economy.ts  signal.ts  effects.ts (D-009 vocabulary)  input.ts (bindings)
+│         environment.ts (Phase 7: environment channels, overlays, floors, light settings)
 │ + input/                      InputState + InputReader, ActionMap, BrowserInput (DOM adapter),
 │                               PointerLock, autoPause, stepInput
 │ + render/                     Renderer (WebGL2, resize + DPR cap), viewport math, camera, webglSupport
@@ -277,6 +287,8 @@ src/
 │                               (Phase 4, D-042: RouteGraph (A* over the level's authored routes),
 │                               LineTester (walkable straight lines, sight, ground), clearance)
 │ + modifiers/                  Stat, StatBlock, modifier stacks, TriggerRegistry
+│                               (Phase 7, D-045: StatRegistry, TriggerRegistry, ScreenEffects (the STATIC
+│                               schedule, simulation), EffectRouter)
 ├── player/                     Player, PlayerController, CameraController, PlayerHealth, PlayerMovement
 │                               (Phase 1: PlayerMotor is the plan's PlayerMovement; + PlayerLook, HeadBob;
 │                               Phase 4: PlayerHealth, + PlayerTarget (the player as an enemy target))
@@ -294,12 +306,16 @@ src/
 │ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
 ├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild, + SupplyTerminal (D-039)
 ├── signal/                     SignalSystem, SignalMutationSystem, SignalProgression
+│                               (Phase 7: SignalMutationSystem, events, actions (the deathCry trigger action))
 ├── world/                      World, EnvironmentState, LightingController, DynamicEvents, + levels/, + PickupManager,
 │                               + WorldView, SignalBeacon (Phase 1); levels/: types, geometry, facility (blockout);
-│                               + drops, PickupManager, PickupView (Phase 3: ammo drop foundation)
+│                               + drops, PickupManager, PickupView (Phase 3: ammo drop foundation);
+│                               Environment (the plan's EnvironmentState: base + overlays) and
+│                               LightingController (Phase 7, D-045)
 ├── bosses/                     Boss, bosses/ (Siren; Hunter later)
 ├── ui/                         HUD, MainMenu, PauseMenu, UpgradeScreen, GameOverScreen, + LockPrompt (Phase 0.4, temporary),
-│                               + WeaponHud (Phase 2), CombatFeedback (Phase 3), HealthHud (Phase 4):
+│                               + WeaponHud (Phase 2), CombatFeedback (Phase 3), HealthHud (Phase 4),
+│                               WaveHud (Phase 6), AlarmPulse (Phase 5), MutationHud, StaticOverlay (Phase 7):
 │                               placeholders until the UI phase,
 │                               + StatusScreen (WebGL2 missing, fatal error, context lost / not recovered),
 │                               + UIManager, SettingsMenu, LoadingScreen, VictoryScreen, styles/
@@ -340,6 +356,12 @@ One mechanism handles upgrades, mutations, difficulty scaling, enemy modifiers a
 - **`StatBlock`:** named stats per entity or class, such as `player.moveSpeed`, `weapon.fireRate`, `enemy.walker.moveSpeed` and `world.gravity`.
 - **`TriggerRegistry`:** reactions to events, declared in data. Examples: `{ on: 'enemy:killed', action: 'healPlayer', amount: 3 }` (Vampire) and `{ on: 'enemy:killed', action: 'alertRadius', radius: 12 }` (SCREAM). Actions come from a small vocabulary of registered handlers, and content refers to them only by name.
 - **Upgrades and mutations are pure data** built from five effect kinds: `stat`, `trigger`, `spawnRule`, `environment` and `screen`. Adding a mutation means adding a config entry, not editing `WaveManager`.
+- **Implemented in Phase 7 (D-045):**
+  - `config/effects.ts`: the typed `Effect` union (`EffectOf<K>` per kind), the registered vocabulary (`STAT_TARGETS`, `TRIGGER_EVENTS`, `TRIGGER_ACTIONS`, `ENVIRONMENT_OVERLAY_IDS`) and `EFFECT_CLAMPS`.
+  - `StatRegistry`: `add(sourceId, stat, op, value)`, `value(stat, base) = override ?? (base + Σadd) × Πmul`, `multiplier(stat)`, `removeSource(WithPrefix)`. Only registered stats are accepted (`enemy.moveSpeed`, `enemy.acceleration` in Phase 7; `world.gravity` and `weapon.recoil` are declared but refused until LOW GRAVITY and OVERLOAD arrive). Stats are per registry, not per entity: `EnemyManager` reads the two enemy multipliers once per step and hands them to each enemy, which applies its own speed cap.
+  - `TriggerRegistry`: `registerAction(name, handler)`, `add(sourceId, on, action, params)`, `dispatch(event, payload)`. Phase 7 registers one action, `deathCry` (`signal/actions.ts`), and dispatches `enemy:died`.
+  - `ScreenEffects`: a simulation-side schedule of screen bursts (STATIC), seeded and in simulated time; presentation only draws the current burst.
+  - `EffectRouter`: `apply(sourceId, effects, {kinds, rng})` routes stats, triggers, environment overlays and screen effects to their owners and clamps their values; it validates everything before touching anything (atomic), so a deferred mutation is refused whole. `remove(sourceId, {kinds, immediate})` undoes it. `spawnRule` effects are read by the wave generator, not routed.
 
 ### 7.3 Combat (D-007, D-011)
 
@@ -653,7 +675,8 @@ per step speed:  motor walkSpeed = config.moveSpeed × brain speedScale (a leap)
   - Heavies are kept out of the opening 15% of the spawn order.
   - Only `DEFAULT_ROSTER` archetypes are drawn; extras come only from adaptive modifiers for implemented archetypes (the Climber never appears).
 - **Plug-in channel: `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, budgetMultiplier, spawnBias}`.** Adaptive (Phase 8) and mutation (Phase 7) effects arrive this way. Adaptation never changes the budget (D-026); only a mutation's `budgetMultiplier` may, clamped.
-- **`WaveMutation.selectMutation` selects the wave's mutation ID** (returns `null` in Phase 6; waves 1–3 stay mutation-free). **`SignalMutationSystem` (Phase 7) applies it** at wave start and reverts it at wave end. Selection and application are deliberately separate systems.
+  - Phase 7 (D-045): `generateWave` turns the mutation's `spawnRule` data into a `source: 'mutation'` modifier itself (`mutationModifiers(id, n)`), so previews, debug jumps and play build the same wave. Mutation-only fields: `eliteMaxBonus` (≤ 3), `eliteMinimum` (≤ 2, Walkers promoted within the budget) and `surges` (→ `definition.surges`, each `{at, size, warning}`, clamped).
+- **`WaveMutation.selectMutation(n, history, rng)` selects the wave's mutation ID** (pure; D-045): none on waves 1–3 and 20, one on every other wave; enabled mutations whose `minWave` has come; never the previous one or the previous `vision` group; tier weights with a recent-use penalty; stream `${runSeed}:mutation:${n}`. `WaveManager` keeps the played history (a regenerated wave replaces its entry) and a debug override. **`SignalMutationSystem` applies it** (§4) and reverts it. Selection and application are deliberately separate systems.
 - **`SpawnDirector` picks a fair spawn point for each group** from the level's authored `spawnPoints`:
   - a point must be ≥ 12 m away, out of view (FOV cone + 15°, with a line-of-sight check to head height) and have room for every body;
   - the draw is weighted toward 16–30 m, away from recently used points and toward favoured regions;
@@ -664,7 +687,9 @@ per step speed:  motor walkSpeed = config.moveSpeed × brain speedScale (a leap)
   - intro and breather timers, victory and endless, and FSM transitions;
   - alarm pull-forward (the next group spawns now, toward the alarm, with no extra budget);
   - straggler relocation;
-  - `WaveEvents` (`waveStarting`, `waveStarted`, `enemySpawned`, `spawnDeferred`, `waveProgress`, `waveCompleted`, `runVictory`, `stragglers`, `reinforcementsPulled`) and `RunStats`.
+  - `WaveEvents` (`waveStarting`, `waveStarted`, `enemySpawned`, `spawnDeferred`, `waveProgress`, `waveCompleted`, `runVictory`, `stragglers`, `reinforcementsPulled`, and from Phase 7 `surgeWarning`, `surgeSpawned`) and `RunStats` (with each wave's mutation);
+  - surges (Phase 7, generic, no per-mutation code): when the queue reaches a surge point a fair point is picked and announced; after the warning the group spawns there (or in that region) with `min(size, queued, room)` members, never above `maxAlive`;
+  - alarm pull-forward only for alarms with `reinforcements: true` (the Screamer); a DEATH CRY never pulls.
   
   During the intro it reserves enemy pools (`EnemyManager.reserve`) and prewarms looks (`EnemyView.prewarm`), so first spawns never allocate.
 
@@ -673,7 +698,8 @@ WAVE_START:  selectMutation → generateWave(n, {runSeed, modifiers()}) → rese
 WAVE_ACTIVE: every step → due? room under maxAlive? → SpawnDirector.pick(group, viewer, bias)
              → EnemyManager.spawn(…, {traits, alertTo: player, patrol: false}) → enemySpawned
              died/despawned (wave ids) → waveProgress → queue empty and none alive → WAVE_COMPLETE
-alarm        → pull the next group forward toward the alarm's region (no extra budget)
+alarm        → reinforcements? pull the next group forward toward the alarm's region (no extra budget)
+surge point  → surgeWarning{region} → (warning) → group of min(size, queued, room) there → surgeSpawned
 ```
 
 ### 7.9 Adaptive system (D-026)
@@ -694,6 +720,11 @@ Three sources change the world. They are layered rather than competing:
 
 `LightingController` combines them: base state, then overlays, with the highest-priority source winning on each channel. All lights exist from load time, and states only change intensity and colour (D-022).
 
+**Implemented in Phase 7 (D-045):**
+- `world/Environment.ts` (simulation, a `FixedUpdateSystem`) holds the base channels (`ambient, sun, tint, tintAmount, fog, emergency, eyeshine, muzzleLight`; `BASE_ENVIRONMENT` until Phase 12) and the overlays `{sourceId, id, priority, fadeIn, fadeOut}`. `resolve()` blends the overlays in priority order by their fade weight (simulated time, so it freezes while paused), then applies the visibility floors (`ambient ≥ 0.25`; eyeshine ≥ 0.1 when dark).
+- `world/LightingController.ts` (presentation) writes the resolved channels to the rig `WorldView` builds at load: the hemisphere and sun (intensity, tint), fog and background colour, the level's emergency `PointLight`s and lamp glow. `WeaponView` owns a muzzle `PointLight` (intensity 0 except while the flash shows, scaled by `muzzleLight`); `EnemyView` sets the eye glow from `eyeshine`. Nothing is added at runtime, so the shader program count never changes.
+- Overlays: `blackout` (priority 20) and `bloodMoon` (priority 10).
+
 ### 7.11 Bosses
 
 - **`Boss` reuses the enemy framework** (health, hitboxes, AI scheduler) and adds a **phase FSM**.
@@ -706,6 +737,7 @@ Three sources change the world. They are layered rather than competing:
 - **DOM and CSS, no framework.** `UIManager` shows and hides screens when the game state changes.
 - **The HUD updates from events** and writes a value only when it changes. Damage numbers and the kill feed reuse pooled DOM nodes.
 - **Layout uses rem units.** It is verified at 1366×768, 1600×900 and 1920×1080, and must stay playable below that.
+- **Mutations (Phase 7, D-045):** `MutationHud` (intro card, wave badge, "LIFTED" note, surge cue with a direction arrow) and `StaticOverlay` (the STATIC layer, inserted right after the canvas so every HUD element stacks above it). Both expose `data-*` attributes for tests in any build.
 
 ### 7.13 Audio
 
@@ -720,6 +752,7 @@ Three sources change the world. They are layered rather than competing:
 - **Purely visual and event-driven.**
 - **Pooled:** `Pool<T>` for effects, fixed-capacity ring buffers for decals and impacts.
 - **`ScreenEffects`** handles overlays and post-processing: damage flash, low-health vignette, STATIC interference.
+- **Phase 7:** STATIC's timing lives in the simulation (`modifiers/ScreenEffects.ts`, seeded, simulated time); the picture is `ui/StaticOverlay.ts`, a noise canvas drawn once and shown by CSS opacity and a ≤ 3 Hz jitter (none with `prefers-reduced-motion`). No WebGL post-processing.
 
 ### 7.15 Save and settings (D-019)
 

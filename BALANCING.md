@@ -275,6 +275,37 @@ Difficulty rises through the threat budget, the mix, traits and concurrency. Ene
 | Stragglers | ≤ 2 left, no progress for 40 s, farther than 25 m → moved to a fresh point | A wave never stalls on a stuck body |
 | Healing between waves | none | GAME_DESIGN §4.2; if runs prove too short, Pass 2 may add a small wave-clear heal |
 
+### 2.15 Signal Mutations (`src/config/mutations.ts`, `effects.ts`, `environment.ts`, Phase 7, D-045)
+
+Every mutation is one wave's rule change, announced before it acts. The numbers keep each one noticeable but never decisive on its own; every value is clamped (in `EFFECT_CLAMPS` and `WAVE_RULES.modifierClamp`) in the data tests and again when applied.
+
+| Value | Setting | Why |
+|---|---|---|
+| Mutation-free waves | 1–3, and 20 | O-7: learn the basics first; the finale (later the boss) has its own rules |
+| Mutations per wave | exactly 1 from wave 4 (endless included) | Plan §14 "every normal wave receives one mutation" |
+| First wave | HUNGER, BLACKOUT 4; DEATH CRY 5; STATIC 6; HIVE 7; BLOOD MOON 9 | The simplest (faster enemies, darkness) first; DEATH CRY after the Screamer has been met (wave 4), so the two alarms can be told apart; HIVE once waves are long enough to surge in; BLOOD MOON in the pressure tier |
+| Weights (variety / pressure / complex; endless = complex) | HUNGER 1.2/1/1; BLACKOUT 1/1/1; DEATH CRY 1/1/1; STATIC 0.8/1/1; HIVE 0.6/1/1.2; BLOOD MOON –/0.8/1.2 | Simpler rules more often early; the bigger ones later |
+| Repeats | never the previous; never two of BLACKOUT/STATIC in a row; ×0.35 if used in the last 3 waves | Variety; two sight-denial waves back to back is frustrating |
+| HUNGER speed / acceleration | ×1.2 / ×1.2 (clamp ×0.5–1.25) | Walker 1.6 → 1.92 m/s, Runner 5.2 → 6.24 m/s: noticeably faster, still slower than the player's sprint (7.5 m/s) |
+| HUNGER cap | never above max(own speed, 0.9 × sprint = 6.75 m/s), hasted included | The player can always outrun a hungry enemy by sprinting; a fast enemy is never made slower by the cap |
+| BLACKOUT lighting | ambient ×0.3, sun ×0.12, cold tint 50 %, near-black fog colour; fade in 2.5 s (intro), out 2 s (breather) | Dark enough to change how the player moves; fog distance unchanged, so the view range is the same |
+| BLACKOUT visibility aids | 3 red emergency lights (intensity 14, reach 13 m); muzzle light (intensity 9, reach 14 m) while the flash shows; eyeshine 0.14 | Safe zones to hold, gunfire as a light source, and enemies stay readable as pairs of eyes |
+| Visibility floors | ambient ≥ 0.25; eyeshine ≥ 0.1 whenever ambient < 0.6 | No mutation (or stack of overlays) can make enemies invisible |
+| STATIC bursts | every 6–10 s, 0.4–0.7 s long, first ≥ 4 s in; opacity 0.26 (clamp ≤ 0.35; bursts ≤ 0.8 s; ≥ 5 s apart) | Short, readable interruptions; 0.35 in the first browser pass hid too much and was lowered |
+| STATIC safety | under the HUD; clear centre 10 vmin → full at 22 vmin; jitter ≤ 3 Hz; still with reduced motion | Aim and HUD are never covered; photosensitivity |
+| DEATH CRY alarm | radius 8 m, alert 6 s, haste ×1.2 for 2.5 s (clamp ≤ 10 m, ×1.25, 3 s); never reinforcements | A kill in a crowd costs attention, a kill of a straggler costs nothing: rewards isolating targets. Much smaller than the Screamer's 18 m, ×1.35 for 6 s |
+| HIVE budget | ×1.3 (clamp ×0.5–1.5; mutations only) | About a third more enemies at the same concurrency: a longer wave, not a denser one |
+| HIVE surges | 2, at 40 % and 75 % of the queue; group + 2 (≤ 6); warning 2 s (clamp ≤ 3 surges, 1–4 s) | Flanks the player can see coming: the warning names the direction |
+| BLOOD MOON | Elite chance +0.15 (the trait clamp is ±0.2); Elite limit +1, +1 more every 5 waves after 9 (≤ +3); at least 1 Elite | Elites become the wave's focus; the budget stays the same, so fewer but tougher enemies |
+| BLOOD MOON lighting | ambient ×0.9, sun ×0.85, red tint 45 %, dark red fog | Mood, not darkness |
+| Tripwire | a scripted defender clears waves 6, 9, 12 under each mutation and takes ≤ 1.6× (+20) the unmutated damage | Catches a mutation that silently makes a wave unfair (TESTING §6). Measured values below |
+
+**Tripwire measurements** (the scripted defender of `signal/mutations.integration.test.ts`, seeds `tripwire-<wave>`; health points taken, `BALANCE_REPORT=1`):
+
+TRIPWIRE_TABLE
+
+These are a regression check, not a player's experience: the defender stands still and never misses its rhythm.
+
 ---
 
 ## 3. Change log
@@ -289,3 +320,5 @@ Difficulty rises through the threat budget, the mix, traits and concurrency. Ene
 | 2026-09-27 | Runner, Tank, Screamer, traits, their drops, test encounter | Initial Pass-1 values | Phase 5 (D-043). Verified by automated tests only (time-to-kill, attack timing, the leap, head-only stagger, the scream and its response, trait damage); not play-tested by hand |
 | 2026-09-27 | Separation | room = max(0.8 m, both radii + 0.1 m) + closing speed × 0.5 s; push + closing speed × 1.5 | Phase 5 head-on tests: a Runner ran through oncoming enemies with the flat push. A first try (push ≥ 1.5 × the faster body's speed) did not help head-on (planted-bug run) and was replaced |
 | 2026-09-28 | Waves: budget curve, concurrency, pacing, unlocks, caps, themes, trait schedule, spawn rules, timings | Initial Pass-1 values | Phase 6 (D-044). Verified by automated tests only (the budget table, property tests over 200 waves × 30 seeds, spawn fairness, pacing, completion, timings); not play-tested by hand |
+| 2026-09-29 | Signal Mutations: selection rules, the six v1 mutations, environment overlays, visibility floors, clamps | Initial Pass-1 values | Phase 7 (D-045). Verified by automated tests (data within clamps, selection properties over many seeds, generator per mutation, the lifecycle, determinism, the scripted-defender tripwire) and a browser check of each mutation's look; not play-tested by hand |
+| 2026-09-29 | STATIC opacity | 0.35 → 0.26; no screen blend; the clear centre widened | First browser look: the interference hid too much of the view |

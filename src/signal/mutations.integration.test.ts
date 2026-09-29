@@ -367,14 +367,17 @@ describe('mutations integration: no mutation silently makes a wave impossible', 
   };
 
   it('every mutation’s wave is cleared, taking at most 1.6× (+20) the damage of the same wave unmutated', () => {
+    const report: string[] = [];
     for (const n of [6, 9, 12]) {
       const baseline = defended(n, 'none');
+      report.push(`wave ${n} none: ${Math.round(baseline.taken)}`);
       expect(baseline.cleared, `baseline wave ${n}`).toBe(true);
       for (const id of ['BLACKOUT', 'HUNGER', 'STATIC', 'SCREAM', 'HIVE', 'BLOOD_MOON'] as const) {
         if (n < { BLACKOUT: 4, HUNGER: 4, STATIC: 6, SCREAM: 5, HIVE: 7, BLOOD_MOON: 9 }[id]) {
           continue;
         }
         const r = defended(n, id);
+        report.push(`wave ${n} ${id}: ${Math.round(r.taken)}`);
         expect(r.cleared, `${id} wave ${n}`).toBe(true);
         expect(r.taken, `${id} wave ${n}: ${r.taken} vs ${baseline.taken}`).toBeLessThanOrEqual(
           baseline.taken * 1.6 + 20,
@@ -384,6 +387,9 @@ describe('mutations integration: no mutation silently makes a wave impossible', 
           expect(r.taken, `${id} wave ${n}`).toBe(baseline.taken);
         }
       }
+    }
+    if (process.env.BALANCE_REPORT) {
+      console.log(`damage taken by the scripted defender\n${report.join('\n')}`);
     }
   }, 300_000);
 });

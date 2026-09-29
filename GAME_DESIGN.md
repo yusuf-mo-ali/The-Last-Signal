@@ -54,7 +54,9 @@ A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared a
 - Each wave ends with a short breather (about 10–15 s), the upgrade screen and the Supply Terminal (§5.3).
 - A full run is therefore roughly 25–35 minutes.
 
-**Implemented (Phase 6, D-044):** the introduction order in the table: Runner from wave 3, Screamer from 4, Tank from 6, Armored and Helmeted from 8, Elite from 13. The Climber is never part of a normal wave. There is a 3 s announcement and a 10 s breather. Until the Siren exists (Phase 13), wave 20 is a finale wave with guaranteed Tanks and Screamers. The signal phases, mutations and upgrades are not built yet.
+**Implemented (Phase 6, D-044):** the introduction order in the table: Runner from wave 3, Screamer from 4, Tank from 6, Armored and Helmeted from 8, Elite from 13. The Climber is never part of a normal wave. There is a 3 s announcement and a 10 s breather. Until the Siren exists (Phase 13), wave 20 is a finale wave with guaranteed Tanks and Screamers. The signal phases and upgrades are not built yet.
+
+**Implemented (Phase 7, D-045):** Signal Mutations (§9). Waves 1–3 and wave 20 have none; every other wave (endless included) has exactly one.
 
 This maps onto the plan's first-session curve (§33):
 
@@ -341,11 +343,11 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 | **BLACKOUT** | Lights drop sharply; emergency lights stay on | Visibility | Hold lit zones; muzzle flash lights the area | environment | Yes |
 | **HUNGER** | Enemy movement speed up | Less time per target | Positioning, retreat routes | stat | Yes |
 | **STATIC** | Periodic visual interference | Information denial | Rely on audio cues | screen | Yes |
-| **SCREAM** | Enemy deaths alert nearby enemies | Every kill pulls more attention | Fight at range; isolate targets | trigger | Yes |
+| **SCREAM** (shown as **DEATH CRY**) | Enemy deaths alert nearby enemies | Every kill pulls more attention | Fight at range; isolate targets | trigger | Yes |
 | **HIVE** | Extra spawn events | Surprise flanks | Map awareness | spawnRule | Yes |
 | **BLOOD MOON** | Higher chance of Elite enemies | High-value targets | Prioritise; earn bonus rewards | spawnRule | Yes |
-| **LOW GRAVITY** | Player and enemy physics change | Movement and aim relearned | Vertical play | stat (`world.gravity`) | **Deferred [Open O-4]** |
-| **OVERLOAD** | Weapon fire causes environmental effects; recoil increases | Risk vs reward | Burst discipline | trigger + stat | **Deferred [Open O-4]** |
+| **LOW GRAVITY** | Player and enemy physics change | Movement and aim relearned | Vertical play | stat (`world.gravity`) | **Deferred (D-045)** |
+| **OVERLOAD** | Weapon fire causes environmental effects; recoil increases | Risk vs reward | Burst discipline | trigger + stat | **Deferred (D-045)** |
 
 **Why defer these two:**
 - LOW GRAVITY affects player physics, enemy navigation (airborne time vs the nav grid) and animation.
@@ -357,7 +359,38 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 - The icon stays on the HUD for the whole wave.
 - **[Proposed]** Mutated waves pay a small reward bonus, so they read as a challenge rather than just a nerf.
 
-**BLACKOUT visibility [Open O-10].** Should the player have a flashlight? It would make BLACKOUT a positioning problem instead of pure frustration, but it adds a control and a shadow-casting light.
+**BLACKOUT visibility [O-10, updated by D-045].** No flashlight for now: BLACKOUT is played with the red emergency lights, the muzzle flash (which lights the scene) and glowing enemy eyes. A flashlight is reconsidered after a hands-on playtest.
+
+### 9.1 Implemented (Phase 7, D-045; values in BALANCING §2.15)
+
+**When.** None on waves 1–3 (the player learns the basics first) or on wave 20 (the finale / boss rules). Exactly one on every other wave, endless waves included. The draw is seeded per run and wave, so a seed always gives the same sequence.
+
+| Mutation | First wave | What the player reads (rule · hint) | What it does |
+|---|---|---|---|
+| **HUNGER** | 4 | "Zombies move 20 % faster." · "Keep your distance and a way out." | Enemy speed and acceleration ×1.2 while the wave is live. Never above max(the enemy's own speed, 90 % of the player's sprint): the player can always outrun a Walker, a Tank or a Screamer, and a Runner stays below the sprint. The Runner's leap is unchanged |
+| **BLACKOUT** | 4 | "The lights are failing; only the red emergency lights stay on." · "Hold the lit zones. Your muzzle flash lights the way." | The lights fade to about a third over the announcement; three red emergency lights come on; each shot lights the area; enemy eyes glow. The fog distance and the HUD are untouched. The light comes back during the breather |
+| **DEATH CRY** (id `SCREAM`) | 5 | "Every kill cries out: zombies nearby surge at you." · "Kill them apart, or from range." | Each death alerts enemies within 8 m and hurries them (×1.2 for 2.5 s). A small red ring at the body shows its reach. It never brings more zombies |
+| **STATIC** | 6 | "Signal interference breaks up your view now and then." · "Your crosshair and HUD stay clear. Keep tracking through it." | Bursts of interference every 6–10 s, each 0.4–0.7 s, the first ≥ 4 s into the wave. The layer is under the HUD, at most 26 % opaque and nearly clear around the crosshair; it jitters at most 3 times a second and not at all with reduced motion. The badge flickers with each burst |
+| **HIVE** | 7 | "The horde is bigger and surges in twice." · "Watch for the surge warning and turn to face it." | 30 % more threat budget (the same concurrency cap, so a longer wave) and two surges at 40 % and 75 % of the wave: "HIVE SURGE · EAST" and an arrow warn 2 s before a bigger group (up to 6) arrives there |
+| **BLOOD MOON** | 9 | "Elite zombies are far more common." · "Fewer, tougher enemies: pick your targets." | A red sky; the Elite chance +15 %, one more Elite allowed (more on later waves), and at least one Elite. The budget stays the same: fewer, tougher enemies. Before wave 13 it is the only way to meet Elites. The badge counts them ("ELITES ×2") |
+
+**Selection.** A mutation's first wave must have come. The previous wave's mutation is never repeated, and two sight mutations (BLACKOUT, STATIC) never follow each other. A mutation seen in the last three waves is less likely.
+
+**The player always knows why.**
+- During the announcement: a card under "WAVE N" with the name in its colour, the rule and a counter-play hint. Only lighting changes during the announcement; nothing that changes play acts before the wave starts.
+- During the wave: a badge top centre (`◆ HUNGER`) and a cue tied to each occurrence (the lights failing, the red ring at a body, the badge flickering with interference, the surge warning with its direction, the Elite count).
+- After the wave: "HUNGER LIFTED" in the breather.
+- On death: "You died · Wave 7 · Hunger".
+
+**The Screamer, DEATH CRY and adaptation are different things.**
+- A Screamer's scream (§7.5) is an enemy doing something: a wind-up the player can interrupt, a large **violet** ring, a violet pulse at the screen edges, and the next group of the wave arrives early.
+- DEATH CRY is a rule of the wave: every death, a small **red** ring, no screen pulse, and never extra zombies.
+- Adaptation (§10, Phase 8) is explained after a wave and changes which enemies come next; it never raises alarms and never chooses mutations.
+
+**Guardrails.** A mutation can never make a wave silently impossible or unfair:
+- it never changes the concurrency cap, the spawn distance or view rule, the damage window (none in the announcement or breather), unlocks or the roster;
+- speeds, budgets, surges, Elites, alarm reach and haste, darkness and interference strength are all capped, in the data and again when applied;
+- a scripted test player clears waves 6, 9 and 12 under every mutation, taking at most 1.6× the damage of the same wave without one.
 
 ---
 
@@ -529,6 +562,7 @@ Minimal. The player must understand the situation within one second (§22).
 - **Phase 3 placeholder:** a hit marker around the crosshair (hit, headshot, kill) and floating damage numbers (§6).
 - **Phase 4 placeholder:** health bottom left (`HEALTH 85` and a bar) and a brief red flash at the screen edges when the player is hit; "You died / Click to start a new run" at game over.
 - **Phase 6 placeholder:** `WAVE 7 · 12 LEFT` top left (queued + alive), a centred "WAVE 7" banner during the announcement and "WAVE 7 CLEARED · NEXT WAVE IN 8" during the breather.
+- **Phase 7 placeholder (D-045):** the mutation card under the wave banner during the announcement (name, rule, hint); the badge top centre for the whole wave (`◆ BLOOD MOON · ELITES ×2`), flickering with STATIC bursts and reading `… LIFTED` in the breather; the HIVE surge warning under it with a direction arrow; the STATIC layer under every HUD element.
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).
@@ -566,6 +600,7 @@ Audio should warn the player of danger before they see it (§23).
   This fulfils the plan's rule that the player always understands why they died. Restart is one click and should take about 2 s.
 - **Win:** clear wave 20 and transmit the signal, then `VICTORY`, showing run stats and signal strength.
 - **Implemented so far (Phase 6 placeholder):** the prompt names the wave reached ("You died · Wave 7 · Click to start a new run"; "Signal transmitted · Wave 20 cleared · Click to start a new run"). Run stats (kills per archetype, headshots, damage taken, wave times) are collected for the end screens of the UI phase.
+- **Phase 7:** the prompt also names the wave's mutation ("You died · Wave 7 · Blackout"), and run stats record each wave's mutation. A new run starts with normal lighting and no mutation.
 
 ---
 

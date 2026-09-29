@@ -2,13 +2,15 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 6 (wave system) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and survive **waves** of the v1 zombie roster:
+> **Status: Phase 7 (Signal Mutations) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and survive **waves** of the v1 zombie roster:
 > - the **Walker**: slow and durable, with a swipe you can dodge;
 > - the **Runner** (from wave 3): fast and fragile; it zig-zags in the open and leaps at you;
 > - the **Screamer** (from wave 4): keeps its distance and screams to call and hasten the others, and to pull the next group in early; shoot it first;
 > - the **Tank** (from wave 6): a slow wall that soaks body shots and must be shot in the head.
 >
-> Each wave is announced, arrives from out of sight at spawn points around the facility, and is followed by a 10 s breather. Waves grow in size and mix (swarms, heavy waves, ambushes), and from wave 8 zombies can be **Armored** or **Helmeted**, from wave 13 **Elite**. Clearing wave 20 transmits the signal and wins the run; `?endless=1` keeps going. You have 100 health and no healing yet; when it runs out the run ends on the wave reached, and a click starts a new one. The Phase 3–5 training range and test encounter are still available with `?sandbox=1`. Mutations, upgrades and bosses come in later phases.
+> Each wave is announced, arrives from out of sight at spawn points around the facility, and is followed by a 10 s breather. Waves grow in size and mix (swarms, heavy waves, ambushes), and from wave 8 zombies can be **Armored** or **Helmeted**, from wave 13 **Elite**. Clearing wave 20 transmits the signal and wins the run; `?endless=1` keeps going. You have 100 health and no healing yet; when it runs out the run ends on the wave reached, and a click starts a new one. The Phase 3–5 training range and test encounter are still available with `?sandbox=1`.
+>
+> From wave 4 every wave (except the finale) carries a **Signal Mutation**, announced before the wave with its rule and a hint, and shown top centre while it lasts: **Blackout** (the lights fail; red emergency lights and your muzzle flash light the way), **Hunger** (zombies 20 % faster, never faster than your sprint), **Static** (bursts of interference, never over your HUD), **Death Cry** (every kill alerts and hurries the zombies around it), **Hive** (a bigger wave with two announced surges) and **Blood Moon** (Elites under a red sky). Upgrades, adaptation and bosses come in later phases.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -89,6 +91,7 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
   - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
   - `tls.throwError()` shows the error screen.
   - `tls.wave()` shows the current wave (state, theme, budget, queued, alive, timers); `tls.startWave(12)` jumps to a wave, `tls.skipWaveTimer()` ends the announcement or breather, `tls.completeWave()` clears the wave, `tls.pauseSpawning(true)` holds spawns, `tls.setEndless(true)` goes past wave 20, and `tls.runStats()` shows the run's tallies.
+  - `tls.startWave(9, 'BLOOD_MOON')` jumps to a wave with a given mutation (`'none'` for none); `tls.mutation()` shows the current one (phase, what is applied, next STATIC burst, surges); `tls.triggerMutation('HIVE')` sets the current wave's (during its announcement) or the next wave's mutation; `tls.mutationSchedule(1, 20)` lists a run's mutations; `tls.setMutations(false)` turns them off; `tls.clearMutation()` removes the current effects; `tls.staticBurst()` forces a burst; `tls.mutations()` lists the catalogue.
   - `tls.waveTable(1, 25)` prints the difficulty curve; `tls.previewWave(20)` lists what a wave will contain; `tls.spawnPoints()` and `tls.showSpawns()` show where the next group could enter (green) and why not (red: in view, orange: too close, grey: no room, violet: reserved).
 - The plan's remaining gameplay commands (`triggerMutation`, `spawnBoss`) are listed already. They report which phase will implement them.
 
