@@ -44,8 +44,14 @@ function mutation(page: Page): Promise<MutationSnapshot> {
   return page.evaluate(() => window.tls!.mutation());
 }
 
-function programs(page: Page): Promise<number> {
-  return page.evaluate(() => window.tls!.inspect().renderer.webgl.info.programs?.length ?? 0);
+/**
+ * The shader programs in use, by id. A recompile can release the old programs, so their count may
+ * not change: the ids do (D-022: no mutation may cause one).
+ */
+function programs(page: Page): Promise<string> {
+  return page.evaluate(() =>
+    (window.tls!.inspect().renderer.webgl.info.programs ?? []).map((p) => p.id).join(','),
+  );
 }
 
 /** Starts wave `n` with `id` (god mode on) and waits until it is active. */
@@ -238,14 +244,30 @@ test.describe('mutations (development build)', () => {
     await play(page);
     await startActive(page, 12, 'STATIC');
     expect((await mutation(page)).nextBurstIn).toBeGreaterThan(0);
-    await page.evaluate(() => window.tls!.staticBurst());
+    // Sampled every frame in the page: a burst lasts well under a second of simulated time,
+    // which can fall between two polls at software-rendering frame rates.
+    await page.evaluate(() => {
+      const w = window as unknown as { __static: { opacity: number; flicker: boolean } };
+      w.__static = { opacity: 0, flicker: false };
+      const sample = (): void => {
+        const overlay = document.querySelector<HTMLElement>('.static-overlay');
+        const badge = document.querySelector<HTMLElement>('.mutation-badge');
+        w.__static.opacity = Math.max(w.__static.opacity, Number(overlay?.dataset.opacity ?? 0));
+        w.__static.flicker ||= badge?.classList.contains('mutation-badge--flicker') ?? false;
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+      window.tls!.staticBurst();
+    });
     // The overlay shows the burst and the badge flickers with it (the player sees the cause).
     await expect
-      .poll(async () => {
-        const hud = await mutationHud(page);
-        return hud.staticOpacity > 0 && hud.staticOpacity <= 0.35 && hud.flicker;
-      })
-      .toBe(true);
+      .poll(() => page.evaluate(() => (window as unknown as { __static: object }).__static))
+      .toMatchObject({ flicker: true });
+    const peak = await page.evaluate(
+      () => (window as unknown as { __static: { opacity: number } }).__static.opacity,
+    );
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThanOrEqual(0.35);
 
     // Stacking: with every element made hit-testable, the HUD is on top of the overlay.
     const stacking = await page.evaluate(() => {
@@ -305,7 +327,11 @@ test.describe('mutations (development build)', () => {
         w.__pulled++;
       });
     });
-    const ids = await page.evaluate(() => window.tls!.spawnWalkers(4, 10));
+    // Close enough that the player is inside the cry's 8 m: a wrong screen pulse would show.
+    const ids = await page.evaluate(() => {
+      window.tls!.freezeEnemies(true);
+      return window.tls!.spawnWalkers(4, 6);
+    });
     expect(ids.length).toBeGreaterThanOrEqual(2);
     const pulsesBefore = await page.evaluate(
       () => document.querySelector<HTMLElement>('.alarm-pulse')?.dataset.pulses,
