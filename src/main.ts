@@ -446,9 +446,8 @@ function boot(app: HTMLElement): () => void {
       weaponView.update(simDt);
       dummyView.update(simDt);
       const channels = environment.resolve();
-      lighting.update(channels);
+      lighting.update(channels, weaponView.muzzleFlashVisible ? 1 : 0);
       enemyView.eyeshine = channels.eyeshine;
-      weaponView.muzzleLightScale = channels.muzzleLight;
       enemyView.update(alpha, simDt);
       pickupView.update(simDt);
       const held = weapons.activeWeapon;

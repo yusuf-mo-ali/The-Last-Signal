@@ -87,6 +87,10 @@ export const LIGHTING = {
   emergency: { color: 0xff3322, poolRadius: 4.5, poolOffset: 1.4, poolOpacity: 0.6 },
   /** The fixture lamp's own glow (a small emissive box) at full emergency. */
   emergencyLampGlow: 3,
-  /** Muzzle light at `muzzleLight = 1`, while the flash shows. */
-  muzzle: { color: 0xffc27a, intensity: 9, distance: 14, decay: 1.5 },
+  /**
+   * The muzzle flash lighting the surroundings at `muzzleLight = 1` (a blackout): while the flash
+   * shows, the fill light rises by `ambientBoost` (of its normal intensity) and warms toward
+   * `color`. Not a point light: one costs ~7 % of the frame on software rendering (TESTING §7.4).
+   */
+  muzzle: { color: 0xffc27a, ambientBoost: 0.45, warmth: 0.35 },
 } as const;

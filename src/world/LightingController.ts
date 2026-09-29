@@ -14,6 +14,7 @@ import { LIGHTING } from '../config/environment';
 import type { LightRig } from './WorldView';
 
 const _tint = new Color();
+const _muzzle = new Color(LIGHTING.muzzle.color);
 
 export class LightingController {
   private readonly rig: LightRig;
@@ -37,9 +38,13 @@ export class LightingController {
     };
   }
 
-  /** Applies the channels (writes only when something changed). */
-  update(c: EnvironmentChannels): void {
-    const key = [c.ambient, c.sun, c.tintAmount, c.emergency, ...c.tint, ...c.fog]
+  /**
+   * Applies the channels (writes only when something changed). `flash`: 1 while the muzzle flash
+   * shows; with the `muzzleLight` channel (a blackout) it briefly lights the scene.
+   */
+  update(c: EnvironmentChannels, flash = 0): void {
+    const muzzle = c.muzzleLight * flash;
+    const key = [c.ambient, c.sun, c.tintAmount, c.emergency, muzzle, ...c.tint, ...c.fog]
       .map((v) => v.toFixed(4))
       .join(',');
     if (key === this.lastKey) {
@@ -48,8 +53,12 @@ export class LightingController {
     this.lastKey = key;
     const { hemisphere, sun, lamp, pool, pools, fog, background } = this.rig;
     _tint.setRGB(c.tint[0], c.tint[1], c.tint[2], SRGBColorSpace);
-    hemisphere.intensity = this.base.hemisphere * c.ambient;
+    hemisphere.intensity =
+      this.base.hemisphere * (c.ambient + LIGHTING.muzzle.ambientBoost * muzzle);
     hemisphere.color.copy(this.base.sky).lerp(_tint, c.tintAmount);
+    if (muzzle > 0) {
+      hemisphere.color.lerp(_muzzle, LIGHTING.muzzle.warmth * muzzle);
+    }
     hemisphere.groundColor.copy(this.base.ground).lerp(_tint, c.tintAmount * 0.5);
     sun.intensity = this.base.sun * c.sun;
     sun.color.copy(this.base.sunColor).lerp(_tint, c.tintAmount);
