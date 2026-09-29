@@ -6,7 +6,9 @@
  *   surface kind, so the whole map is a handful of draw calls;
  * - flat-shaded solid colours per surface kind, plus a ground grid for reading distance and speed;
  * - a fixed light rig (D-022): hemisphere fill and one shadow-casting sun, whose shadow map size
- *   comes from the graphics quality profile (D-037);
+ *   comes from the graphics quality profile (D-037), plus the level's emergency fixtures (off
+ *   until the lights fail, D-045). Every light exists from load; `LightingController` changes
+ *   only intensities and colours;
  * - every shader is compiled before the first frame (`prewarm`).
  */
 
@@ -21,11 +23,13 @@ import {
   HemisphereLight,
   Mesh,
   MeshStandardMaterial,
+  PointLight,
   Scene,
   type Object3D,
   type PerspectiveCamera,
   type Triangle,
 } from 'three';
+import { LIGHTING } from '../config/environment';
 import type { Renderer } from '../render/Renderer';
 import { levelTriangles } from './levels/geometry';
 import type { SurfaceKind, Vec3 } from './levels/types';
@@ -45,6 +49,17 @@ const SURFACE_COLORS: Readonly<Record<SurfaceKind, number>> = {
 
 const BEACON_BOB_HEIGHT = 0.15;
 
+/** The lights `LightingController` drives (all created at load, D-022). */
+export interface LightRig {
+  readonly hemisphere: HemisphereLight;
+  readonly sun: DirectionalLight;
+  readonly emergency: readonly PointLight[];
+  /** The emergency lamps' shared material (their glow). */
+  readonly lamp: MeshStandardMaterial;
+  readonly fog: Fog;
+  readonly background: Color;
+}
+
 export interface WorldViewOptions {
   /** Where the beacon hovers (level data). */
   readonly beaconPosition: Vec3;
@@ -57,17 +72,21 @@ export class WorldView {
   private readonly beacon: Mesh;
   private readonly beaconBase: Vec3;
   private readonly disposables: { dispose(): void }[] = [];
+  readonly lights: LightRig;
 
   constructor(renderer: Renderer, world: World, options: WorldViewOptions) {
     this.renderer = renderer;
     this.world = world;
     this.beaconBase = options.beaconPosition;
 
-    this.scene.background = new Color(BACKGROUND);
-    this.scene.fog = new Fog(BACKGROUND, 35, 110);
+    const background = new Color(BACKGROUND);
+    const fog = new Fog(BACKGROUND, 35, 110);
+    this.scene.background = background;
+    this.scene.fog = fog;
 
     // Light rig: fixed from the start (D-022). One shadow caster.
-    this.scene.add(new HemisphereLight(0xc4d3e2, 0x3b3128, 2.2));
+    const hemisphere = new HemisphereLight(0xc4d3e2, 0x3b3128, 2.2);
+    this.scene.add(hemisphere);
     const sun = new DirectionalLight(0xffe2b8, 2.4);
     sun.position.set(18, 30, 10);
     const shadows = renderer.quality.shadows;
@@ -83,6 +102,39 @@ export class WorldView {
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.02;
     this.scene.add(sun, sun.target);
+
+    // Emergency fixtures (D-045): a lamp and a light each, dark until the lights fail. Never
+    // hidden or removed (D-022): the controller only changes intensity.
+    const lamp = this.track(
+      new MeshStandardMaterial({
+        color: 0x3a1512,
+        emissive: LIGHTING.emergency.color,
+        emissiveIntensity: 0,
+        roughness: 0.5,
+      }),
+    );
+    const lampGeometry = this.track(new BoxGeometry(0.42, 0.2, 0.16));
+    const emergency: PointLight[] = [];
+    for (const fixture of world.level.lights ?? []) {
+      const [x, y, z] = fixture.position;
+      const [fx, , fz] = fixture.facing;
+      const mesh = new Mesh(lampGeometry, lamp);
+      mesh.name = `lamp:${fixture.id}`;
+      mesh.position.set(x, y, z);
+      mesh.rotation.y = Math.atan2(fx, fz);
+      this.scene.add(mesh);
+      const light = new PointLight(
+        LIGHTING.emergency.color,
+        0,
+        LIGHTING.emergency.distance,
+        LIGHTING.emergency.decay,
+      );
+      light.name = `emergency:${fixture.id}`;
+      light.position.set(x + fx * 0.4, y - 0.1, z + fz * 0.4);
+      this.scene.add(light);
+      emergency.push(light);
+    }
+    this.lights = { hemisphere, sun, emergency, lamp, fog, background };
 
     for (const { surface, triangles } of levelTriangles(world.level.brushes, 'render')) {
       const material = this.track(

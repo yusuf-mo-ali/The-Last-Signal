@@ -41,6 +41,16 @@ import { WeaponHud } from './ui/WeaponHud';
 import { Rng } from './utils/Rng';
 import { SpawnDirector, type SpawnViewer } from './waves/SpawnDirector';
 import { WaveManager } from './waves/WaveManager';
+import { EffectRouter } from './modifiers/EffectRouter';
+import { ScreenEffects } from './modifiers/ScreenEffects';
+import { StatRegistry } from './modifiers/StatRegistry';
+import { TriggerRegistry } from './modifiers/TriggerRegistry';
+import { SignalMutationSystem } from './signal/SignalMutationSystem';
+import { MutationHud } from './ui/MutationHud';
+import { StaticOverlay } from './ui/StaticOverlay';
+import { MUTATIONS } from './config/mutations';
+import { Environment } from './world/Environment';
+import { LightingController } from './world/LightingController';
 import { Hitscan } from './weapons/hitscan';
 import { WeaponController } from './weapons/WeaponController';
 import { WeaponManager } from './weapons/WeaponManager';
@@ -167,6 +177,20 @@ function boot(app: HTMLElement): () => void {
     collector: () => (playing() ? player.motor.position : null),
     collect: (pickup) => weapons.addAmmo(pickup.definition.magazines) > 0,
   });
+  // The modifier runtime (D-009, D-045): sourced stats, triggers, the environment state and
+  // screen effects, all applied and removed by source through one router.
+  const stats = new StatRegistry(['enemy.moveSpeed', 'enemy.acceleration'], {
+    strict: import.meta.env.DEV,
+  });
+  const triggers = new TriggerRegistry({ strict: import.meta.env.DEV });
+  const environment = new Environment();
+  const screenEffects = new ScreenEffects();
+  const effects = new EffectRouter({
+    stats,
+    triggers,
+    environment,
+    screen: screenEffects,
+  });
   const enemies = new EnemyManager({
     world: world.collision,
     level: FACILITY,
@@ -176,6 +200,7 @@ function boot(app: HTMLElement): () => void {
     active: playing,
     pickups,
     strict: import.meta.env.DEV,
+    modifiers: stats, // HUNGER (D-045)
   });
   // Waves (D-044): the run's waves, entering at fair spawn points. The wave runtime steps before
   // the enemies, so a group spawned this step moves with everyone else.
@@ -200,10 +225,21 @@ function boot(app: HTMLElement): () => void {
       enemyView.prewarm(definition.spawns);
     },
   });
+  // Signal Mutations (D-045): the wave's mutation is announced, applied and removed with the wave.
+  const mutations = new SignalMutationSystem({
+    state: game.state,
+    waves,
+    enemies,
+    router: effects,
+    triggers,
+    screen: screenEffects,
+  });
   if (!sandbox) {
-    cleanups.push(waves.attach());
+    cleanups.push(waves.attach(), mutations.attach());
   }
   game.addSystem(waves);
+  game.addSystem(environment); // overlay fades, in simulated time
+  game.addSystem(screenEffects); // STATIC's burst schedule
   game.addSystem(enemies);
   // The Phase 4–5 test encounter: only in the sandbox (`?sandbox=1`) now that waves exist.
   const encounter = new TrainingEncounter({ enemies, active: playing });
@@ -240,6 +276,11 @@ function boot(app: HTMLElement): () => void {
   const hud = new WeaponHud(app);
   const healthHud = new HealthHud(app, playerHealth);
   const waveHud = new WaveHud(app, waves);
+  // Mutations on screen (D-045): the lighting follows the environment state; STATIC's layer sits
+  // right above the canvas, under every HUD element; the badge, card and surge cue explain it all.
+  const lighting = new LightingController(view.lights);
+  const staticOverlay = new StaticOverlay(renderer.canvas);
+  const mutationHud = new MutationHud(app, mutations, waves);
   // Where the player looks from, for fair spawns: the eye, the look yaw and the camera's horizontal
   // field of view.
   const eye = new Vector3();
@@ -358,7 +399,11 @@ function boot(app: HTMLElement): () => void {
   });
   cleanups.push(
     pointerLock.onLockChange((locked) => {
-      const reached = waves.isAttached && waves.wave > 0 ? `Wave ${waves.wave}` : undefined;
+      const mutation = waves.status.mutation;
+      const reached =
+        waves.isAttached && waves.wave > 0
+          ? `Wave ${waves.wave}${mutation ? ` · ${MUTATIONS[mutation].name}` : ''}`
+          : undefined;
       if (locked) {
         prompt.show('hidden');
       } else if (game.state.current === 'GAME_OVER') {
@@ -400,6 +445,10 @@ function boot(app: HTMLElement): () => void {
       cameraController.update(alpha, simDt);
       weaponView.update(simDt);
       dummyView.update(simDt);
+      const channels = environment.resolve();
+      lighting.update(channels);
+      enemyView.eyeshine = channels.eyeshine;
+      weaponView.muzzleLightScale = channels.muzzleLight;
       enemyView.update(alpha, simDt);
       pickupView.update(simDt);
       const held = weapons.activeWeapon;
@@ -412,6 +461,12 @@ function boot(app: HTMLElement): () => void {
       feedback.update(simDt, camera, hudVisible);
       healthHud.update(simDt, hudVisible);
       waveHud.update(hudVisible);
+      staticOverlay.update(screenEffects.burst, screenEffects.time, hudVisible);
+      mutationHud.update(hudVisible, simDt, {
+        x: player.motor.position.x,
+        z: player.motor.position.z,
+        yaw: player.look.yaw,
+      });
       alarmPulse.update(simDt);
       view.render(alpha, camera);
     },
@@ -444,6 +499,10 @@ function boot(app: HTMLElement): () => void {
         playerHealth,
         playerTarget,
         waves,
+        mutations,
+        effects,
+        environment,
+        screenEffects,
         spawnViewer,
         scene: view.scene,
         applyView,
@@ -466,6 +525,11 @@ function boot(app: HTMLElement): () => void {
           healthHud,
           waveHud,
           alarmPulse,
+          lighting,
+          staticOverlay,
+          mutationHud,
+          stats,
+          triggers,
         },
       }).dispose;
     });
@@ -490,6 +554,9 @@ function boot(app: HTMLElement): () => void {
     enemyView.dispose();
     healthHud.dispose();
     waveHud.dispose();
+    mutationHud.dispose();
+    staticOverlay.dispose();
+    mutations.detach();
     waves.detach();
     alarmPulse.dispose();
     pickupView.dispose();

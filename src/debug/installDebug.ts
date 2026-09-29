@@ -48,6 +48,17 @@ import type { Renderer } from '../render/Renderer';
 import type { CombatFeedback } from '../ui/CombatFeedback';
 import type { PickupManager } from '../world/PickupManager';
 import { FINAL_WAVE } from '../config/waves';
+import {
+  ENABLED_MUTATION_IDS,
+  MUTATION_IDS,
+  MUTATIONS,
+  type MutationId,
+} from '../config/mutations';
+import type { EffectRouter } from '../modifiers/EffectRouter';
+import type { ScreenEffects } from '../modifiers/ScreenEffects';
+import type { SignalMutationSystem } from '../signal/SignalMutationSystem';
+import { mutationSchedule } from '../waves/WaveMutation';
+import type { Environment } from '../world/Environment';
 import type { SpawnViewer } from '../waves/SpawnDirector';
 import {
   waveBudget,
@@ -94,6 +105,11 @@ export interface DebugContext {
   readonly waves?: WaveManager;
   /** Where the player looks from (spawn point status). */
   readonly spawnViewer?: () => SpawnViewer;
+  /** Signal Mutations, for `tls.mutation()`, `tls.triggerMutation()`, `tls.staticBurst()`, … */
+  readonly mutations?: SignalMutationSystem;
+  readonly effects?: EffectRouter;
+  readonly environment?: Environment;
+  readonly screenEffects?: ScreenEffects;
   /** View settings access, for `tls.view()`. */
   readonly getView?: () => ViewSettings;
   readonly applyView?: (settings: ViewSettings) => ViewSettings;
@@ -115,7 +131,6 @@ declare global {
 
 /** Plan §29 commands whose systems arrive in later phases. */
 const PLANNED_COMMANDS: readonly (readonly [string, string, string])[] = [
-  ['triggerMutation', 'Apply a Signal Mutation', 'Phase 7 (mutations)'],
   ['spawnBoss', 'Spawn a boss', 'Phase 13 (bosses)'],
 ];
 
@@ -271,6 +286,7 @@ export function installDebug(context: DebugContext): DebugTools {
   const disposeCombat = registerCombatCommands(commands, context);
   const disposeEnemies = registerEnemyCommands(commands, context);
   const disposeWaves = registerWaveCommands(commands, context);
+  registerMutationCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -646,6 +662,9 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     ...(context.combat ? [formatCombat(context.combat, lastHit)] : []),
     ...(context.enemies ? [formatEnemies(context.enemies, context.playerHealth)] : []),
     ...(context.waves?.isAttached ? [formatWaves(context.waves)] : []),
+    ...(context.waves?.isAttached && context.mutations
+      ? [formatMutation(context.mutations, context.waves, context.screenEffects)]
+      : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
 }
@@ -1012,13 +1031,14 @@ function registerWaveCommands(commands: DebugCommands, context: DebugContext): (
   }));
   commands.register(
     'startWave',
-    `Jump to a wave (its intro starts; the current wave's enemies are removed): tls.startWave(n) (1–${FINAL_WAVE}, more with endless)`,
-    (n: number) => {
+    `Jump to a wave (its intro starts; the current wave's enemies are removed): tls.startWave(n, mutation?) (1–${FINAL_WAVE}, more with endless; mutation an id or 'none')`,
+    (n: number, mutation?: string) => {
       requireAttached();
       if (!Number.isFinite(n) || n < 1) {
         throw new Error('startWave(n) needs a wave number ≥ 1');
       }
-      if (!waves.startWave(n)) {
+      const forced = mutation === undefined ? undefined : mutationArg(mutation);
+      if (!waves.startWave(n, forced)) {
         throw new Error(`Cannot start a wave in ${game.state.current} (start a run first)`);
       }
       return status();
@@ -1145,6 +1165,136 @@ function registerWaveCommands(commands: DebugCommands, context: DebugContext): (
       dispose();
     }
   };
+}
+
+/** A mutation id from the console ('none', or an enabled id; case and spaces forgiven). */
+function mutationArg(value: string): MutationId | 'none' {
+  const id = value
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_');
+  if (id === 'NONE') {
+    return 'none';
+  }
+  if (id === 'DEATH_CRY') {
+    return 'SCREAM';
+  }
+  if (!(MUTATION_IDS as readonly string[]).includes(id)) {
+    throw new Error(`Unknown mutation "${value}". Mutations: ${ENABLED_MUTATION_IDS.join(', ')}`);
+  }
+  const m = MUTATIONS[id as MutationId];
+  if (m.status !== 'enabled') {
+    throw new Error(`${m.name} is deferred (O-4): it is data only and cannot be applied yet`);
+  }
+  return m.id;
+}
+
+function registerMutationCommands(commands: DebugCommands, context: DebugContext): void {
+  const { waves, mutations, effects, environment, screenEffects } = context;
+  if (!waves || !mutations) {
+    return;
+  }
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const status = () => ({
+    ...mutations.status,
+    wave: waves.wave,
+    enabled: waves.mutationsEnabled,
+    sources: effects?.sources() ?? null,
+    environment: environment?.status().map((o) => ({ ...o, weight: round(o.weight) })) ?? [],
+    staticBurst: screenEffects?.burst ?? null,
+    nextBurstIn:
+      screenEffects?.nextIn === null || !screenEffects ? null : round(screenEffects.nextIn),
+    surges: waves.status.surges,
+    history: waves.mutations,
+  });
+  commands.register(
+    'mutation',
+    'The current Signal Mutation: id, phase, what is applied, next STATIC burst, surges, history',
+    status,
+  );
+  commands.register(
+    'mutations',
+    'The mutation catalogue: status (enabled / deferred), first wave, rule and effects',
+    () =>
+      MUTATION_IDS.map((id) => ({
+        id,
+        name: MUTATIONS[id].name,
+        status: MUTATIONS[id].status,
+        minWave: MUTATIONS[id].minWave,
+        rule: MUTATIONS[id].rule,
+        effects: MUTATIONS[id].effects,
+      })),
+  );
+  commands.register(
+    'triggerMutation',
+    `Give a wave a mutation: during the intro the current wave is rebuilt with it, otherwise the next wave gets it: tls.triggerMutation(id) (${ENABLED_MUTATION_IDS.join(', ')}, or 'none')`,
+    (id: string) => {
+      if (!waves.isAttached) {
+        throw new Error('The wave system is off in the sandbox mode (?sandbox=1)');
+      }
+      if (!waves.forceMutation(mutationArg(id))) {
+        throw new Error('Cannot set a mutation now (start a run first)');
+      }
+      return status();
+    },
+  );
+  commands.register(
+    'clearMutation',
+    'Remove the current mutation’s effects now (its wave composition stays)',
+    () => mutations.clear(),
+  );
+  commands.register(
+    'setMutations',
+    'Switch mutations on or off for the next waves: tls.setMutations(false)',
+    (enabled?: boolean) => {
+      waves.mutationsEnabled = enabled ?? !waves.mutationsEnabled;
+      return waves.mutationsEnabled;
+    },
+  );
+  commands.register(
+    'mutationSchedule',
+    'The mutations a run meets, wave by wave: tls.mutationSchedule(from?, to?, seed?) (this run by default)',
+    (from = 1, to = FINAL_WAVE, seed?: string | number) => {
+      const schedule = mutationSchedule(seed ?? (waves.seed || 'preview'), Math.min(200, to));
+      const rows: Record<number, string> = {};
+      for (let n = Math.max(1, Math.floor(from)); n < schedule.length; n++) {
+        rows[n] = schedule[n] ?? '—';
+      }
+      return rows;
+    },
+  );
+  if (screenEffects) {
+    commands.register('staticBurst', 'Force a STATIC burst now (while STATIC is active)', () => {
+      const burst = screenEffects.force();
+      if (!burst) {
+        throw new Error('STATIC is not active');
+      }
+      return burst;
+    });
+  }
+}
+
+function formatMutation(
+  mutations: SignalMutationSystem,
+  waves: WaveManager,
+  screen: ScreenEffects | undefined,
+): string {
+  const s = mutations.status;
+  if (!s.id) {
+    return `mutation none${waves.mutationsEnabled ? '' : ' (off)'}`;
+  }
+  const next = screen?.nextIn;
+  const burst = screen?.burst
+    ? ' · BURST'
+    : next !== null && next !== undefined && s.phase === 'active'
+      ? ` · burst in ${next.toFixed(1)} s`
+      : '';
+  const surges = waves.status.surges;
+  const surge =
+    surges.total > 0
+      ? ` · surges ${surges.done}/${surges.total}${surges.pending ? ` (${surges.pending.region} in ${surges.pending.arrivesIn.toFixed(1)} s)` : ''}`
+      : '';
+  return `mutation ${s.id} ${s.phase}${burst}${surge}`;
 }
 
 function formatWaves(waves: WaveManager): string {

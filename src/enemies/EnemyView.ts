@@ -76,6 +76,9 @@ const FALL_TIME = 0.5;
 const SINK_TIME = 1;
 /** Seconds a scream's ring takes to reach its full radius and fade. */
 const RING_TIME = 0.7;
+/** A Screamer's scream (violet) and a DEATH CRY (red, D-045) look different at a glance. */
+const SCREAM_RING_COLOR = 0xb46cff;
+const DEATH_CRY_RING_COLOR = 0xff3b30;
 const RING_POOL = 4;
 /**
  * Culling sphere around the feet that holds the body in any pose, standing or lying down. The
@@ -101,6 +104,8 @@ interface Look {
 interface Visual {
   /** The enemy drawn; null while pooled. */
   enemy: Enemy | null;
+  /** Attack (or hit) glow this frame, 0–1. */
+  glow: number;
   readonly config: EnemyArchetypeConfig;
   readonly look: EnemyLook;
   readonly root: Group;
@@ -138,6 +143,11 @@ function lookOf(config: EnemyArchetypeConfig): EnemyLook {
 }
 
 export class EnemyView {
+  /**
+   * Baseline glow of living enemies in their eye colour when not telegraphing (0 normally; the
+   * environment's `eyeshine` in the dark, D-045). Set every frame by the composition root.
+   */
+  eyeshine = 0;
   private readonly scene: Scene;
   private readonly manager: EnemyManager;
   private readonly visuals = new Map<string, Visual>();
@@ -166,7 +176,11 @@ export class EnemyView {
         }
       }),
       manager.events.on('alarm', (alarm) => {
-        this.startRing(alarm.position, alarm.radius);
+        this.startRing(
+          alarm.position,
+          alarm.radius,
+          alarm.kind === 'deathCry' ? DEATH_CRY_RING_COLOR : SCREAM_RING_COLOR,
+        );
       }),
     );
     // One pooled, hidden visual per archetype from the start: the start-up shader prewarm, which
@@ -176,7 +190,7 @@ export class EnemyView {
     }
     for (let i = 0; i < RING_POOL; i++) {
       const material = new MeshBasicMaterial({
-        color: 0xb46cff,
+        color: SCREAM_RING_COLOR,
         transparent: true,
         opacity: 0,
         blending: AdditiveBlending,
@@ -210,8 +224,7 @@ export class EnemyView {
 
   /** Attack glow of an enemy, 0–1 (tests, debug). */
   telegraph(id: string): number {
-    const v = this.visuals.get(id);
-    return v ? v.material.emissiveIntensity : 0;
+    return this.visuals.get(id)?.glow ?? 0;
   }
 
   /** The attachments an enemy is drawn with (tests, debug). */
@@ -297,12 +310,13 @@ export class EnemyView {
     this.ringGeometry.dispose();
   }
 
-  private startRing(position: readonly number[], radius: number): void {
+  private startRing(position: readonly number[], radius: number, color: number): void {
     const ring =
       this.rings.find((r) => r.age >= RING_TIME) ??
       this.rings.reduce((oldest, r) => (r.age > oldest.age ? r : oldest));
     ring.age = 0;
     ring.radius = radius;
+    ring.material.color.setHex(color);
     ring.mesh.position.set(position[0] ?? 0, (position[1] ?? 0) + 0.08, position[2] ?? 0);
     ring.mesh.scale.set(0.5, 1, 0.5);
     ring.mesh.visible = true;
@@ -383,6 +397,7 @@ export class EnemyView {
       material,
       lookBits: 0,
       flash: 0,
+      glow: 0,
       pushX: 0,
       pushZ: 0,
       walkPhase: 0,
@@ -482,9 +497,18 @@ export class EnemyView {
     v.body.rotation.set(lean + v.lean + v.pushX + f, 0, sway + v.pushZ);
     v.arms.rotation.set(v.arm + swing + 0.12, 0, 0);
 
-    const glow = Math.max(v.flash > 0 ? 0.6 : 0, telegraph);
-    material.emissive.setHex(v.flash > 0 ? 0xffffff : look.telegraph);
-    material.emissiveIntensity = enemy.health.isDead ? 0 : glow;
+    const glow = enemy.health.isDead ? 0 : Math.max(v.flash > 0 ? 0.6 : 0, telegraph);
+    v.glow = glow;
+    if (glow > 0) {
+      material.emissive.setHex(v.flash > 0 ? 0xffffff : look.telegraph);
+      material.emissiveIntensity = glow;
+    } else if (this.eyeshine > 0 && !enemy.health.isDead) {
+      // In the dark (BLACKOUT, D-045) a faint glow in its eye colour keeps the silhouette readable.
+      material.emissive.setHex(look.eyes);
+      material.emissiveIntensity = this.eyeshine;
+    } else {
+      material.emissiveIntensity = 0;
+    }
   }
 
   /** Tips the top of the body along a world direction by `amount` radians. */

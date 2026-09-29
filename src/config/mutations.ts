@@ -111,7 +111,7 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
           intervalMax: 10,
           durationMin: 0.4,
           durationMax: 0.7,
-          opacity: 0.32,
+          opacity: 0.26,
           firstAfter: 4,
         },
       },

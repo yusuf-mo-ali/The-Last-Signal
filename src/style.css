@@ -435,3 +435,132 @@ body {
     transform: translate(-3px, 2px);
   }
 }
+
+/* ---- Signal Mutations (Phase 7 placeholder, ui/MutationHud.ts, ui/StaticOverlay.ts) ---------- */
+.mutation-badge {
+  --accent: #ffffff;
+
+  position: absolute;
+  top: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: rgb(7 9 11 / 55%);
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 80%);
+  pointer-events: none;
+}
+
+.mutation-badge--lifted {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+.mutation-badge--flicker {
+  animation: mutation-flicker 0.4s steps(2) 1;
+}
+
+@keyframes mutation-flicker {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.mutation-card {
+  --accent: #ffffff;
+
+  position: absolute;
+  top: 36%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 0.35rem;
+  max-width: min(34rem, 90vw);
+  text-align: center;
+  text-shadow: 0 2px 6px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
+.mutation-card__name {
+  color: var(--accent);
+  font-size: clamp(1.1rem, 2.4vw, 1.8rem);
+  font-weight: 700;
+  letter-spacing: 0.3em;
+}
+
+.mutation-card__rule {
+  color: var(--color-text);
+  font-size: 1rem;
+}
+
+.mutation-card__hint {
+  color: var(--color-text);
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.surge-cue {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  color: #ffd54a;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
+.surge-cue__arrow {
+  font-size: 1.4rem;
+  transition: transform 80ms linear;
+}
+
+.mutation-badge[hidden],
+.mutation-card[hidden],
+.surge-cue[hidden] {
+  display: none;
+}
+
+/* Above the 3D view, below every HUD element (DOM order); the centre stays clear. */
+.static-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  mask-image: radial-gradient(circle at 50% 50%, transparent 0 10vmin, rgb(0 0 0 / 100%) 22vmin);
+}
+
+.static-overlay__noise {
+  position: absolute;
+  inset: -4%;
+  width: 108%;
+  height: 108%;
+  image-rendering: pixelated;
+  animation: static-jitter 1s steps(3) infinite; /* at most 3 changes a second */
+}
+
+.static-overlay--still .static-overlay__noise {
+  animation: none;
+}
+
+@keyframes static-jitter {
+  33% {
+    transform: translate(-2%, 1%);
+  }
+
+  66% {
+    transform: translate(1%, -2%);
+  }
+}

@@ -6,8 +6,9 @@
  *
  * Kept cheap (plan §25): every mesh, geometry and material is created once. Impact markers are a
  * fixed ring of meshes reused oldest-first (sparks likewise), so firing allocates nothing on the
- * GPU. No lights are
- * added (D-022): the flash is an unlit additive quad.
+ * GPU. The flash is an unlit additive quad; one muzzle light (created at load, D-022) lights the
+ * surroundings while the flash shows, scaled by the environment's `muzzleLight` channel: dark
+ * everywhere except in a blackout (D-045), so normal waves look exactly as before.
  */
 
 import {
@@ -18,6 +19,7 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
+  PointLight,
   Sprite,
   SpriteMaterial,
   Vector3,
@@ -25,6 +27,7 @@ import {
   type PerspectiveCamera,
   type Scene,
 } from 'three';
+import { LIGHTING } from '../config/environment';
 import type { ShotResult } from './types';
 import type { WeaponManager } from './WeaponManager';
 
@@ -64,6 +67,9 @@ export class WeaponView {
   constructor(scene: Scene, camera: PerspectiveCamera, manager: WeaponManager) {
     this.manager = manager;
     this.camera = camera;
+    this.muzzleLight.name = 'muzzle-light';
+    this.muzzleLight.position.set(0.12, -0.08, -0.8); // just ahead of the muzzle
+    camera.add(this.muzzleLight);
 
     // ---- view model (drawn over the world: no depth test, drawn last) -------------------------
     const metal = this.viewMaterial(
@@ -170,6 +176,16 @@ export class WeaponView {
     return this.flash.visible;
   }
 
+  /** The light the flash casts (0 = the unlit flash only). Set every frame from the environment. */
+  muzzleLightScale = 0;
+  /** Lights the surroundings while the flash shows (exists from load, D-022). */
+  readonly muzzleLight = new PointLight(
+    LIGHTING.muzzle.color,
+    0,
+    LIGHTING.muzzle.distance,
+    LIGHTING.muzzle.decay,
+  );
+
   /** Animates the view model; `dt` is simulated seconds this frame (0 while paused). */
   update(dt: number): void {
     const manager = this.manager;
@@ -181,6 +197,9 @@ export class WeaponView {
     // slow frame is longer than the flash itself.
     this.flash.visible = this.flashTimer > 0;
     this.flash.rotation.z = this.flashTimer * 40;
+    this.muzzleLight.intensity = this.flash.visible
+      ? LIGHTING.muzzle.intensity * this.muzzleLightScale
+      : 0;
     this.flashTimer = Math.max(0, this.flashTimer - dt);
     this.punchTimer = Math.max(0, this.punchTimer - dt);
     this.kick *= Math.exp(-dt * 18);
@@ -234,6 +253,7 @@ export class WeaponView {
       off();
     }
     this.camera.remove(this.root);
+    this.muzzleLight.removeFromParent();
     for (const marker of this.markers) {
       marker.removeFromParent();
     }
