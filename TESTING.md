@@ -135,6 +135,15 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 - **Tests must be able to fail.** For important behaviour, plant a realistic bug and confirm a test goes red.
   - Phases 0.2 and 0.4: 16 of 16 unit-level mutations were caught.
   - Phase 0.6: a planted e2e bug (refusal feedback removed) failed in both projects.
+  - Phase 7: 32 of 32 Signal Mutation bugs caught, across:
+    - selection: mutations on waves 2–3 or on wave 20, the same one twice, two sight mutations in a row, `minWave` ignored, deferred mutations selectable, the recent-use penalty ignored;
+    - the generator: adaptive budget changes, BLOOD MOON's guaranteed Elite, the Elite bonus unclamped or not growing with the wave, surge size and count unclamped, the mutation's composition dropped;
+    - the wave runtime: a surge above `maxAlive`, a surge without its warning, every alarm (or a death cry) pulling reinforcements, a regenerated wave keeping its old history entry;
+    - the lifecycle: HUNGER live during the announcement, a stat left after the clear, an overlay left after a new run, effects kept after death, the STATIC stream not seeded per wave;
+    - enemies: the speed cap ignored, the acceleration stat never read;
+    - the effect runtime and environment: speed, death-cry radius and STATIC opacity unclamped, bursts closer than the photosensitivity limit, the blackout below its visibility floor, overlays blended out of priority order.
+  - Phase 7 first run: 31 of 32. The survivor (the acceleration multiplier never read) had no direct test; a new one gives the two stats different multipliers and checks the enemy's ground acceleration and a leap's. Every file was restored byte-identically (hash-checked), in a separate git worktree.
+  - Phase 7, end-to-end: E2E_PLANTS
   - Phase 6: 45 of 45 wave-system mutations caught, across:
     - the curves: budget terms, the endless tail, max alive (and its endless cap), unlocks, caps, the trait ramp;
     - the generator: the Elite limit, extras from any source (the Climber path), adaptive budget changes, unclamped budget scale and weights, introductions, the Walker floor, the remainder, heavies in the opening, repeated themes, the finale's heavies, trait costs, the ambush bonus;
