@@ -13,8 +13,10 @@
  */
 
 import {
+  AdditiveBlending,
   BoxGeometry,
   BufferGeometry,
+  CircleGeometry,
   Color,
   DirectionalLight,
   Float32BufferAttribute,
@@ -22,12 +24,13 @@ import {
   GridHelper,
   HemisphereLight,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
-  PointLight,
   Scene,
   type Object3D,
   type PerspectiveCamera,
   type Triangle,
+  Vector3,
 } from 'three';
 import { LIGHTING } from '../config/environment';
 import type { Renderer } from '../render/Renderer';
@@ -53,9 +56,11 @@ const BEACON_BOB_HEIGHT = 0.15;
 export interface LightRig {
   readonly hemisphere: HemisphereLight;
   readonly sun: DirectionalLight;
-  readonly emergency: readonly PointLight[];
   /** The emergency lamps' shared material (their glow). */
   readonly lamp: MeshStandardMaterial;
+  /** The emergency light pools on the floor (shared material; opacity = how lit). */
+  readonly pool: MeshBasicMaterial;
+  readonly pools: readonly Mesh[];
   readonly fog: Fog;
   readonly background: Color;
 }
@@ -103,8 +108,10 @@ export class WorldView {
     sun.shadow.normalBias = 0.02;
     this.scene.add(sun, sun.target);
 
-    // Emergency fixtures (D-045): a lamp and a light each, dark until the lights fail. Never
-    // hidden or removed (D-022): the controller only changes intensity.
+    // Emergency fixtures (D-045): a lamp and a pool of red light on the floor in front of it,
+    // dark until the lights fail. The pool is an unlit additive disc, bright in the middle and
+    // fading to nothing at its edge (vertex colours), so it lights the floor without being a
+    // light: no per-pixel lighting cost anywhere else. Compiled at load with everything else.
     const lamp = this.track(
       new MeshStandardMaterial({
         color: 0x3a1512,
@@ -114,7 +121,23 @@ export class WorldView {
       }),
     );
     const lampGeometry = this.track(new BoxGeometry(0.42, 0.2, 0.16));
-    const emergency: PointLight[] = [];
+    const pool = this.track(
+      new MeshBasicMaterial({
+        color: LIGHTING.emergency.color,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    const poolGeometry = this.track(new CircleGeometry(LIGHTING.emergency.poolRadius, 32));
+    poolGeometry.rotateX(-Math.PI / 2);
+    const rim = new Float32Array(poolGeometry.getAttribute('position').count * 3);
+    rim.set([1, 1, 1]); // the centre vertex; the rim stays black (adds nothing)
+    poolGeometry.setAttribute('color', new Float32BufferAttribute(rim, 3));
+    const pools: Mesh[] = [];
+    const down = new Vector3(0, -1, 0);
     for (const fixture of world.level.lights ?? []) {
       const [x, y, z] = fixture.position;
       const [fx, , fz] = fixture.facing;
@@ -123,18 +146,18 @@ export class WorldView {
       mesh.position.set(x, y, z);
       mesh.rotation.y = Math.atan2(fx, fz);
       this.scene.add(mesh);
-      const light = new PointLight(
-        LIGHTING.emergency.color,
-        0,
-        LIGHTING.emergency.distance,
-        LIGHTING.emergency.decay,
-      );
-      light.name = `emergency:${fixture.id}`;
-      light.position.set(x + fx * 0.4, y - 0.1, z + fz * 0.4);
-      this.scene.add(light);
-      emergency.push(light);
+      const offset = LIGHTING.emergency.poolOffset;
+      const from = new Vector3(x + fx * offset, y, z + fz * offset);
+      const floor = world.collision.raycast(from, down, 20);
+      const puddle = new Mesh(poolGeometry, pool);
+      puddle.name = `lamp-pool:${fixture.id}`;
+      puddle.position.set(from.x, (floor?.point.y ?? 0) + 0.02, from.z);
+      puddle.renderOrder = 5;
+      puddle.visible = false;
+      this.scene.add(puddle);
+      pools.push(puddle);
     }
-    this.lights = { hemisphere, sun, emergency, lamp, fog, background };
+    this.lights = { hemisphere, sun, lamp, pool, pools, fog, background };
 
     for (const { surface, triangles } of levelTriangles(world.level.brushes, 'render')) {
       const material = this.track(

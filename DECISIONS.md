@@ -1094,7 +1094,7 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
    - `PAUSED`: nothing runs (push-down state, no fixed steps), so fades and bursts freeze.
    - Composition effects (`spawnRule`) never pass through here: `generateWave` reads them from the data, so previews, debug jumps and play build the same wave.
 7. **The six mutations (values in BALANCING §2.15).**
-   - **BLACKOUT:** environment overlay. Ambient ×0.3, sun ×0.12, red emergency lights on, the muzzle flash lights the scene, enemy eyes glow. Fog distance unchanged.
+   - **BLACKOUT:** environment overlay. Ambient ×0.3, sun ×0.12, the red emergency lamps and their pools of light on, the muzzle flash lights the scene, enemy eyes glow. Fog distance unchanged.
    - **HUNGER:** `enemy.moveSpeed` and `enemy.acceleration` ×1.2. An enemy is never pushed above max(its own speed, 0.9 × the player's sprint = 6.75 m/s); the Runner's lunge and the landing brake are unaffected.
    - **STATIC:** a screen burst every 6–10 s for 0.4–0.7 s, at most 26 % opaque; the first ≥ 4 s into the wave.
    - **DEATH CRY:** every death raises a small alarm (see 8).
@@ -1111,7 +1111,7 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
    - A mutation never changes `maxAlive`, the spawn rate, the spawn distance or view rule, the D-029 damage window, unlocks, or the roster.
 10. **Surges (HIVE, executed generically by `WaveManager`).** When the queue reaches a surge point, a fair spawn point is chosen and announced (`surgeWarning {region, pointId}`; "HIVE SURGE · EAST" with an arrow). After the warning the group spawns there, or in that region if the point is no longer fair, with `min(size, queued, room)` members: never above `maxAlive`, never breaking spawn rules.
 11. **Presentation (D-022: no light is ever added at runtime).**
-    - Three emergency `PointLight`s and one muzzle `PointLight` exist from load at intensity 0; `LightingController` changes only intensities, colours, fog and background, so no shader recompiles (the browser test checks the program count).
+    - One muzzle `PointLight` exists from load at intensity 0. The emergency fixtures are not lights: a glowing lamp and an unlit additive pool of red light on the floor in front of it. Three emergency `PointLight`s were built first and measured at ~18 % of the frame in software rendering, in every wave (every lit pixel pays for every light, even at intensity 0), against a 10 % budget; the plan's fallback (emissive lamps and fake light) replaced them. The muzzle light costs ~7 % and stays. `LightingController` changes only intensities, colours, opacities, fog and background, so no shader recompiles (the browser test checks the program count).
     - `MutationHud`: an intro card (name, rule, counter-play hint), a badge for the whole wave (`◆ BLACKOUT`, `· ELITES ×N`, flicker with each STATIC burst), `BLACKOUT LIFTED` in the breather, and the surge cue.
     - `StaticOverlay`: a DOM layer directly above the canvas and below every HUD element, with a clear centre, ≤ 3 Hz jitter, none with `prefers-reduced-motion`, no pointer events.
     - The game-over prompt names the mutation ("Wave 7 · Blackout").

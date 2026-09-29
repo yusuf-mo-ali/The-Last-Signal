@@ -722,7 +722,7 @@ Three sources change the world. They are layered rather than competing:
 
 **Implemented in Phase 7 (D-045):**
 - `world/Environment.ts` (simulation, a `FixedUpdateSystem`) holds the base channels (`ambient, sun, tint, tintAmount, fog, emergency, eyeshine, muzzleLight`; `BASE_ENVIRONMENT` until Phase 12) and the overlays `{sourceId, id, priority, fadeIn, fadeOut}`. `resolve()` blends the overlays in priority order by their fade weight (simulated time, so it freezes while paused), then applies the visibility floors (`ambient ≥ 0.25`; eyeshine ≥ 0.1 when dark).
-- `world/LightingController.ts` (presentation) writes the resolved channels to the rig `WorldView` builds at load: the hemisphere and sun (intensity, tint), fog and background colour, the level's emergency `PointLight`s and lamp glow. `WeaponView` owns a muzzle `PointLight` (intensity 0 except while the flash shows, scaled by `muzzleLight`); `EnemyView` sets the eye glow from `eyeshine`. Nothing is added at runtime, so the shader program count never changes.
+- `world/LightingController.ts` (presentation) writes the resolved channels to the rig `WorldView` builds at load: the hemisphere and sun (intensity, tint), fog and background colour, the level's emergency lamps (glow) and their floor pools (unlit additive discs placed by a raycast to the floor, shown only while lit: three real point lights cost ~18 % of the frame in software rendering, TESTING §7.4). `WeaponView` owns a muzzle `PointLight` (intensity 0 except while the flash shows, scaled by `muzzleLight`); `EnemyView` sets the eye glow from `eyeshine`. Nothing is added at runtime, so the shader program count never changes.
 - Overlays: `blackout` (priority 20) and `bloodMoon` (priority 10).
 
 ### 7.11 Bosses

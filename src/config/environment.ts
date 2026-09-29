@@ -79,10 +79,14 @@ export const ENVIRONMENT_FLOORS = {
 
 /** How the lighting controller renders the channels (presentation values). */
 export const LIGHTING = {
-  /** Emergency fixtures at `emergency = 1`: colour, intensity and reach. */
-  emergency: { color: 0xff3322, intensity: 14, distance: 13, decay: 1.6 },
+  /**
+   * Emergency fixtures at `emergency = 1`: a glowing lamp and a pool of red light on the floor in
+   * front of it (an unlit additive disc, brightest at its centre). Not real lights: three point
+   * lights cost ~18 % of the frame on software rendering (TESTING §7.4), for every wave.
+   */
+  emergency: { color: 0xff3322, poolRadius: 4.5, poolOffset: 1.4, poolOpacity: 0.6 },
   /** The fixture lamp's own glow (a small emissive box) at full emergency. */
-  emergencyLampGlow: 2.2,
+  emergencyLampGlow: 3,
   /** Muzzle light at `muzzleLight = 1`, while the flash shows. */
   muzzle: { color: 0xffc27a, intensity: 9, distance: 14, decay: 1.5 },
 } as const;
