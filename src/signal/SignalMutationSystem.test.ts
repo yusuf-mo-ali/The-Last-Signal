@@ -183,10 +183,10 @@ describe('SignalMutationSystem: the lifecycle', () => {
     h.forced(6, 'HUNGER');
     expect(h.stats.multiplier('enemy.moveSpeed')).toBe(1); // not during the intro
     h.toActive();
-    expect(h.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.2);
+    expect(h.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.15);
     h.until(() => h.waveEnemies().length > 0);
     h.step();
-    expect(h.waveEnemies()[0]?.speedMultiplier).toBeCloseTo(1.2);
+    expect(h.waveEnemies()[0]?.speedMultiplier).toBeCloseTo(1.15);
     h.clearWave();
     expect(h.stats.multiplier('enemy.moveSpeed')).toBe(1);
     expect(h.leftovers().stats).toEqual([]);
@@ -241,11 +241,11 @@ describe('SignalMutationSystem: the lifecycle', () => {
     expect(h.leftovers().screen).toEqual([]);
   });
 
-  it('HIVE: two announced surges arrive from their region, never above the wave’s cap', () => {
+  it('HIVE: an announced surge arrives from its region, never above the wave’s cap', () => {
     const h = harness();
     h.forced(12, 'HIVE');
     const def = h.waves.definition;
-    expect(def?.surges).toHaveLength(2);
+    expect(def?.surges).toHaveLength(1);
     const warnings: { region: string; at: number }[] = [];
     const arrivals: { region: string; count: number; at: number }[] = [];
     h.waves.events.on('surgeWarning', (e) =>
@@ -268,8 +268,8 @@ describe('SignalMutationSystem: the lifecycle', () => {
       return h.state.current !== 'WAVE_ACTIVE';
     }, 600);
     expect(peak).toBeLessThanOrEqual(def?.maxAlive ?? 0);
-    expect(warnings).toHaveLength(2);
-    expect(arrivals).toHaveLength(2);
+    expect(warnings).toHaveLength(1);
+    expect(arrivals).toHaveLength(1);
     arrivals.forEach((a, i) => {
       const w = warnings[i];
       expect(a.at - (w?.at ?? 0)).toBeGreaterThanOrEqual(2 - 1e-6);

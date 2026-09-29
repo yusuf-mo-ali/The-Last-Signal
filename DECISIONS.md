@@ -1095,10 +1095,10 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
    - Composition effects (`spawnRule`) never pass through here: `generateWave` reads them from the data, so previews, debug jumps and play build the same wave.
 7. **The six mutations (values in BALANCING §2.15).**
    - **BLACKOUT:** environment overlay. Ambient ×0.3, sun ×0.12, the red emergency lamps and their pools of light on, the muzzle flash lights the scene, enemy eyes glow. Fog distance unchanged.
-   - **HUNGER:** `enemy.moveSpeed` and `enemy.acceleration` ×1.2. An enemy is never pushed above max(its own speed, 0.9 × the player's sprint = 6.75 m/s); the Runner's lunge and the landing brake are unaffected.
+   - **HUNGER:** `enemy.moveSpeed` and `enemy.acceleration` ×1.15. An enemy is never pushed above max(its own speed, 0.9 × the player's sprint = 6.75 m/s); the Runner's lunge and the landing brake are unaffected.
    - **STATIC:** a screen burst every 6–10 s for 0.4–0.7 s, at most 26 % opaque; the first ≥ 4 s into the wave.
    - **DEATH CRY:** every death raises a small alarm (see 8).
-   - **HIVE:** budget ×1.3 (mutation-owned, clamped ≤ 1.5) and two announced surges at 40 % and 75 % of the queue.
+   - **HIVE:** budget ×1.2 (mutation-owned, clamped ≤ 1.5) and one announced surge halfway through the queue (the wave's largest group + 1, ≤ 6).
    - **BLOOD MOON:** Elite chance +0.15, Elite limit +1 (+1 more every 5 waves after 9, at most +3), at least one Elite (Walkers promoted inside the same budget), and a red sky.
 8. **Screamer vs DEATH CRY vs Adaptive (the overlap).**
    - `AlarmEvent` gains `kind: 'scream' | 'deathCry'` and `reinforcements`.
@@ -1120,7 +1120,7 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
     - The game-over prompt names the mutation ("Wave 7 · Blackout").
 12. **Guardrails (checked by data tests and enforced again at runtime).**
     - Speed ×0.5–1.25 with the sprint cap; budget ≤ 1.5; alarms ≤ 10 m, haste ≤ 1.25 for ≤ 3 s, never reinforcing; ambient ≥ 0.25 and eyeshine ≥ 0.1 in the dark; STATIC ≤ 0.35 opaque, ≤ 0.8 s bursts, ≥ 5 s apart; fades ≤ 5 s.
-    - A balance tripwire: a scripted headless defender (no god mode) clears waves 6, 9 and 12 under every mutation and takes at most 1.6× the unmutated damage + 20.
+    - A survival tripwire: a scripted headless defender that clears the unmutated waves 6, 9 and 12 unhurt (10 seeds each, no healing) must clear every mutated one without dying. The first version (at most 1.6× the unmutated damage + 20) was vacuous: its defender was never hit. With a defender that can be hurt, the damage ratio proved chaotic (a defender that cannot move either shrugs a wave off or is overwhelmed), so survival is what is checked. It failed HUNGER ×1.2 (1 death in 10). HIVE at ×1.3 with two +2 surges passed but hurt the defender most and killed a slightly slower one in 3 of 10 runs. Pass-1 values were lowered to HUNGER ×1.15 and HIVE ×1.2 with one +1 surge (BALANCING §2.15).
 13. **O-10 updated: no flashlight in Phase 7.** BLACKOUT is playable with the emergency lamps and their pools of light, the muzzle flash lighting the scene, and eyeshine. Revisit after a hands-on playtest.
 14. **Debug (development only):** `mutation()`, `mutations()`, `triggerMutation(id)` (replaces the stub), `startWave(n, id?)`, `clearMutation()`, `setMutations(bool)`, `mutationSchedule(from?, to?, seed?)`, `staticBurst()`, and an overlay line (`mutation STATIC active · burst in 3.2 s`).
 

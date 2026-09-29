@@ -35,7 +35,7 @@ describe('mutations in the generator: invariants for every v1 mutation', () => {
             def.spawns.every((s) => DEFAULT_ROSTER.includes(s.archetype)),
             where,
           ).toBe(true);
-          const expectedBudget = id === 'HIVE' ? Math.round(waveBudget(n) * 1.3) : waveBudget(n);
+          const expectedBudget = id === 'HIVE' ? Math.round(waveBudget(n) * 1.2) : waveBudget(n);
           expect(def.enemyBudget, where).toBe(expectedBudget);
           expect(def.enemyBudget / waveBudget(n), where).toBeLessThanOrEqual(
             WAVE_RULES.modifierClamp.budget[1] + 0.05,
@@ -70,13 +70,13 @@ describe('mutations in the generator: invariants for every v1 mutation', () => {
 });
 
 describe('HIVE: a bigger wave that surges in', () => {
-  it('two surges at 40 % and 75 % of the queue, groups up to the wave’s largest + 2 (≤ 6)', () => {
+  it('one surge halfway through the queue, a group up to the wave’s largest + 1 (≤ 6)', () => {
     for (const n of [7, 10, 15, 19, 30]) {
       const def = generateWave(n, { seed: 'hive', mutation: 'HIVE' });
       const groupMax = def.groupSize.max;
-      expect(def.surges.map((s) => s.at)).toEqual([0.4, 0.75]);
+      expect(def.surges.map((s) => s.at)).toEqual([0.5]);
       for (const s of def.surges) {
-        expect(s.size).toBe(Math.min(6, groupMax + 2));
+        expect(s.size).toBe(Math.min(6, groupMax + 1));
         expect(s.size).toBeLessThanOrEqual(WAVE_RULES.modifierClamp.surges.groupSize);
         expect(s.warning).toBe(2);
       }

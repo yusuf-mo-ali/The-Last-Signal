@@ -81,15 +81,15 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
   HUNGER: {
     id: 'HUNGER',
     name: 'Hunger',
-    rule: 'Zombies move 20 % faster.',
+    rule: 'Zombies move 15 % faster.',
     hint: 'Keep your distance and a way out.',
     status: 'enabled',
     minWave: 4,
     weights: tiers(1.2, 1, 1),
     accent: '#ff9f43',
     effects: [
-      { kind: 'stat', target: 'enemy.moveSpeed', op: 'mul', value: 1.2 },
-      { kind: 'stat', target: 'enemy.acceleration', op: 'mul', value: 1.2 },
+      { kind: 'stat', target: 'enemy.moveSpeed', op: 'mul', value: 1.15 },
+      { kind: 'stat', target: 'enemy.acceleration', op: 'mul', value: 1.15 },
     ],
   },
   STATIC: {
@@ -138,7 +138,7 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
   HIVE: {
     id: 'HIVE',
     name: 'Hive',
-    rule: 'The horde is bigger and surges in twice.',
+    rule: 'The horde is bigger and surges in at once midway.',
     hint: 'Watch for the surge warning and turn to face it.',
     status: 'enabled',
     minWave: 7,
@@ -147,8 +147,8 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
     effects: [
       {
         kind: 'spawnRule',
-        composition: { budgetMultiplier: 1.3 },
-        surges: { at: [0.4, 0.75], extraGroupSize: 2, warning: 2 },
+        composition: { budgetMultiplier: 1.2 },
+        surges: { at: [0.5], extraGroupSize: 1, warning: 2 },
       },
     ],
   },

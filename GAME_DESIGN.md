@@ -367,11 +367,11 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 
 | Mutation | First wave | What the player reads (rule · hint) | What it does |
 |---|---|---|---|
-| **HUNGER** | 4 | "Zombies move 20 % faster." · "Keep your distance and a way out." | Enemy speed and acceleration ×1.2 while the wave is live. Never above max(the enemy's own speed, 90 % of the player's sprint): the player can always outrun a Walker, a Tank or a Screamer, and a Runner stays below the sprint. The Runner's leap is unchanged |
+| **HUNGER** | 4 | "Zombies move 15 % faster." · "Keep your distance and a way out." | Enemy speed and acceleration ×1.15 while the wave is live. Never above max(the enemy's own speed, 90 % of the player's sprint): the player can always outrun a Walker, a Tank or a Screamer, and a Runner stays below the sprint. The Runner's leap is unchanged |
 | **BLACKOUT** | 4 | "The lights are failing; only the red emergency lights stay on." · "Hold the lit zones. Your muzzle flash lights the way." | The lights fade to about a third over the announcement; three red emergency lights come on; each shot lights the area; enemy eyes glow. The fog distance and the HUD are untouched. The light comes back during the breather |
 | **DEATH CRY** (id `SCREAM`) | 5 | "Every kill cries out: zombies nearby surge at you." · "Kill them apart, or from range." | Each death alerts enemies within 8 m and hurries them (×1.2 for 2.5 s). A small red ring at the body shows its reach. It never brings more zombies |
 | **STATIC** | 6 | "Signal interference breaks up your view now and then." · "Your crosshair and HUD stay clear. Keep tracking through it." | Bursts of interference every 6–10 s, each 0.4–0.7 s, the first ≥ 4 s into the wave. The layer is under the HUD, at most 26 % opaque and nearly clear around the crosshair; it jitters at most 3 times a second and not at all with reduced motion. The badge flickers with each burst |
-| **HIVE** | 7 | "The horde is bigger and surges in twice." · "Watch for the surge warning and turn to face it." | 30 % more threat budget (the same concurrency cap, so a longer wave) and two surges at 40 % and 75 % of the wave: "HIVE SURGE · EAST" and an arrow warn 2 s before a bigger group (up to 6) arrives there |
+| **HIVE** | 7 | "The horde is bigger and surges in at once midway." · "Watch for the surge warning and turn to face it." | 20 % more threat budget (the same concurrency cap, so a longer wave) and a surge halfway through: "HIVE SURGE · EAST" and an arrow warn 2 s before a bigger group (one more than the wave's largest, up to 6) arrives there |
 | **BLOOD MOON** | 9 | "Elite zombies are far more common." · "Fewer, tougher enemies: pick your targets." | A red sky; the Elite chance +15 %, one more Elite allowed (more on later waves), and at least one Elite. The budget stays the same: fewer, tougher enemies. Before wave 13 it is the only way to meet Elites. The badge counts them ("ELITES ×2") |
 
 **Selection.** A mutation's first wave must have come. The previous wave's mutation is never repeated, and two sight mutations (BLACKOUT, STATIC) never follow each other. A mutation seen in the last three waves is less likely.
@@ -390,7 +390,7 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 **Guardrails.** A mutation can never make a wave silently impossible or unfair:
 - it never changes the concurrency cap, the spawn distance or view rule, the damage window (none in the announcement or breather), unlocks or the roster;
 - speeds, budgets, surges, Elites, alarm reach and haste, darkness and interference strength are all capped, in the data and again when applied;
-- a scripted test player clears waves 6, 9 and 12 under every mutation, taking at most 1.6× the damage of the same wave without one.
+- a scripted test player that clears waves 6, 9 and 12 unhurt without a mutation must also clear them under every mutation without dying (10 seeds each). It led to a gentler HUNGER (15 %) and HIVE (one surge).
 
 ---
 

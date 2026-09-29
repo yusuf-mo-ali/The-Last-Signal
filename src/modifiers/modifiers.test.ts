@@ -194,8 +194,8 @@ describe('EffectRouter', () => {
   it('routes each kind: HUNGER to stats, SCREAM to triggers, BLACKOUT to the environment, STATIC to the screen', () => {
     const t = router();
     t.router.apply('mutation:HUNGER', MUTATIONS.HUNGER.effects);
-    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.2);
-    expect(t.stats.multiplier('enemy.acceleration')).toBeCloseTo(1.2);
+    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.15);
+    expect(t.stats.multiplier('enemy.acceleration')).toBeCloseTo(1.15);
     t.router.apply('mutation:SCREAM', MUTATIONS.SCREAM.effects);
     t.triggers.dispatch('enemy:died', { id: 'w', position: [0, 0, 0] });
     expect(t.cries).toEqual([8]);
@@ -231,7 +231,7 @@ describe('EffectRouter', () => {
     expect(t.stats.sources()).toEqual([]); // HUNGER has no environment effect
     t.router.apply('mutation:HUNGER', MUTATIONS.HUNGER.effects, { kinds: ['stat'] });
     t.router.apply('mutation:HUNGER', MUTATIONS.HUNGER.effects, { kinds: ['stat'] }); // idempotent
-    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.2);
+    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.15);
     t.router.remove('mutation:HUNGER', { kinds: ['stat'] });
     expect(t.stats.sources()).toEqual([]);
   });

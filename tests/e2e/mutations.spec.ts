@@ -339,7 +339,7 @@ test.describe('mutations (development build)', () => {
     await play(page);
     await startActive(page, 12, 'HIVE');
     const start = await wave(page);
-    expect(start.surges).toMatchObject({ done: 0, total: 2, pending: null });
+    expect(start.surges).toMatchObject({ done: 0, total: 1, pending: null });
 
     let cue = '';
     let region = '';
