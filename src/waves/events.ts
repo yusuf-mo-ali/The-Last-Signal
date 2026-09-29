@@ -5,7 +5,7 @@
  */
 
 import type { EnemyModifierId, ImplementedEnemyId } from '../config/enemies';
-import type { WaveDefinition } from '../config/waves';
+import type { SpawnRegionId, WaveDefinition } from '../config/waves';
 import type { RunStatsSnapshot } from './RunStats';
 
 export interface WaveEvents {
@@ -48,6 +48,24 @@ export interface WaveEvents {
   reinforcementsPulled: {
     readonly wave: number;
     readonly alarmSourceId: string;
+    readonly count: number;
+  };
+  /** A surge (D-045, e.g. HIVE) is coming: from this region, in `arrivesIn` seconds. */
+  surgeWarning: {
+    readonly wave: number;
+    readonly index: number;
+    readonly region: SpawnRegionId;
+    readonly pointId: string;
+    /** Up to this many (never more than the room under the wave's cap when it arrives). */
+    readonly size: number;
+    readonly arrivesIn: number;
+  };
+  /** The surge arrived. */
+  surgeSpawned: {
+    readonly wave: number;
+    readonly index: number;
+    readonly region: SpawnRegionId;
+    readonly pointId: string;
     readonly count: number;
   };
 }

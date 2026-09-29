@@ -21,7 +21,7 @@
 import { Vector3 } from 'three';
 import type { CombatEvents } from '../combat/CombatSystem';
 import type { ImplementedEnemyId } from '../config/enemies';
-import type { MutationId } from '../config/mutations';
+import { MUTATIONS, type MutationId } from '../config/mutations';
 import {
   WAVE_RULES,
   type CompositionModifier,
@@ -83,6 +83,14 @@ export interface WaveStatus {
   readonly activeTime: number;
   readonly endless: boolean;
   readonly spawningPaused: boolean;
+  /** The wave's Signal Mutation (D-045), if any. */
+  readonly mutation: MutationId | null;
+  /** Surges (extra spawn events): done of total, and one announced but not arrived yet. */
+  readonly surges: {
+    readonly done: number;
+    readonly total: number;
+    readonly pending: { readonly region: SpawnRegionId; readonly arrivesIn: number } | null;
+  };
 }
 
 const _dir = new Vector3();
@@ -94,6 +102,8 @@ export class WaveManager implements FixedUpdateSystem {
   endless: boolean;
   /** Debug: no new spawns (the wave still completes when its enemies are gone). */
   spawningPaused = false;
+  /** Debug: when false, waves carry no mutation. */
+  mutationsEnabled = true;
 
   private readonly options: WaveManagerOptions;
   private readonly rules: WaveRules;
@@ -119,7 +129,16 @@ export class WaveManager implements FixedUpdateSystem {
   private lastKillAt = 0;
   private pulled: { sourceId: string; region: SpawnRegionId } | null = null;
   /** The mutations this run has met, in order (the selector never repeats the last). */
-  private readonly mutationHistory: MutationId[] = [];
+  private mutationLog: { readonly wave: number; readonly id: MutationId }[] = [];
+  /** Debug: the next generated wave's mutation ('none': no mutation). */
+  private forcedMutation: MutationId | 'none' | null = null;
+  /** The next surge of the wave (index into `definition.surges`), and one announced. */
+  private surgeIndex = 0;
+  private surgePending: {
+    readonly region: SpawnRegionId;
+    readonly pointId: string;
+    readonly readyAt: number;
+  } | null = null;
   /** Debug: the wave to start next (a jump), and whether to skip the completion. */
   private jumpTo: number | null = null;
   private skipping = false;
@@ -172,7 +191,23 @@ export class WaveManager implements FixedUpdateSystem {
       activeTime: this.activeTime,
       endless: this.endless,
       spawningPaused: this.spawningPaused,
+      mutation: this.def?.mutation ?? null,
+      surges: {
+        done: this.surgeIndex,
+        total: this.def?.surges.length ?? 0,
+        pending: this.surgePending
+          ? {
+              region: this.surgePending.region,
+              arrivesIn: Math.max(0, this.surgePending.readyAt - this.activeTime),
+            }
+          : null,
+      },
     };
+  }
+
+  /** The mutations this run has met so far, by wave. */
+  get mutations(): readonly { readonly wave: number; readonly id: MutationId }[] {
+    return this.mutationLog;
   }
 
   /** Whether `id` is one of the current wave's living enemies. */
@@ -267,7 +302,8 @@ export class WaveManager implements FixedUpdateSystem {
     this.rng = new Rng(`${this.runSeed}:spawns`);
     this.options.spawns.reset(new Rng(`${this.runSeed}:spawn-points`));
     this.stats.reset();
-    this.mutationHistory.length = 0;
+    this.mutationLog = [];
+    this.forcedMutation = null;
     this.waveNumber = 0;
     this.def = null;
     this.head = 0;
@@ -295,6 +331,7 @@ export class WaveManager implements FixedUpdateSystem {
         break;
       case 'WAVE_ACTIVE':
         this.activeTime += dt;
+        this.surgeDue();
         this.spawnDue();
         this.checkStragglers();
         if (this.def && this.head >= this.def.spawns.length && this.alive.size === 0) {
@@ -315,11 +352,17 @@ export class WaveManager implements FixedUpdateSystem {
   // ---- debug controls --------------------------------------------------------------------------
 
   /** Jumps to wave `n` (its intro starts now); the current wave's enemies are removed. */
-  startWave(n: number): boolean {
+  startWave(n: number, mutation?: MutationId | 'none'): boolean {
     const { state } = this.options;
     const wave = Math.max(1, Math.floor(n));
     if (!this.attached || !Number.isFinite(n)) {
       return false;
+    }
+    if (mutation !== undefined) {
+      if (mutation !== 'none' && MUTATIONS[mutation].status !== 'enabled') {
+        return false;
+      }
+      this.forcedMutation = mutation;
     }
     switch (state.current) {
       case 'WAVE_START':
@@ -342,6 +385,23 @@ export class WaveManager implements FixedUpdateSystem {
       default:
         return false;
     }
+  }
+
+  /**
+   * Debug: gives a wave `mutation` ('none': no mutation). During the intro the current wave is
+   * generated again with it; otherwise the next wave gets it. Deferred mutations are refused.
+   */
+  forceMutation(mutation: MutationId | 'none'): boolean {
+    if (!this.attached || (mutation !== 'none' && MUTATIONS[mutation].status !== 'enabled')) {
+      return false;
+    }
+    this.forcedMutation = mutation;
+    if (this.options.state.current === 'WAVE_START') {
+      this.jumpTo = this.waveNumber;
+      this.clearWave();
+      this.beginWave();
+    }
+    return true;
   }
 
   /** Clears the current wave now: nothing more spawns, its enemies die. Returns how many. */
@@ -375,14 +435,23 @@ export class WaveManager implements FixedUpdateSystem {
     this.waveNumber = this.jumpTo ?? this.waveNumber + 1;
     this.jumpTo = null;
     this.skipping = false;
-    const mutation = selectMutation(
-      this.waveNumber,
-      this.mutationHistory,
-      mutationRng(this.runSeed, this.waveNumber),
-    );
+    // A wave generated again (a debug jump within the intro) forgets its earlier mutation.
+    this.mutationLog = this.mutationLog.filter((m) => m.wave !== this.waveNumber);
+    const forced = this.forcedMutation;
+    this.forcedMutation = null;
+    const mutation =
+      forced === 'none' || !this.mutationsEnabled
+        ? null
+        : (forced ??
+          selectMutation(
+            this.waveNumber,
+            this.mutationLog.map((m) => m.id),
+            mutationRng(this.runSeed, this.waveNumber),
+          ));
     if (mutation) {
-      this.mutationHistory.push(mutation);
+      this.mutationLog.push({ wave: this.waveNumber, id: mutation });
     }
+    this.stats.recordMutation(this.waveNumber, mutation);
     const def = generateWave(
       this.waveNumber,
       { seed: this.runSeed, modifiers: this.options.modifiers?.() ?? [], mutation },
@@ -390,6 +459,8 @@ export class WaveManager implements FixedUpdateSystem {
     );
     this.def = def;
     this.head = 0;
+    this.surgeIndex = 0;
+    this.surgePending = null;
     this.alive.clear();
     this.spawnedCount = 0;
     this.killedCount = 0;
@@ -465,16 +536,10 @@ export class WaveManager implements FixedUpdateSystem {
       def.spawns.length - this.head,
       room,
     );
-    const group = def.spawns.slice(this.head, this.head + size);
     const relaxed = this.deferredFor >= this.rules.spawn.relaxAfter - 1e-9;
     const bias = this.pulled ? [...def.spawnBias, this.pulled.region] : def.spawnBias;
-    const pick = this.options.spawns.pick(
-      group.map((s) => s.archetype),
-      this.options.viewer(),
-      bias,
-      relaxed,
-    );
-    if (!pick) {
+    const result = this.spawnGroup(size, bias, relaxed);
+    if (!result) {
       this.deferredFor += this.rules.spawn.retryInterval;
       this.nextGroupAt = this.activeTime + this.rules.spawn.retryInterval;
       if (!this.deferredNotified) {
@@ -482,6 +547,46 @@ export class WaveManager implements FixedUpdateSystem {
         this.events.emit('spawnDeferred', { wave: this.waveNumber, reason: 'noPoint' });
       }
       return;
+    }
+    const { spawned } = result;
+    this.deferredFor = 0;
+    this.deferredNotified = false;
+    this.nextGroupAt = this.activeTime + Math.max(1, spawned) / def.spawnRate;
+    if (this.pulled && spawned > 0) {
+      this.events.emit('reinforcementsPulled', {
+        wave: this.waveNumber,
+        alarmSourceId: this.pulled.sourceId,
+        count: spawned,
+      });
+      this.pulled = null;
+    }
+  }
+
+  /**
+   * Spawns the next `size` queued enemies around one fair spawn point (never more than the room
+   * under `maxAlive`, which the caller checked; the living cap is checked again per enemy).
+   * Returns null when no point is eligible.
+   */
+  private spawnGroup(
+    size: number,
+    bias: readonly SpawnRegionId[],
+    relaxed: boolean,
+    prefer?: SpawnRegionId,
+  ): { spawned: number; pointId: string; region: SpawnRegionId } | null {
+    const def = this.def;
+    if (!def || size <= 0) {
+      return null;
+    }
+    const group = def.spawns.slice(this.head, this.head + size);
+    const pick = this.options.spawns.pick(
+      group.map((s) => s.archetype),
+      this.options.viewer(),
+      bias,
+      relaxed,
+      prefer,
+    );
+    if (!pick) {
+      return null;
     }
     const target = this.options.target();
     let spawned = 0;
@@ -517,18 +622,82 @@ export class WaveManager implements FixedUpdateSystem {
     if (pick.relaxed) {
       this.stats.relaxedSpawns++;
     }
-    this.deferredFor = 0;
-    this.deferredNotified = false;
-    this.nextGroupAt = this.activeTime + Math.max(1, spawned) / def.spawnRate;
-    if (this.pulled && spawned > 0) {
-      this.events.emit('reinforcementsPulled', {
-        wave: this.waveNumber,
-        alarmSourceId: this.pulled.sourceId,
-        count: spawned,
-      });
-      this.pulled = null;
-    }
     this.progress();
+    return { spawned, pointId: pick.point.id, region: pick.point.region };
+  }
+
+  /**
+   * Surges (D-045; e.g. HIVE): when the queue reaches a surge's point, it is announced (with the
+   * region it will come from), and after its warning a bigger group arrives there. Same spawn
+   * rules as any group; never above `maxAlive` (it waits for room and brings only what fits).
+   */
+  private surgeDue(): void {
+    const def = this.def;
+    const surge = def?.surges[this.surgeIndex];
+    if (!def || !surge || this.spawningPaused) {
+      return;
+    }
+    const queued = def.spawns.length - this.head;
+    if (!this.surgePending) {
+      if (queued <= 0 || this.head / def.spawns.length < surge.at - 1e-9) {
+        return;
+      }
+      // Announce it: where it will come from is decided now, from what is eligible now.
+      const lead = def.spawns[this.head]?.archetype ?? 'walker';
+      const viewer = this.options.viewer();
+      const points = this.options.spawns.all.filter(
+        (p) => this.options.spawns.status(p, viewer, lead) === 'eligible',
+      );
+      const point = points.length > 0 ? points[this.rng.int(0, points.length - 1)] : undefined;
+      if (!point) {
+        return; // nothing eligible: try again next step
+      }
+      this.surgePending = {
+        region: point.region,
+        pointId: point.id,
+        readyAt: this.activeTime + surge.warning,
+      };
+      this.events.emit('surgeWarning', {
+        wave: this.waveNumber,
+        index: this.surgeIndex,
+        region: point.region,
+        pointId: point.id,
+        size: Math.min(surge.size, queued),
+        arrivesIn: surge.warning,
+      });
+      return;
+    }
+    if (this.activeTime + 1e-9 < this.surgePending.readyAt) {
+      return;
+    }
+    if (queued <= 0) {
+      // The queue ran out before it arrived: nothing left to surge.
+      this.surgeIndex++;
+      this.surgePending = null;
+      return;
+    }
+    const room = def.maxAlive - this.alive.size;
+    if (room <= 0) {
+      return; // waits for room; never over the cap
+    }
+    const pending = this.surgePending;
+    const result = this.spawnGroup(Math.min(surge.size, queued, room), [], false, pending.region);
+    if (!result) {
+      return; // no eligible point this step: try again
+    }
+    this.events.emit('surgeSpawned', {
+      wave: this.waveNumber,
+      index: this.surgeIndex,
+      region: result.region,
+      pointId: result.pointId,
+      count: result.spawned,
+    });
+    this.surgeIndex++;
+    this.surgePending = null;
+    this.nextGroupAt = Math.max(
+      this.nextGroupAt,
+      this.activeTime + Math.max(1, result.spawned) / def.spawnRate,
+    );
   }
 
   /** An alarm pulls the next queued group forward, toward the alarm (no extra budget). */

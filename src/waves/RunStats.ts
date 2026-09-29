@@ -5,6 +5,7 @@
  */
 
 import type { EnemyArchetypeId } from '../config/enemies';
+import type { MutationId } from '../config/mutations';
 
 export interface RunStatsSnapshot {
   /** The wave in progress (or last reached). */
@@ -21,6 +22,11 @@ export interface RunStatsSnapshot {
   readonly relaxedSpawns: number;
   /** Stragglers moved to fresh spawn points. */
   readonly stragglersMoved: number;
+  /**
+   * Each wave's Signal Mutation (D-045), for the end screens, rewards and the adaptive profile
+   * (which discounts what a mutation caused).
+   */
+  readonly mutations: readonly { readonly wave: number; readonly id: MutationId | null }[];
 }
 
 export class RunStats {
@@ -34,6 +40,7 @@ export class RunStats {
   readonly waveTimes: number[] = [];
   relaxedSpawns = 0;
   stragglersMoved = 0;
+  mutations: { readonly wave: number; readonly id: MutationId | null }[] = [];
 
   reset(): void {
     this.waveReached = 0;
@@ -46,6 +53,12 @@ export class RunStats {
     this.waveTimes.length = 0;
     this.relaxedSpawns = 0;
     this.stragglersMoved = 0;
+    this.mutations = [];
+  }
+
+  /** The mutation wave `wave` carries (a wave generated again replaces its entry). */
+  recordMutation(wave: number, id: MutationId | null): void {
+    this.mutations = [...this.mutations.filter((m) => m.wave !== wave), { wave, id }];
   }
 
   recordKill(archetype: EnemyArchetypeId, elite: boolean): void {
@@ -68,6 +81,7 @@ export class RunStats {
       waveTimes: [...this.waveTimes],
       relaxedSpawns: this.relaxedSpawns,
       stragglersMoved: this.stragglersMoved,
+      mutations: [...this.mutations],
     };
   }
 }

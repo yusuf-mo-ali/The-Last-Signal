@@ -129,15 +129,21 @@ export class SpawnDirector {
     viewer: SpawnViewer,
     bias: readonly SpawnRegionId[] = [],
     relaxView = false,
+    /**
+     * Only points in this region, if any there is eligible (a surge arriving from the side it was
+     * announced on); otherwise any eligible point, as usual. Never relaxes the rules.
+     */
+    prefer?: SpawnRegionId,
   ): SpawnPick | null {
     const s = this.rules.spawn;
+    const lead = group[0] ?? 'walker';
+    const eligible = this.points.filter(
+      (point) => this.status(point, viewer, lead, relaxView) === 'eligible',
+    );
+    const preferred = prefer ? eligible.filter((p) => p.region === prefer) : [];
     const options: { point: SpawnPointDefinition; weight: number }[] = [];
     let total = 0;
-    for (const point of this.points) {
-      const lead = group[0] ?? 'walker';
-      if (this.status(point, viewer, lead, relaxView) !== 'eligible') {
-        continue;
-      }
+    for (const point of preferred.length > 0 ? preferred : eligible) {
       const [x, , z] = point.position;
       const d = Math.hypot(x - viewer.eye.x, z - viewer.eye.z);
       let weight =
