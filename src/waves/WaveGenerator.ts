@@ -28,8 +28,8 @@ import {
   type EnemyModifierId,
   type ImplementedEnemyId,
 } from '../config/enemies';
-import type { MutationId } from '../config/mutations';
-import { applyTraits } from '../config/traits';
+import { MUTATIONS, type MutationId } from '../config/mutations';
+import { applyTraits, normalizeTraits } from '../config/traits';
 import {
   FINAL_WAVE,
   ROTATING_THEMES,
@@ -39,6 +39,7 @@ import {
   type WaveDefinition,
   type WaveRules,
   type WaveSpawn,
+  type WaveSurge,
   type WaveThemeId,
 } from '../config/waves';
 import { Rng } from '../utils/Rng';
@@ -105,7 +106,12 @@ export function generateWave(
 ): WaveDefinition {
   const wave = waveIndex(n);
   const rng = new Rng(`${context.seed}:wave:${wave}`);
-  const modifiers = context.modifiers ?? [];
+  // The wave's mutation shapes it through the same channel as every other influence (D-045).
+  const modifiers = [
+    ...(context.modifiers ?? []),
+    ...mutationModifiers(context.mutation ?? null, wave),
+  ];
+  const fromMutations = modifiers.filter((m) => m.source === 'mutation');
   const roster = context.roster ?? DEFAULT_ROSTER;
   const tier = waveTier(wave);
   const theme = waveTheme(wave, context.seed);
@@ -169,7 +175,19 @@ export function generateWave(
     const p = traitChance(t, wave, rules) + clamp(extra, [-limit, limit]);
     chances.set(t, Math.min(1, Math.max(0, p)));
   }
-  const elitesAllowed = eliteMax(wave, rules);
+  // Mutations only: a higher Elite limit and a guaranteed minimum (BLOOD MOON).
+  const eliteBonus = clamp(
+    fromMutations.reduce((sum, m) => sum + (m.eliteMaxBonus ?? 0), 0),
+    [0, rules.modifierClamp.eliteMaxBonus],
+  );
+  const elitesAllowed = eliteMax(wave, rules) + eliteBonus;
+  const eliteMinimum = Math.min(
+    elitesAllowed,
+    clamp(
+      fromMutations.reduce((most, m) => Math.max(most, m.eliteMinimum ?? 0), 0),
+      [0, rules.modifierClamp.eliteMinimum],
+    ),
+  );
   let elites = 0;
 
   const spawns: WaveSpawn[] = [];
@@ -259,6 +277,39 @@ export function generateWave(
       break;
     }
   }
+  // A guaranteed Elite minimum: promote plain Walkers, making room by dropping others if needed
+  // (the budget never grows for it).
+  while (elites < eliteMinimum) {
+    let index = spawns.findIndex((sp) => sp.archetype === 'walker' && !sp.traits.includes('elite'));
+    const target = spawns[index];
+    if (!target) {
+      break;
+    }
+    const traits = normalizeTraits([...target.traits, 'elite']);
+    const cost = spawnCost('walker', traits);
+    const delta = cost - target.cost;
+    while (remaining + EPSILON < delta) {
+      const drop = spawns.findLastIndex(
+        (sp, k) => k !== index && sp.archetype === 'walker' && sp.traits.length === 0,
+      );
+      const dropped = spawns[drop];
+      if (!dropped) {
+        break;
+      }
+      spawns.splice(drop, 1);
+      counts.set('walker', (counts.get('walker') ?? 1) - 1);
+      remaining += dropped.cost;
+      if (drop < index) {
+        index--;
+      }
+    }
+    if (remaining + EPSILON < delta) {
+      break;
+    }
+    spawns[index] = { archetype: 'walker', traits, cost };
+    remaining -= delta;
+    elites++;
+  }
   while (remaining >= 1 - EPSILON && add('walker', false)) {
     // the remainder
   }
@@ -303,6 +354,23 @@ export function generateWave(
   }
   const groupMax =
     waveGroupMax(wave, rules) + (theme === 'ambush' ? rules.groupSize.ambushBonus : 0);
+  // Surges (mutations only, e.g. HIVE): bigger groups at set points of the queue, clamped.
+  const surgeClamp = rules.modifierClamp.surges;
+  const surgeRule = fromMutations.find((m) => m.surges)?.surges;
+  const surges: WaveSurge[] = surgeRule
+    ? [...surgeRule.at]
+        .filter((at) => at > 0 && at < 1)
+        .sort((a, b) => a - b)
+        .slice(0, surgeClamp.count)
+        .map((at) => ({
+          at,
+          size: Math.min(
+            surgeClamp.groupSize,
+            groupMax + clamp(surgeRule.extraGroupSize, [0, surgeClamp.extraGroupSize]),
+          ),
+          warning: clamp(surgeRule.warning, surgeClamp.warning),
+        }))
+    : [];
   return {
     waveNumber: wave,
     enemyBudget: budget,
@@ -321,6 +389,38 @@ export function generateWave(
     groupSize: { min: 1, max: groupMax },
     spawnBias: [...spawnBias],
     modifiers,
-    surges: [],
+    surges,
   };
+}
+
+/**
+ * The composition modifier wave `n` gets from `mutation`'s spawn rules (none without one). Growth
+ * fields (an Elite bonus that rises with the wave) are resolved for `n` here.
+ */
+export function mutationModifiers(mutation: MutationId | null, n: number): CompositionModifier[] {
+  if (!mutation) {
+    return [];
+  }
+  const wave = waveIndex(n);
+  const out: CompositionModifier[] = [];
+  for (const effect of MUTATIONS[mutation].effects) {
+    if (effect.kind !== 'spawnRule') {
+      continue;
+    }
+    const c = effect.composition ?? {};
+    const growth =
+      c.eliteMaxBonusEvery !== undefined && c.eliteMaxBonusEvery > 0
+        ? Math.max(0, Math.floor((wave - (c.eliteMaxBonusFrom ?? wave)) / c.eliteMaxBonusEvery))
+        : 0;
+    out.push({
+      source: 'mutation',
+      ...(c.budgetMultiplier !== undefined ? { budgetMultiplier: c.budgetMultiplier } : {}),
+      ...(c.traitChance ? { traitChance: c.traitChance } : {}),
+      ...(c.archetypeWeights ? { archetypeWeights: c.archetypeWeights } : {}),
+      ...(c.eliteMaxBonus !== undefined ? { eliteMaxBonus: c.eliteMaxBonus + growth } : {}),
+      ...(c.eliteMinimum !== undefined ? { eliteMinimum: c.eliteMinimum } : {}),
+      ...(effect.surges ? { surges: effect.surges } : {}),
+    });
+  }
+  return out;
 }

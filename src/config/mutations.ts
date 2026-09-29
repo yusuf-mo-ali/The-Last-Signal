@@ -213,12 +213,10 @@ export const ENABLED_MUTATION_IDS: readonly MutationId[] = MUTATION_IDS.filter(
   (id) => MUTATIONS[id].status === 'enabled',
 );
 
-/** Selection rules (D-045). */
+/** Selection rules (D-045). The first waves and the final wave carry none (O-7). */
 export const MUTATION_RULES = {
   /** Mutations used within this many previous waves are less likely (the previous one never). */
   cooldownWaves: 3,
   /** Weight factor for a mutation used within `cooldownWaves`. */
   recentPenalty: 0.35,
-  /** The final wave carries no mutation (boss rules, O-7). */
-  finaleHasNone: true,
 } as const;

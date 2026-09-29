@@ -306,6 +306,6 @@ describe('wave generator: the modifier channel (future adaptive and mutation sys
     ];
     const def = generateWave(9, { seed: 's', modifiers });
     expect(def.spawnBias).toEqual(['east', 'north']);
-    expect(def.modifiers).toBe(modifiers);
+    expect(def.modifiers).toEqual(modifiers);
   });
 });

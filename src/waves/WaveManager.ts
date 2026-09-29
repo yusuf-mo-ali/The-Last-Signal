@@ -21,6 +21,7 @@
 import { Vector3 } from 'three';
 import type { CombatEvents } from '../combat/CombatSystem';
 import type { ImplementedEnemyId } from '../config/enemies';
+import type { MutationId } from '../config/mutations';
 import {
   WAVE_RULES,
   type CompositionModifier,
@@ -39,7 +40,7 @@ import { countDown } from '../weapons/timing';
 import type { WaveEvents } from './events';
 import { RunStats } from './RunStats';
 import type { SpawnDirector, SpawnViewer } from './SpawnDirector';
-import { selectMutation } from './WaveMutation';
+import { mutationRng, selectMutation } from './WaveMutation';
 import { generateWave } from './WaveGenerator';
 
 export interface WaveManagerOptions {
@@ -117,6 +118,8 @@ export class WaveManager implements FixedUpdateSystem {
   private lastProgress = 0;
   private lastKillAt = 0;
   private pulled: { sourceId: string; region: SpawnRegionId } | null = null;
+  /** The mutations this run has met, in order (the selector never repeats the last). */
+  private readonly mutationHistory: MutationId[] = [];
   /** Debug: the wave to start next (a jump), and whether to skip the completion. */
   private jumpTo: number | null = null;
   private skipping = false;
@@ -260,6 +263,7 @@ export class WaveManager implements FixedUpdateSystem {
     this.rng = new Rng(`${this.runSeed}:spawns`);
     this.options.spawns.reset(new Rng(`${this.runSeed}:spawn-points`));
     this.stats.reset();
+    this.mutationHistory.length = 0;
     this.waveNumber = 0;
     this.def = null;
     this.head = 0;
@@ -367,12 +371,14 @@ export class WaveManager implements FixedUpdateSystem {
     this.waveNumber = this.jumpTo ?? this.waveNumber + 1;
     this.jumpTo = null;
     this.skipping = false;
-    const previous = this.def?.mutation ?? null;
     const mutation = selectMutation(
       this.waveNumber,
-      previous,
-      new Rng(`${this.runSeed}:mutation:${this.waveNumber}`),
+      this.mutationHistory,
+      mutationRng(this.runSeed, this.waveNumber),
     );
+    if (mutation) {
+      this.mutationHistory.push(mutation);
+    }
     const def = generateWave(
       this.waveNumber,
       { seed: this.runSeed, modifiers: this.options.modifiers?.() ?? [], mutation },
