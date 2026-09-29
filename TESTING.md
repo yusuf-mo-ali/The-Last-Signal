@@ -143,7 +143,25 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
     - enemies: the speed cap ignored, the acceleration stat never read;
     - the effect runtime and environment: speed, death-cry radius and STATIC opacity unclamped, bursts closer than the photosensitivity limit, the blackout below its visibility floor, overlays blended out of priority order.
   - Phase 7 first run: 31 of 32. The survivor (the acceleration multiplier never read) had no direct test; a new one gives the two stats different multipliers and checks the enemy's ground acceleration and a leap's. Every file was restored byte-identically (hash-checked), in a separate git worktree.
-  - Phase 7, end-to-end: E2E_PLANTS
+  - Phase 7, end-to-end: E2E_RESULT of 14 planted presentation and wiring bugs were caught by `mutations.spec`, run in a separate git worktree (after a clean baseline run):
+    - the STATIC layer above the HUD or blocking the mouse;
+    - the badge, the intro card or the surge cue never shown;
+    - BLOOD MOON's badge counting the wrong trait;
+    - the badge not flickering with STATIC;
+    - the game-over prompt without the mutation;
+    - mutations never attached in normal play;
+    - the lighting not following the environment;
+    - a light added when a blackout starts (every lit shader recompiles);
+    - the death-cry and scream rings swapped;
+    - a screen pulse on death cries;
+    - the STATIC overlay lingering after its burst.
+
+    The first run found three gaps, each now fixed:
+    - A recompile can release old shader programs, so their count may not change; the check now compares program ids.
+    - The DEATH CRY Walkers stood outside the cry's 8 m, so a wrong pulse could never show.
+    - A STATIC burst could fall between two polls at software-rendering frame rates; the page now samples every frame.
+
+    Five plants first left an unused variable and failed the production build's type check (caught by the toolchain, not by the spec); they were rewritten to compile. One plant (the floor pools skipped by the start-up compile) was equivalent: `compile()` covers hidden objects anyway. It was replaced by the runtime light.
   - Phase 6: 45 of 45 wave-system mutations caught, across:
     - the curves: budget terms, the endless tail, max alive (and its endless cap), unlocks, caps, the trait ramp;
     - the generator: the Elite limit, extras from any source (the Climber path), adaptive budget changes, unclamped budget scale and weights, introductions, the Walker floor, the remainder, heavies in the opening, repeated themes, the finale's heavies, trait costs, the ambush bonus;
