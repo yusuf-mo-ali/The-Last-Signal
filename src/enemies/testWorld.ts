@@ -14,7 +14,7 @@ import { Hitscan } from '../weapons/hitscan';
 import { boxTriangles } from '../world/levels/geometry';
 import type { LevelDefinition } from '../world/levels/types';
 import type { PickupManager } from '../world/PickupManager';
-import { EnemyManager } from './EnemyManager';
+import { EnemyManager, type StatMultipliers } from './EnemyManager';
 import type { EnemyEvents } from './events';
 import type { EnemyHit, EnemyTarget } from './types';
 
@@ -91,6 +91,8 @@ export function enemyTestWorld(
     pickups?: PickupManager;
     level?: LevelDefinition;
     world?: CollisionWorld;
+    /** Effect multipliers on enemy locomotion (a mutation such as HUNGER). */
+    modifiers?: StatMultipliers;
   } = {},
 ) {
   const world = options.world ?? new CollisionWorld(TEST_WORLD_BRUSHES);
@@ -108,6 +110,7 @@ export function enemyTestWorld(
     rules: { ...ENEMY_RULES, ...options.rules },
     strict: true,
     ...(options.pickups ? { pickups: options.pickups } : {}),
+    ...(options.modifiers ? { modifiers: options.modifiers } : {}),
   });
   const events: Recorded[] = [];
   for (const type of [

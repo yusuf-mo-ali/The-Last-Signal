@@ -94,6 +94,8 @@ function release(enemy: Enemy, ctx: BrainContext): void {
     targetPosition: target ? [target.position.x, target.position.y, target.position.z] : null,
     alertDuration: ability?.alertDuration ?? 0,
     haste: ability ? { ...ability.haste } : null,
+    // The Screamer calls the horde in: the wave runtime pulls its next group forward (D-045).
+    reinforcements: true,
     time: ctx.now,
   });
 }

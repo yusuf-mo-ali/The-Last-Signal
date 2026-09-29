@@ -33,6 +33,7 @@
 import { Vector3 } from 'three';
 import type { CombatSystem, DamageProfile, KilledEvent } from '../combat/CombatSystem';
 import { DROP_TABLES } from '../config/drops';
+import { EFFECT_CLAMPS } from '../config/effects';
 import {
   ENEMY_RULES,
   enemyConfig,
@@ -41,6 +42,7 @@ import {
   type EnemyArchetypeId,
   type EnemyRules,
 } from '../config/enemies';
+import { PLAYER_MOVEMENT } from '../config/player';
 import { applyTraits, normalizeTraits, type EnemyConfig } from '../config/traits';
 import { EventBus } from '../core/EventBus';
 import type { FixedUpdateSystem } from '../core/Game';
@@ -87,7 +89,25 @@ export interface EnemyManagerOptions {
   readonly rules?: EnemyRules;
   /** Throw on illegal AI transitions (tests and dev builds). */
   readonly strict?: boolean;
+  /** Effect multipliers on enemy locomotion (a mutation such as HUNGER; D-045). */
+  readonly modifiers?: StatMultipliers;
+  /**
+   * No effect pushes an enemy above this speed unless it was already faster without it (D-045).
+   * Default: `EFFECT_CLAMPS.enemySpeedCapOfSprint` × the player's sprint speed.
+   */
+  readonly speedCap?: number;
 }
+
+/** Reads effect multipliers on stats (`StatRegistry`). */
+export interface StatMultipliers {
+  multiplier(stat: 'enemy.moveSpeed' | 'enemy.acceleration'): number;
+}
+
+/** An alarm to raise: who, what kind, where, how far, and the response it asks for. */
+export type AlarmRequest = Omit<AlarmEvent, 'time' | 'targetId' | 'targetPosition'> & {
+  /** The target it is about (default: the first living target, the player). */
+  readonly targetId?: string | null;
+};
 
 /** Counters for tests, debug tools and performance measurements. */
 export interface EnemyStats {
@@ -118,6 +138,8 @@ export class EnemyManager implements FixedUpdateSystem {
   private readonly pickups: PickupManager | undefined;
   private readonly rules: EnemyRules;
   private readonly strict: boolean;
+  private readonly modifiers: StatMultipliers | undefined;
+  private readonly speedCap: number;
   private readonly pools = new Map<EnemyArchetypeId, Pool<Enemy>>();
   private readonly byId = new Map<string, Enemy>();
   /** Registration order; replaced (not mutated) on change so iteration is always safe. */
@@ -143,6 +165,12 @@ export class EnemyManager implements FixedUpdateSystem {
     this.active = options.active;
     this.pickups = options.pickups;
     this.rules = options.rules ?? ENEMY_RULES;
+    this.modifiers = options.modifiers;
+    this.speedCap =
+      options.speedCap ??
+      PLAYER_MOVEMENT.walkSpeed *
+        PLAYER_MOVEMENT.sprintMultiplier *
+        EFFECT_CLAMPS.enemySpeedCapOfSprint;
     this.strict = options.strict ?? false;
     this.lines = new LineTester(options.world, this.rules);
     this.routes = options.level.navigation ? new RouteGraph(options.level.navigation) : null;
@@ -194,6 +222,36 @@ export class EnemyManager implements FixedUpdateSystem {
   /** Simulated seconds since the run began. */
   get now(): number {
     return this.simTime;
+  }
+
+  /** The speed no effect pushes an enemy above (unless it was already faster), m/s. */
+  get effectSpeedCap(): number {
+    return this.speedCap;
+  }
+
+  /**
+   * Raises an alarm now (D-043, D-045): emitted on `events`, and the nearby enemies respond at
+   * once. The Screamer's scream and the DEATH CRY mutation both go through here.
+   */
+  raiseAlarm(request: AlarmRequest): AlarmEvent {
+    const target =
+      request.targetId !== undefined && request.targetId !== null
+        ? this.targets().find((t) => t.id === request.targetId && t.isAlive())
+        : this.targets().find((t) => t.isAlive());
+    const alarm: AlarmEvent = {
+      sourceId: request.sourceId,
+      kind: request.kind,
+      reinforcements: request.reinforcements,
+      position: request.position,
+      radius: request.radius,
+      targetId: target?.id ?? null,
+      targetPosition: target ? [target.position.x, target.position.y, target.position.z] : null,
+      alertDuration: request.alertDuration,
+      haste: request.haste,
+      time: this.simTime,
+    };
+    this.events.emit('alarm', alarm);
+    return alarm;
   }
 
   get(id: string): Enemy | undefined {
@@ -397,6 +455,8 @@ export class EnemyManager implements FixedUpdateSystem {
     ctx.dt = dt;
     ctx.targets = this.targets();
     this.goalCache.clear();
+    const speedMultiplier = this.modifiers?.multiplier('enemy.moveSpeed') ?? 1;
+    const accelerationMultiplier = this.modifiers?.multiplier('enemy.acceleration') ?? 1;
 
     // 1–2. Decisions and exact timing.
     for (const enemy of list) {
@@ -412,6 +472,9 @@ export class EnemyManager implements FixedUpdateSystem {
         }
         continue;
       }
+      enemy.speedMultiplier = speedMultiplier;
+      enemy.accelerationMultiplier = accelerationMultiplier;
+      enemy.speedCap = this.speedCap;
       enemy.fsm.advance(dt);
       enemy.attackCooldown = countDown(enemy.attackCooldown, dt);
       enemy.replanTimer = countDown(enemy.replanTimer, dt);

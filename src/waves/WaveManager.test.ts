@@ -313,6 +313,7 @@ describe('WaveManager: alarms, stragglers and fallbacks', () => {
     h.t.manager.events.emit('alarm', {
       sourceId: 'screamer-x',
       kind: 'scream',
+      reinforcements: true,
       position: [20, 0, -20],
       radius: 18,
       targetId: 'player',

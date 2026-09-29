@@ -124,6 +124,14 @@ export class Enemy {
   /** A timed speed boost (an alarm's haste): the multiplier, until this sim time. */
   hasteMultiplier = 1;
   hasteUntil = Number.NEGATIVE_INFINITY;
+  /**
+   * Effect modifiers on its locomotion (a mutation such as HUNGER; D-045), set by the manager
+   * every step. They change its cruising speed and acceleration, never a lunge or a brake, and
+   * never push it above `speedCap` unless it was already faster without them.
+   */
+  speedMultiplier = 1;
+  accelerationMultiplier = 1;
+  speedCap = Number.POSITIVE_INFINITY;
   /** Backing away from its target (keeping its distance). */
   retreating = false;
 
@@ -179,10 +187,29 @@ export class Enemy {
     return this.movement.walkSpeed;
   }
 
-  /** Sets the motor's speed for this step from its config, the brain's scale and haste. */
+  /**
+   * Its cruising top speed at sim time `now` (no lunge): config × haste, with the effect
+   * multiplier. A boost never lifts it above `speedCap` unless it was already faster without it.
+   */
+  cruiseSpeed(now: number): number {
+    const plain = this.config.moveSpeed * this.haste(now);
+    const boosted = plain * this.speedMultiplier;
+    return this.speedMultiplier > 1 ? Math.min(boosted, Math.max(plain, this.speedCap)) : boosted;
+  }
+
+  /**
+   * Sets the motor's speed for this step from its config, the brain's scale, haste and effect
+   * multipliers. A lunge (a scale other than 1) keeps its own speed, whatever the effects.
+   */
   applySpeed(now: number): void {
-    this.movement.walkSpeed = this.config.moveSpeed * this.speedScale * this.haste(now);
-    const acceleration = this.config.acceleration * this.accelerationScale;
+    this.movement.walkSpeed =
+      this.speedScale === 1
+        ? this.cruiseSpeed(now)
+        : this.config.moveSpeed * this.speedScale * this.haste(now);
+    const acceleration =
+      this.config.acceleration *
+      this.accelerationScale *
+      (this.accelerationScale === 1 ? this.accelerationMultiplier : 1);
     this.movement.groundAcceleration = acceleration;
     this.movement.groundDeceleration = acceleration * 1.5;
   }
@@ -256,6 +283,9 @@ export class Enemy {
     this.accelerationScale = 1;
     this.hasteMultiplier = 1;
     this.hasteUntil = Number.NEGATIVE_INFINITY;
+    this.speedMultiplier = 1;
+    this.accelerationMultiplier = 1;
+    this.speedCap = Number.POSITIVE_INFINITY;
     this.retreating = false;
     this.applySpeed(0);
     this.corpseTimer = 0;

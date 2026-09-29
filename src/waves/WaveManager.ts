@@ -221,7 +221,11 @@ export class WaveManager implements FixedUpdateSystem {
         }
       }),
       enemies.events.on('alarm', (alarm) => {
-        this.onAlarm(alarm.sourceId, alarm.position);
+        // Only an alarm that calls the horde in (a Screamer's scream) pulls a group forward; a
+        // DEATH CRY never does (D-045).
+        if (alarm.reinforcements) {
+          this.onAlarm(alarm.sourceId, alarm.position);
+        }
       }),
     );
     if (combat) {

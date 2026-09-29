@@ -314,7 +314,7 @@ export const meleeBrain: EnemyBrain = {
     // Out of a leap (landed, or knocked out of it), it plants its feet instead of sliding on.
     if (enemy.attackPhase !== 'lunge' && config.attack.lunge) {
       const v = enemy.motor.velocity;
-      if (Math.hypot(v.x, v.z) > config.moveSpeed * enemy.haste(ctx.now) * 1.05) {
+      if (Math.hypot(v.x, v.z) > enemy.cruiseSpeed(ctx.now) * 1.05) {
         enemy.accelerationScale = LANDING_BRAKE;
       }
     }

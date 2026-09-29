@@ -32,6 +32,10 @@ export class AlarmPulse {
     this.element.dataset.pulses = '0';
     container.appendChild(this.element);
     this.unsubscribe = events.on('alarm', (alarm) => {
+      // The screen pulse is the Screamer's scream only; a DEATH CRY shows at the corpse (D-045).
+      if (alarm.kind !== 'scream') {
+        return;
+      }
       const p = this.listener();
       const [x, y, z] = alarm.position;
       if (Math.hypot(p.x - x, p.z - z) <= alarm.radius && Math.abs(p.y - y) <= alarm.radius / 2) {

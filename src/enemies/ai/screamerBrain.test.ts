@@ -78,6 +78,7 @@ describe('Screamer: detection and the scream', () => {
       {
         sourceId: 'screamer-1',
         kind: 'scream',
+        reinforcements: true,
         position: [p.x, p.y, p.z],
         radius: ability.radius,
         targetId: 'player',
@@ -278,6 +279,7 @@ describe('the alarm’s prototype response (EnemyManager)', () => {
     t.manager.events.emit('alarm', {
       sourceId: 'somewhere',
       kind: 'scream',
+      reinforcements: true,
       position: [0, 0, 5],
       radius: 10,
       targetId: 'player',

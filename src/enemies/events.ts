@@ -13,16 +13,27 @@ export type TargetLossReason = 'dead' | 'range' | 'memory';
 export type AttackKind = 'strike' | 'scream';
 
 /**
+ * How an alarm was raised (D-043, D-045):
+ * - `scream`: a Screamer's telegraphed scream; it calls reinforcements (the wave pulls its next
+ *   group forward) and shakes the screen;
+ * - `deathCry`: the DEATH CRY mutation (id SCREAM): a dying enemy's short cry; smaller and briefer,
+ *   and it never calls reinforcements.
+ */
+export type AlarmKind = 'scream' | 'deathCry';
+
+/**
  * Something raised the alarm (D-043): a disturbance that tells whoever hears it where a target
- * is. Generic on purpose: listeners never need to know what raised it. The Screamer's scream is the
- * first source; the prototype response (nearby enemies told and hastened) is in `EnemyManager`,
- * and waves, signal mutations, the adaptive profile, audio and effects can listen too.
+ * is. Generic on purpose: listeners never need to know what raised it. The response (nearby
+ * enemies told and hastened) is in `EnemyManager`; waves, audio, effects and the adaptive profile
+ * can listen too, telling kinds apart by `kind` and `reinforcements`.
  */
 export interface AlarmEvent {
   /** Who raised it (an enemy id). */
   readonly sourceId: string;
   /** How it was raised. */
-  readonly kind: 'scream';
+  readonly kind: AlarmKind;
+  /** Whether it calls the horde in (the wave runtime pulls its next group forward). */
+  readonly reinforcements: boolean;
   /** Where it came from (feet) and how far it carries, metres. */
   readonly position: Vec3Tuple;
   readonly radius: number;
