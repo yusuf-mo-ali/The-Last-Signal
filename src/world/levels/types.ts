@@ -78,6 +78,19 @@ export interface SpawnPointDefinition {
   readonly tags?: readonly ('indoor' | 'elevated')[];
 }
 
+/**
+ * A light fixture that exists from load (D-022): the lighting controller only changes its
+ * intensity and colour. `emergency` fixtures light up red when the lights fail (BLACKOUT, D-045).
+ */
+export interface LevelLightDefinition {
+  readonly id: string;
+  readonly kind: 'emergency';
+  /** Where the lamp hangs (the light sits just in front of it, along `facing`). */
+  readonly position: Vec3;
+  /** Unit direction the lamp faces, horizontally (the wall it is mounted on is behind it). */
+  readonly facing: Vec3;
+}
+
 export interface LevelDefinition {
   readonly name: string;
   /** Where the player starts, standing on the ground, and the direction they face. */
@@ -89,4 +102,6 @@ export interface LevelDefinition {
   readonly navigation?: NavGraphDefinition;
   /** Where wave enemies enter; without any, waves cannot spawn. */
   readonly spawnPoints?: readonly SpawnPointDefinition[];
+  /** Light fixtures (D-022: all exist from load). */
+  readonly lights?: readonly LevelLightDefinition[];
 }

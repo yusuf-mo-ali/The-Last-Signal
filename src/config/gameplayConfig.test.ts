@@ -157,11 +157,11 @@ describe('gameplay config skeletons (plan §31)', () => {
   it('mutations: the plan’s eight, six in v1, using known effect kinds', () => {
     expect(MUTATION_IDS).toHaveLength(8);
     expect(Object.keys(MUTATIONS).sort()).toEqual([...MUTATION_IDS].sort());
-    expect(Object.values(MUTATIONS).filter((m) => m.inV1)).toHaveLength(6);
+    expect(Object.values(MUTATIONS).filter((m) => m.status === 'enabled')).toHaveLength(6);
     for (const mutation of Object.values(MUTATIONS)) {
-      expect(mutation.effectKinds.length).toBeGreaterThan(0);
-      for (const kind of mutation.effectKinds) {
-        expect(EFFECT_KINDS).toContain(kind);
+      expect(mutation.effects.length).toBeGreaterThan(0);
+      for (const effect of mutation.effects) {
+        expect(EFFECT_KINDS).toContain(effect.kind);
       }
     }
   });

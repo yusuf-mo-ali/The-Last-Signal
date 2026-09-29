@@ -8,6 +8,7 @@ import {
   FACILITY,
   FACILITY_BEACON_POSITION,
   FACILITY_HALF_SIZE,
+  FACILITY_LIGHTS,
   FACILITY_ROUTE,
 } from './facility';
 import { levelTriangles } from './geometry';
@@ -95,5 +96,29 @@ describe('FACILITY blockout', () => {
     const top = collision.raycast(new Vector3(x, y, z), new Vector3(0, -1, 0), 20);
     expect(top?.point.y).toBeCloseTo(7);
     expect(y - (top?.point.y ?? 0)).toBeGreaterThan(0.4);
+  });
+});
+
+describe('facility: emergency lamps (D-045)', () => {
+  it('three lamps in open air inside the map, each facing away from the wall behind it', () => {
+    expect(FACILITY.lights).toBe(FACILITY_LIGHTS);
+    expect(FACILITY_LIGHTS.map((l) => l.id)).toEqual([
+      'emergency-control',
+      'emergency-hall',
+      'emergency-tower',
+    ]);
+    for (const light of FACILITY_LIGHTS) {
+      const [x, y, z] = light.position;
+      expect(Math.abs(x), light.id).toBeLessThan(FACILITY_HALF_SIZE);
+      expect(Math.abs(z), light.id).toBeLessThan(FACILITY_HALF_SIZE);
+      expect(y, light.id).toBeGreaterThan(2.5);
+      const [fx, fy, fz] = light.facing;
+      expect(Math.hypot(fx, fy, fz), light.id).toBeCloseTo(1);
+      // Open air a metre in front of the lamp; a wall within a metre behind it.
+      const at = new Vector3(x, y, z);
+      const facing = new Vector3(fx, fy, fz);
+      expect(collision.raycast(at, facing, 1), light.id).toBeNull();
+      expect(collision.raycast(at, facing.clone().negate(), 1), light.id).not.toBeNull();
+    }
   });
 });

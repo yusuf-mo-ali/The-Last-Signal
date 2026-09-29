@@ -321,5 +321,6 @@ export function generateWave(
     groupSize: { min: 1, max: groupMax },
     spawnBias: [...spawnBias],
     modifiers,
+    surges: [],
   };
 }

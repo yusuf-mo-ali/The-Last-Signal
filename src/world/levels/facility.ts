@@ -21,6 +21,7 @@
 import type {
   Brush,
   LevelDefinition,
+  LevelLightDefinition,
   NavGraphDefinition,
   SpawnPointDefinition,
   SurfaceKind,
@@ -275,6 +276,16 @@ export const FACILITY_SPAWN_POINTS: readonly SpawnPointDefinition[] = [
   },
 ];
 
+/**
+ * Emergency lamps (D-045): off in normal lighting, red pools of light when the lights fail. One
+ * in the control room, one in the generator hall and one on the signal tower over the yard.
+ */
+export const FACILITY_LIGHTS: readonly LevelLightDefinition[] = [
+  { id: 'emergency-control', kind: 'emergency', position: [0, 3.25, -23.3], facing: [0, 0, 1] },
+  { id: 'emergency-hall', kind: 'emergency', position: [23.3, 3.2, -18], facing: [-1, 0, 0] },
+  { id: 'emergency-tower', kind: 'emergency', position: [0, 3.6, 1.3], facing: [0, 0, 1] },
+];
+
 export const FACILITY: LevelDefinition = {
   name: 'Facility (blockout)',
   spawn: { position: [0, 0, 14], yaw: 0 }, // facing the tower and its beacon
@@ -282,6 +293,7 @@ export const FACILITY: LevelDefinition = {
   brushes: [...perimeter, ...yard, ...controlRoom, ...eastWing, ...catwalk, ...loadingBay],
   navigation: FACILITY_NAVIGATION,
   spawnPoints: FACILITY_SPAWN_POINTS,
+  lights: FACILITY_LIGHTS,
 };
 
 /** Where the signal beacon sits: on top of the tower. */

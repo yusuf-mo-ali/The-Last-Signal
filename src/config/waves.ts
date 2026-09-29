@@ -10,6 +10,7 @@
 
 import type { BossId } from './bosses';
 import type { EnemyArchetypeId, EnemyModifierId, ImplementedEnemyId } from './enemies';
+import type { SurgeRule } from './effects';
 import type { MutationId } from './mutations';
 
 /** A standard run ends in victory after this wave (plan §42); the generator supports more (§13). */
@@ -92,6 +93,23 @@ export interface CompositionModifier {
   readonly budgetMultiplier?: number;
   /** Spawn regions to favour (flank spawns). */
   readonly spawnBias?: readonly SpawnRegionId[];
+  // ---- Mutations only (D-045; ignored from any other source, clamped by `modifierClamp`) ----
+  /** Raises the wave's Elite limit. */
+  readonly eliteMaxBonus?: number;
+  /** At least this many Elites, when the budget allows. */
+  readonly eliteMinimum?: number;
+  /** Extra spawn events (surges). */
+  readonly surges?: SurgeRule;
+}
+
+/** A surge scheduled in a wave: when the queue reaches `at`, a group of up to `size` arrives. */
+export interface WaveSurge {
+  /** Fraction of the wave's queue spawned (0–1). */
+  readonly at: number;
+  /** Largest group the surge brings (never above the room under `maxAlive`). */
+  readonly size: number;
+  /** Seconds of warning before it arrives. */
+  readonly warning: number;
 }
 
 /** Plan §13: what each generated wave contains, plus what the runtime needs to run it. */
@@ -124,6 +142,9 @@ export interface WaveDefinition {
   readonly spawnBias: readonly SpawnRegionId[];
   /** The modifiers that shaped it (for the future "SIGNAL ANALYSIS" line). */
   readonly modifiers: readonly CompositionModifier[];
+  // ---- Phase 7 (D-045) ----
+  /** Extra spawn events, in order (none without a surge mutation). */
+  readonly surges: readonly WaveSurge[];
 }
 
 /** A per-wave value that starts at `from`, rises by `perWave` and stops at `max`. */
@@ -191,6 +212,15 @@ export interface WaveRules {
     readonly weight: readonly [number, number];
     readonly traitChance: number;
     readonly budget: readonly [number, number];
+    /** Mutations only (D-045). */
+    readonly eliteMaxBonus: number;
+    readonly eliteMinimum: number;
+    readonly surges: {
+      readonly count: number;
+      readonly extraGroupSize: number;
+      readonly groupSize: number;
+      readonly warning: readonly [number, number];
+    };
   };
   /** Seconds of `WAVE_START` before spawning (the announcement). */
   readonly introTime: number;
@@ -269,7 +299,14 @@ export const WAVE_RULES: WaveRules = {
     endlessEvery: 8,
   },
   extraArchetypeMax: 2,
-  modifierClamp: { weight: [0.5, 2], traitChance: 0.2, budget: [0.5, 1.5] },
+  modifierClamp: {
+    weight: [0.5, 2],
+    traitChance: 0.2,
+    budget: [0.5, 1.5],
+    eliteMaxBonus: 3,
+    eliteMinimum: 2,
+    surges: { count: 3, extraGroupSize: 2, groupSize: 6, warning: [1, 4] },
+  },
   introTime: 3,
   breather: 10,
   firstGroupDelay: 2,
