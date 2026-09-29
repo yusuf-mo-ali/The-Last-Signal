@@ -217,6 +217,11 @@ export class EnemyView {
     return this.rings.filter((r) => r.age < RING_TIME).length;
   }
 
+  /** Colours of the alarm rings currently expanding (tests, debug): violet scream, red death cry. */
+  get activeRingColors(): number[] {
+    return this.rings.filter((r) => r.age < RING_TIME).map((r) => r.material.color.getHex());
+  }
+
   /** Whether an enemy is drawn lying down (tests, debug). */
   isDown(id: string): boolean {
     return (this.visuals.get(id)?.fall ?? 0) >= 1;

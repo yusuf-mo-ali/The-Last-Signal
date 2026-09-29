@@ -5,7 +5,7 @@
 import { expect, isDev, openGame, test } from './helpers';
 
 /** Plan §29 commands whose systems arrive in later phases (registered as stubs until then). */
-const PLAN_29_STUBS = ['triggerMutation', 'spawnBoss'];
+const PLAN_29_STUBS = ['spawnBoss'];
 
 test('development build: tls commands, plan §29 stubs and the stats overlay', async ({
   page,
@@ -83,16 +83,24 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'runStats',
     'spawnPoints',
     'showSpawns',
+    // Phase 7 mutation tools (triggerMutation was a stub until then).
+    'triggerMutation',
+    'mutation',
+    'mutations',
+    'clearMutation',
+    'setMutations',
+    'mutationSchedule',
+    'staticBurst',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
   expect(
     await page.evaluate(() =>
-      (window.tls as unknown as Record<string, () => unknown>).triggerMutation?.(),
+      (window.tls as unknown as Record<string, () => unknown>).spawnBoss?.(),
     ),
   ).toMatchObject({
     ok: false,
-    reason: expect.stringContaining('Phase 7') as unknown as string,
+    reason: expect.stringContaining('Phase 13') as unknown as string,
   });
   expect(
     await page.evaluate(() => typeof (window as unknown as Record<string, unknown>).__TLS_DEV__),

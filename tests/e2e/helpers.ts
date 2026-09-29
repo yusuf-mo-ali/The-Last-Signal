@@ -29,6 +29,11 @@ import type { PlayerHealth } from '../../src/player/PlayerHealth';
 import type { HealthHud } from '../../src/ui/HealthHud';
 import type { WaveHud } from '../../src/ui/WaveHud';
 import type { WaveManager } from '../../src/waves/WaveManager';
+import type { SignalMutationSystem } from '../../src/signal/SignalMutationSystem';
+import type { Environment } from '../../src/world/Environment';
+import type { ScreenEffects } from '../../src/modifiers/ScreenEffects';
+import type { EffectRouter } from '../../src/modifiers/EffectRouter';
+import type { LightingController } from '../../src/world/LightingController';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -56,6 +61,11 @@ export interface DevHandles {
   readonly healthHud: HealthHud;
   readonly waves: WaveManager;
   readonly waveHud: WaveHud;
+  readonly mutations: SignalMutationSystem;
+  readonly effects: EffectRouter;
+  readonly environment: Environment;
+  readonly screenEffects: ScreenEffects;
+  readonly lighting: LightingController;
 }
 
 /** What `tls.wave()` returns. */
@@ -75,6 +85,31 @@ export interface WaveSnapshot {
   readonly endless: boolean;
   readonly spawningPaused: boolean;
   readonly composition: Record<string, number> | null;
+  readonly mutation: string | null;
+  readonly surges: {
+    readonly done: number;
+    readonly total: number;
+    readonly pending: { readonly region: string; readonly arrivesIn: number } | null;
+  };
+}
+
+/** What `tls.mutation()` returns. */
+export interface MutationSnapshot {
+  readonly wave: number;
+  readonly id: string | null;
+  readonly name: string | null;
+  readonly phase: 'none' | 'announced' | 'active' | 'lifted' | 'ended';
+  readonly enabled: boolean;
+  readonly sources: {
+    readonly stats: string[];
+    readonly triggers: string[];
+    readonly environment: string[];
+    readonly screen: string[];
+  } | null;
+  readonly environment: { readonly sourceId: string; readonly weight: number }[];
+  readonly staticBurst: { readonly until: number; readonly intensity: number } | null;
+  readonly nextBurstIn: number | null;
+  readonly history: { readonly wave: number; readonly id: string }[];
 }
 
 /** One entry of `tls.spawnPoints()`. */
@@ -204,7 +239,14 @@ export interface TlsApi {
   state(): unknown;
   stats(): { overlayVisible: boolean };
   giveAmmo(): WeaponsSnapshot;
-  startWave(n: number): WaveSnapshot;
+  startWave(n: number, mutation?: string): WaveSnapshot;
+  mutation(): MutationSnapshot;
+  mutations(): { id: string; name: string; status: string; minWave: number }[];
+  triggerMutation(id: string): MutationSnapshot;
+  clearMutation(): unknown;
+  setMutations(enabled?: boolean): boolean;
+  mutationSchedule(from?: number, to?: number, seed?: string | number): Record<number, string>;
+  staticBurst(): { until: number; intensity: number };
   wave(): WaveSnapshot;
   completeWave(): number;
   skipWaveTimer(): boolean;
