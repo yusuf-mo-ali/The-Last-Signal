@@ -187,6 +187,11 @@ export class Enemy {
     return this.movement.walkSpeed;
   }
 
+  /** Its ground acceleration this step (m/s²): config × the brain's scale or the stat multiplier. */
+  get groundAcceleration(): number {
+    return this.movement.groundAcceleration;
+  }
+
   /**
    * Its cruising top speed at sim time `now` (no lunge): config × haste, with the effect
    * multiplier. A boost never lifts it above `speedCap` unless it was already faster without it.

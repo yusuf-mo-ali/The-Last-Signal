@@ -82,6 +82,27 @@ describe('HUNGER: faster zombies, within the cap', () => {
     expect(runner.walkSpeed).toBeCloseTo(ENEMY_STATS.runner.moveSpeed * 1.2);
   });
 
+  it('acceleration follows its own stat; a leap keeps its own acceleration', () => {
+    // Different multipliers per stat, so reading the wrong one shows.
+    const t = enemyTestWorld({
+      targets: [new TestTarget(0, 60)],
+      modifiers: { multiplier: (stat) => (stat === 'enemy.acceleration' ? 1.3 : 1.2) },
+    });
+    const walker = t.manager.spawn('walker', [0, 0, 0]);
+    const runner = t.manager.spawn('runner', [3, 0, 0]);
+    t.step();
+    if (!walker || !runner) {
+      throw new Error('spawn');
+    }
+    expect(walker.accelerationMultiplier).toBe(1.3);
+    walker.applySpeed(0);
+    expect(walker.groundAcceleration).toBeCloseTo(ENEMY_STATS.walker.acceleration * 1.3);
+    expect(walker.walkSpeed).toBeCloseTo(ENEMY_STATS.walker.moveSpeed * 1.2);
+    runner.accelerationScale = 20; // a leap
+    runner.applySpeed(0);
+    expect(runner.groundAcceleration).toBeCloseTo(ENEMY_STATS.runner.acceleration * 20);
+  });
+
   it('without the mutation nothing changes (multiplier 1)', () => {
     const t = enemyTestWorld({ targets: [new TestTarget(0, 60)] });
     const walker = t.manager.spawn('walker', [0, 0, 0]);
