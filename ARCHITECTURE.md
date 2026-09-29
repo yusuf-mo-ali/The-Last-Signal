@@ -877,6 +877,10 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 - draw calls unchanged: each enemy is still one skinned mesh whatever its archetype and traits (144 at 64); geometry is shared per archetype and set of attachments (25–27 geometries); traits add triangles (+31 % if every enemy has all three), not draw calls;
 - browser frame cost at 64: mixed 16.0 ms vs Walkers 17.0 ms on the same host (noise), JS heap 30–37 MB.
 
+**Phase 7 baseline** (Signal Mutations; TESTING.md §7.4):
+- simulation per step unchanged by any mutation (~0.2 ms at 24 alive); a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms;
+- **no real-time lights were added.** Three emergency and one muzzle point light, present from load, cost ~25 % of the frame in software rendering in every wave, even at intensity 0; they were replaced by emissive lamps with unlit floor pools and a fill-light rise while the muzzle flash shows. Frame rates are within noise of Phase 6; the program count is constant (11).
+
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);
 - Chrome's Rendering → *Frame Rendering Stats* and the Performance panel, which also work on production builds;

@@ -272,12 +272,12 @@
   - **Presentation:** `LightingController` over a light rig built at load (hemisphere, sun, fog, three emergency lamps with unlit pools of light on the floor, which replaced three point lights after measuring them); the muzzle flash brightening the fill light in a blackout (it replaced a muzzle point light for the same reason); enemy eyeshine; red DEATH CRY rings; `MutationHud` (card, badge with Elite count and STATIC flicker, `LIFTED`, the surge cue and arrow); `StaticOverlay` (under the HUD, clear centre, ≤ 3 Hz, reduced motion); `AlarmPulse` only for screams; the game-over prompt names the mutation.
   - **Debug (dev only):** `mutation`, `mutations`, `triggerMutation` (replaces the stub), `startWave(n, id?)`, `clearMutation`, `setMutations`, `mutationSchedule`, `staticBurst`, an overlay line.
   - Verified:
-    - ⟨UNIT⟩ new unit, property and integration tests (⟨TOTAL⟩ in the suite): the catalogue and clamps, the effect runtime, the environment, selection properties over 50 runs × 60 waves, the generator per mutation, the enemy hooks, the lifecycle (every way a wave ends leaves nothing behind), the full loop (waves 4–8, D-029, pause, death, 30 / 60 / 144 Hz), and the scripted-defender tripwire (BALANCING §2.15).
+    - 72 new unit, property and integration tests (1188 in the suite): the catalogue and clamps, the effect runtime, the environment, selection properties over 50 runs × 60 waves, the generator per mutation, the enemy hooks, the lifecycle (every way a wave ends leaves nothing behind), the full loop (waves 4–8, D-029, pause, death, 30 / 60 / 144 Hz), and the survival tripwire (BALANCING §2.15). The tripwire's first form never failed (its defender was never hit); rebuilt as a survival check, it failed HUNGER ×1.2, and HUNGER (×1.15) and HIVE (×1.2, one +1 surge) were made gentler.
     - Planted bugs: ⟨PLANTED⟩ (TESTING.md §4).
     - `npm run check` passes; `npm run build` ⟨BUILD⟩; no debug code in `dist/`; the plan's hash is unchanged.
     - `npm run test:e2e`: ⟨E2E⟩
     - Browser screenshots of all six mutations inspected; STATIC was toned down after the first look (BALANCING change log).
-    - Performance (TESTING.md §7.4): ⟨PERF⟩
+    - Performance (TESTING.md §7.4): the simulation step is unchanged by any mutation (~0.2 ms at 24 alive; a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms). The first lighting (three emergency and one muzzle point light, present from load) cost ~25 % of the frame in every wave on software rendering; it was replaced by emissive lamps with unlit floor pools and a fill-light rise on the muzzle flash, which measure within noise of Phase 6 with a constant program count.
   - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
 
 ## Active Task
