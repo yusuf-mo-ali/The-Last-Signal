@@ -202,6 +202,10 @@ export function installDebug(context: DebugContext): DebugTools {
     ...(context.training ? { training: context.training } : {}),
     ...(context.pickups ? { pickups: context.pickups } : {}),
     ...(context.feedback ? { feedback: context.feedback } : {}),
+    ...(context.mutations ? { mutations: context.mutations } : {}),
+    ...(context.effects ? { effects: context.effects } : {}),
+    ...(context.environment ? { environment: context.environment } : {}),
+    ...(context.screenEffects ? { screenEffects: context.screenEffects } : {}),
     ...context.extras,
   });
 

@@ -257,7 +257,7 @@ test.describe('mutations (development build)', () => {
         requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
-      window.tls!.staticBurst();
+      (window as unknown as { __until: number }).__until = window.tls!.staticBurst().until;
     });
     // The overlay shows the burst and the badge flickers with it (the player sees the cause).
     await expect
@@ -302,8 +302,20 @@ test.describe('mutations (development build)', () => {
       wave: 'above',
       badge: 'above',
     });
-    // The burst ends on its own.
-    await expect.poll(async () => (await mutationHud(page)).staticOpacity).toBe(0);
+    // The burst ends on its own, and the layer clears with it (it never lingers).
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              window.tls!.inspect().screenEffects.time >
+              (window as unknown as { __until: number }).__until + 0.2,
+          ),
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    await frames(page, 2);
+    expect((await mutationHud(page)).staticOpacity).toBe(0);
     expect(issues.problems()).toEqual([]);
   });
 
