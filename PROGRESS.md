@@ -273,8 +273,8 @@
   - **Debug (dev only):** `mutation`, `mutations`, `triggerMutation` (replaces the stub), `startWave(n, id?)`, `clearMutation`, `setMutations`, `mutationSchedule`, `staticBurst`, an overlay line.
   - Verified:
     - 72 new unit, property and integration tests (1188 in the suite): the catalogue and clamps, the effect runtime, the environment, selection properties over 50 runs × 60 waves, the generator per mutation, the enemy hooks, the lifecycle (every way a wave ends leaves nothing behind), the full loop (waves 4–8, D-029, pause, death, 30 / 60 / 144 Hz), and the survival tripwire (BALANCING §2.15). The tripwire's first form never failed (its defender was never hit); rebuilt as a survival check, it failed HUNGER ×1.2, and HUNGER (×1.15) and HIVE (×1.2, one +1 surge) were made gentler.
-    - Planted bugs: ⟨PLANTED⟩ (TESTING.md §4).
-    - `npm run check` passes; `npm run build` ⟨BUILD⟩; no debug code in `dist/`; the plan's hash is unchanged.
+    - Planted bugs: 32 of 32 unit-level (31 on the first run; the survivor led to a direct acceleration test) and 14 of 14 end-to-end (the runs found five weak browser checks, all tightened; TESTING.md §4).
+    - `npm run check` passes; `npm run build` has no warnings (game 190.8 kB, 62.0 kB gzipped); no debug code in `dist/`; the plan's hash is unchanged.
     - `npm run test:e2e`: ⟨E2E⟩
     - Browser screenshots of all six mutations inspected; STATIC was toned down after the first look (BALANCING change log).
     - Performance (TESTING.md §7.4): the simulation step is unchanged by any mutation (~0.2 ms at 24 alive; a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms). The first lighting (three emergency and one muzzle point light, present from load) cost ~25 % of the frame in every wave on software rendering; it was replaced by emissive lamps with unlit floor pools and a fill-light rise on the muzzle flash, which measure within noise of Phase 6 with a constant program count.
