@@ -440,9 +440,18 @@ test.describe('mutations (development build)', () => {
     await page.click('.lock-prompt');
     await frames(page, 4);
     await startActive(page, 12, 'STATIC');
+    // Pause once the layer is visibly showing (checked every frame in the page).
     await page.evaluate(() => {
       window.tls!.staticBurst();
-      document.exitPointerLock();
+      const waitShown = (): void => {
+        const overlay = document.querySelector<HTMLElement>('.static-overlay');
+        if (Number(overlay?.dataset.opacity ?? 0) > 0) {
+          document.exitPointerLock();
+        } else {
+          requestAnimationFrame(waitShown);
+        }
+      };
+      requestAnimationFrame(waitShown);
     });
     await expect.poll(async () => (await lockPrompt(page))?.mode).toBe('paused');
     expect((await mutation(page)).staticBurst).not.toBeNull(); // frozen mid-burst
