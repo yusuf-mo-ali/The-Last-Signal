@@ -435,14 +435,19 @@ test.describe('mutations (development build)', () => {
     await page.waitForTimeout(800);
     expect((await mutation(page)).environment[0]?.weight).toBe(weight);
 
-    // Resume, then STATIC: the time to the next burst holds while paused.
+    // Resume, then STATIC: pausing mid-burst freezes it, but the layer never shows behind the
+    // pause prompt; the time to the next burst holds.
     await page.click('.lock-prompt');
     await frames(page, 4);
     await startActive(page, 12, 'STATIC');
     await page.evaluate(() => {
+      window.tls!.staticBurst();
       document.exitPointerLock();
     });
     await expect.poll(async () => (await lockPrompt(page))?.mode).toBe('paused');
+    expect((await mutation(page)).staticBurst).not.toBeNull(); // frozen mid-burst
+    await frames(page, 2);
+    expect((await mutationHud(page)).staticOpacity).toBe(0);
     const next = (await mutation(page)).nextBurstIn;
     await page.waitForTimeout(800);
     expect((await mutation(page)).nextBurstIn).toBe(next);
