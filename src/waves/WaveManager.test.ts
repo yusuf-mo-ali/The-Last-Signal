@@ -319,7 +319,9 @@ describe('WaveManager: alarms, stragglers and fallbacks', () => {
       targetId: 'player',
       targetPosition: [0, 0, 14],
       alertDuration: 8,
+      alertMode: 'live',
       haste: null,
+      frenzy: null,
       time: 0,
     });
     h.step();

@@ -33,6 +33,7 @@ import {
   alertTo,
   angleDelta,
   checkProgress,
+  cooldownOf,
   enterIdle,
   followPath,
   horizontalDistance,
@@ -45,6 +46,7 @@ import {
   thinkIdle,
   transition,
   updatePatrol,
+  windupOf,
   yawToward,
 } from './common';
 
@@ -99,9 +101,10 @@ function startAttack(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void
   transition(enemy, 'ATTACK');
   const { config } = enemy;
   enemy.attackPhase = 'windup';
-  enemy.attackTimer = config.attack.windup;
+  const windup = windupOf(enemy, ctx.now);
+  enemy.attackTimer = windup;
   enemy.attackYaw = yawToward(enemy.motor.position, target.position);
-  enemy.attackCooldown = config.attackCooldown;
+  enemy.attackCooldown = cooldownOf(enemy, ctx.now);
   enemy.attacks++;
   enemy.directBlocked = false; // it got there: whatever was in the way is behind it
   enemy.weaveSide = 0;
@@ -113,7 +116,7 @@ function startAttack(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void
   ctx.events.emit('attackStarted', {
     id: enemy.id,
     targetId: target.id,
-    windup: config.attack.windup,
+    windup,
     kind: 'strike',
   });
 }
@@ -330,8 +333,8 @@ export const meleeBrain: EnemyBrain = {
     stagger(enemy, ctx);
   },
 
-  alert(enemy, ctx, target, duration = Number.POSITIVE_INFINITY) {
-    alertTo(enemy, ctx, target, duration);
+  alert(enemy, ctx, target, duration = Number.POSITIVE_INFINITY, lastKnown = null) {
+    alertTo(enemy, ctx, target, duration, lastKnown);
   },
 
   forceAttack(enemy, ctx) {

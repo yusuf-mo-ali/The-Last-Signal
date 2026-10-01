@@ -165,9 +165,10 @@ function headlessGame(seed = 'mutation-run') {
   };
 
   /**
-   * A scripted defender at the spawn: every `interval` seconds it shoots the nearest wave enemy
-   * it can see within `range`, one headshot in every `headshotEvery` shots and body shots
-   * otherwise, with the Pistol (no god mode).
+   * A scripted defender at the spawn: every `interval` seconds it shoots a wave enemy it can see
+   * within `range`, one headshot in every `headshotEvery` shots and body shots otherwise, with the
+   * Pistol (no god mode). Like a real player it picks priority targets first (D-046): the
+   * nearest visible enemy that does not fight in melee (a Screamer, a Spitter), else the nearest.
    */
   let shotClock = 0;
   let shots = 0;
@@ -177,7 +178,7 @@ function headlessGame(seed = 'mutation-run') {
       return;
     }
     const from = viewer().eye;
-    let best: { id: string; d: number; head: Vector3 } | null = null;
+    let best: { id: string; d: number; head: Vector3; priority: number } | null = null;
     for (const e of enemies.enemies) {
       if (!e.alive || !waves.isWaveEnemy(e.id)) {
         continue;
@@ -185,8 +186,11 @@ function headlessGame(seed = 'mutation-run') {
       const head = e.motor.position.clone();
       head.y += e.config.body.height * 0.9;
       const d = head.distanceTo(from);
-      if (d < range && (!best || d < best.d) && enemies.lines.lineOfSight(from, head)) {
-        best = { id: e.id, d, head };
+      const priority = e.config.behavior === 'melee' ? 1 : 0;
+      const better =
+        !best || priority < best.priority || (priority === best.priority && d < best.d);
+      if (d < range && better && enemies.lines.lineOfSight(from, head)) {
+        best = { id: e.id, d, head, priority };
       }
     }
     if (!best) {

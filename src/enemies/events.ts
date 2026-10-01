@@ -3,6 +3,7 @@
  * tests, and later waves, XP/Scrap, the adaptive profile and analytics.
  */
 
+import type { FrenzyParams } from '../config/effects';
 import type { AiState, EnemyArchetypeId, EnemyModifierId } from '../config/enemies';
 import type { Vec3Tuple } from '../weapons/types';
 
@@ -20,6 +21,14 @@ export type AttackKind = 'strike' | 'scream';
  *   and it never calls reinforcements.
  */
 export type AlarmKind = 'scream' | 'deathCry';
+
+/**
+ * What listeners are told (D-046):
+ * - `live`: where the target is, kept up to date for the alert duration (a Screamer's scream);
+ * - `lastKnown`: only where the target was when the alarm was raised (a death cry). They rush that
+ *   spot and find the target again only by seeing it, so moving after a kill pays off.
+ */
+export type AlertMode = 'live' | 'lastKnown';
 
 /**
  * Something raised the alarm (D-043): a disturbance that tells whoever hears it where a target
@@ -42,8 +51,12 @@ export interface AlarmEvent {
   readonly targetPosition: Vec3Tuple | null;
   /** Seconds listeners are told about the target for. */
   readonly alertDuration: number;
+  /** Whether listeners track the target, or only learn where it was (D-046). */
+  readonly alertMode: AlertMode;
   /** A speed boost for those who hear it, if any. */
   readonly haste: { readonly multiplier: number; readonly duration: number } | null;
+  /** A combat frenzy for those who hear it, if any (D-046; never stacked). */
+  readonly frenzy: FrenzyParams | null;
   /** Sim time it was raised. */
   readonly time: number;
 }
@@ -95,5 +108,7 @@ export interface EnemyEvents {
   alarm: AlarmEvent;
   /** Sped up by an alarm (or anything else), until sim time `until`. */
   hasted: { readonly id: string; readonly multiplier: number; readonly until: number };
+  /** Frenzied by an alarm (D-046) until sim time `until`; `kind` is the alarm that did it. */
+  frenzied: { readonly id: string; readonly kind: AlarmKind; readonly until: number };
   traitsChanged: { readonly id: string; readonly traits: readonly EnemyModifierId[] };
 }

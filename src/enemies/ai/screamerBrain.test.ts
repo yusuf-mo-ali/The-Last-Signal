@@ -84,7 +84,9 @@ describe('Screamer: detection and the scream', () => {
         targetId: 'player',
         targetPosition: [0, 0, 12],
         alertDuration: ability.alertDuration,
+        alertMode: 'live',
         haste: { multiplier: ability.haste.multiplier, duration: ability.haste.duration },
+        frenzy: ability.frenzy,
         time: t.manager.now,
       },
     ]);
@@ -285,7 +287,9 @@ describe('the alarm’s prototype response (EnemyManager)', () => {
       targetId: 'player',
       targetPosition: [0, 0, 20],
       alertDuration: 3,
+      alertMode: 'live',
       haste: null,
+      frenzy: null,
       time: 0,
     });
     expect(walker?.target?.id).toBe('player');

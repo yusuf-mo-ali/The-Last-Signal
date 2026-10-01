@@ -127,6 +127,7 @@ export function enemyTestWorld(
     'despawned',
     'alarm',
     'hasted',
+    'frenzied',
     'traitsChanged',
   ] as const) {
     manager.events.on(type, (payload: unknown) => {

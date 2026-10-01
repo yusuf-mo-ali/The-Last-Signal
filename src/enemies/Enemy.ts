@@ -19,6 +19,7 @@ import { Vector3 } from 'three';
 import { ArmorPlate } from '../combat/armor';
 import { Health } from '../combat/Health';
 import { HitboxRig } from '../combat/hitbox';
+import { EFFECT_CLAMPS, type FrenzyParams } from '../config/effects';
 import type { AiState, EnemyArchetypeConfig } from '../config/enemies';
 import type { PlayerMovementConfig } from '../config/player';
 import { applyTraits, type EnemyConfig } from '../config/traits';
@@ -26,6 +27,7 @@ import type { CollisionWorld } from '../physics/CollisionWorld';
 import { PlayerMotor } from '../player/PlayerMotor';
 import { EnemyStateMachine, type EnemyStateListener } from './ai/EnemyStateMachine';
 import { enemyMovementConfig } from './body';
+import type { AlarmKind } from './events';
 import type { EnemyTarget } from './types';
 
 /** `lunge`: a committed leap between the wind-up and the strike (archetypes with `attack.lunge`). */
@@ -33,6 +35,20 @@ export type AttackPhase = 'none' | 'windup' | 'lunge' | 'recovery';
 
 /** How the enemy is currently getting to its target. */
 export type NavMode = 'none' | 'direct' | 'route';
+
+const clampTo = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** A frenzy within the guardrails (`EFFECT_CLAMPS.frenzy`), whoever asked for it. */
+export function clampFrenzy(f: FrenzyParams): FrenzyParams {
+  const c = EFFECT_CLAMPS.frenzy;
+  return {
+    duration: clampTo(f.duration, 0, c.duration),
+    cooldownScale: clampTo(f.cooldownScale, c.cooldownScale, 1),
+    windupScale: clampTo(f.windupScale, c.windupScale, 1),
+    turnScale: clampTo(f.turnScale, 1, c.turnScale),
+    staggerScale: clampTo(f.staggerScale, 1, c.staggerScale),
+  };
+}
 
 type MutableMovement = { -readonly [K in keyof PlayerMovementConfig]: PlayerMovementConfig[K] };
 
@@ -73,6 +89,12 @@ export class Enemy {
    */
   alertUntil = Number.NEGATIVE_INFINITY;
   readonly lastKnownTargetPosition = new Vector3();
+  /**
+   * Told only where the target was (a death cry, D-046), not where it is: while true and unable to
+   * see the target, it heads for `lastKnownTargetPosition` instead of the target. Ends when it sees
+   * the target or reaches the spot.
+   */
+  investigating = false;
 
   // ---- attack -------------------------------------------------------------------------------
   attackPhase: AttackPhase = 'none';
@@ -134,6 +156,19 @@ export class Enemy {
   speedCap = Number.POSITIVE_INFINITY;
   /** Backing away from its target (keeping its distance). */
   retreating = false;
+  /**
+   * A combat frenzy from an alarm (D-046), until this sim time: attacks sooner, winds up faster,
+   * turns faster and may resist staggers. Never stacked: the strongest scales win.
+   */
+  frenzyUntil = Number.NEGATIVE_INFINITY;
+  frenzyCooldownScale = 1;
+  frenzyWindupScale = 1;
+  frenzyTurnScale = 1;
+  frenzyStaggerScale = 1;
+  /** What frenzied it last (the view tints its eyes). */
+  frenzyKind: AlarmKind | null = null;
+  /** The stagger scale its combat profile was last configured with (the manager keeps it in step). */
+  appliedStaggerScale = 1;
 
   // ---- lifecycle ----------------------------------------------------------------------------
   /** Seconds a dead body has left before it is removed. */
@@ -180,6 +215,57 @@ export class Enemy {
   /** Speed multiplier from haste at sim time `now` (1 when none is active). */
   haste(now: number): number {
     return now < this.hasteUntil ? this.hasteMultiplier : 1;
+  }
+
+  /** Whether a frenzy is active at sim time `now`. */
+  frenzied(now: number): boolean {
+    return now < this.frenzyUntil;
+  }
+
+  /**
+   * Starts or strengthens a frenzy at sim time `now` (D-046). Never stacks: while one is active,
+   * each scale keeps the stronger value, and it ends at the later of its end and `now + duration`.
+   * Returns whether anything was applied.
+   */
+  frenzy(now: number, params: FrenzyParams, kind: AlarmKind): boolean {
+    const f = clampFrenzy(params);
+    if (f.duration <= 0) {
+      return false;
+    }
+    const active = this.frenzied(now);
+    this.frenzyCooldownScale = active
+      ? Math.min(this.frenzyCooldownScale, f.cooldownScale)
+      : f.cooldownScale;
+    this.frenzyWindupScale = active
+      ? Math.min(this.frenzyWindupScale, f.windupScale)
+      : f.windupScale;
+    this.frenzyTurnScale = active ? Math.max(this.frenzyTurnScale, f.turnScale) : f.turnScale;
+    this.frenzyStaggerScale = active
+      ? Math.max(this.frenzyStaggerScale, f.staggerScale)
+      : f.staggerScale;
+    this.frenzyUntil = Math.max(active ? this.frenzyUntil : now, now + f.duration);
+    this.frenzyKind = kind;
+    return true;
+  }
+
+  /** × its attack cooldown at sim time `now` (a frenzy attacks sooner). */
+  cooldownScale(now: number): number {
+    return this.frenzied(now) ? this.frenzyCooldownScale : 1;
+  }
+
+  /** × its wind-up at sim time `now`. */
+  windupScale(now: number): number {
+    return this.frenzied(now) ? this.frenzyWindupScale : 1;
+  }
+
+  /** × its turn speed at sim time `now`. */
+  turnScale(now: number): number {
+    return this.frenzied(now) ? this.frenzyTurnScale : 1;
+  }
+
+  /** × its stagger threshold at sim time `now`. */
+  staggerScale(now: number): number {
+    return this.frenzied(now) ? this.frenzyStaggerScale : 1;
   }
 
   /** Its top speed this step (m/s): config × the brain's scale × haste. */
@@ -264,6 +350,7 @@ export class Enemy {
     this.canSeeTarget = false;
     this.lastSeenAt = Number.NEGATIVE_INFINITY;
     this.alertUntil = Number.NEGATIVE_INFINITY;
+    this.investigating = false;
     this.attackPhase = 'none';
     this.attackTimer = 0;
     this.attackCooldown = 0;
@@ -292,6 +379,13 @@ export class Enemy {
     this.accelerationMultiplier = 1;
     this.speedCap = Number.POSITIVE_INFINITY;
     this.retreating = false;
+    this.frenzyUntil = Number.NEGATIVE_INFINITY;
+    this.frenzyCooldownScale = 1;
+    this.frenzyWindupScale = 1;
+    this.frenzyTurnScale = 1;
+    this.frenzyStaggerScale = 1;
+    this.frenzyKind = null;
+    this.appliedStaggerScale = 1;
     this.applySpeed(0);
     this.corpseTimer = 0;
     this.rig.setPose(this.config.rig);

@@ -19,6 +19,7 @@ import type { EnemyRules } from '../../config/enemies';
 import type { LineTester } from '../../navigation/LineTester';
 import type { RouteGraph } from '../../navigation/RouteGraph';
 import type { Rng } from '../../utils/Rng';
+import type { Vec3Tuple } from '../../weapons/types';
 import type { Enemy } from '../Enemy';
 import type { EnemyEvents } from '../events';
 import type { EnemyTarget } from '../types';
@@ -49,9 +50,16 @@ export interface EnemyBrain {
   onStaggered(enemy: Enemy, ctx: BrainContext): void;
   /**
    * Made aware of a target from outside, for `duration` seconds (default: for good; waves: "the
-   * horde knows where you are"; an alarm: its alert duration).
+   * horde knows where you are"; an alarm: its alert duration). With `lastKnown`, it learns only
+   * where the target was (a death cry, D-046): it heads there and must see the target to find it.
    */
-  alert(enemy: Enemy, ctx: BrainContext, target: EnemyTarget, duration?: number): void;
+  alert(
+    enemy: Enemy,
+    ctx: BrainContext,
+    target: EnemyTarget,
+    duration?: number,
+    lastKnown?: Vec3Tuple | null,
+  ): void;
   /**
    * Starts its attack (or ability) at its current target now, ignoring the cooldown (debug tools).
    * Returns whether it did: it needs a target and must be free to act (not staggered, not already

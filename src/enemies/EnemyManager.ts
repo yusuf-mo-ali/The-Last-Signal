@@ -104,9 +104,16 @@ export interface StatMultipliers {
 }
 
 /** An alarm to raise: who, what kind, where, how far, and the response it asks for. */
-export type AlarmRequest = Omit<AlarmEvent, 'time' | 'targetId' | 'targetPosition'> & {
+export type AlarmRequest = Omit<
+  AlarmEvent,
+  'time' | 'targetId' | 'targetPosition' | 'alertMode' | 'frenzy'
+> & {
   /** The target it is about (default: the first living target, the player). */
   readonly targetId?: string | null;
+  /** Default `live`. */
+  readonly alertMode?: AlarmEvent['alertMode'];
+  /** Default none. */
+  readonly frenzy?: AlarmEvent['frenzy'];
 };
 
 /** Counters for tests, debug tools and performance measurements. */
@@ -247,7 +254,9 @@ export class EnemyManager implements FixedUpdateSystem {
       targetId: target?.id ?? null,
       targetPosition: target ? [target.position.x, target.position.y, target.position.z] : null,
       alertDuration: request.alertDuration,
+      alertMode: request.alertMode ?? 'live',
       haste: request.haste,
+      frenzy: request.frenzy ?? null,
       time: this.simTime,
     };
     this.events.emit('alarm', alarm);
@@ -475,6 +484,7 @@ export class EnemyManager implements FixedUpdateSystem {
       enemy.speedMultiplier = speedMultiplier;
       enemy.accelerationMultiplier = accelerationMultiplier;
       enemy.speedCap = this.speedCap;
+      this.syncStagger(enemy); // a frenzy's stagger resistance ends with it
       enemy.fsm.advance(dt);
       enemy.attackCooldown = countDown(enemy.attackCooldown, dt);
       enemy.replanTimer = countDown(enemy.replanTimer, dt);
@@ -581,9 +591,12 @@ export class EnemyManager implements FixedUpdateSystem {
   }
 
   /**
-   * The prototype response to an alarm (D-043): every other living enemy within its radius (and
-   * roughly on the same level) is told where the target is and, if the alarm carries haste, moves
-   * faster for a while. Enemies that already have another target keep it, but are still hastened.
+   * The response to an alarm (D-043, D-046): every other living enemy within its radius (and
+   * roughly on the same level) is told about the target (where it is, or with `lastKnown` only
+   * where it was) and, if the alarm carries them, hastened and frenzied for a while. Enemies that
+   * already have another target keep it, but are still hastened and frenzied. Neither stacks: the
+   * stronger value wins and the end is the later one, never more than the alarm's own duration
+   * from now. An alarm never hurts anyone, so a death cry cannot chain into more deaths.
    */
   private respondToAlarm(alarm: AlarmEvent): void {
     const [x, y, z] = alarm.position;
@@ -602,7 +615,17 @@ export class EnemyManager implements FixedUpdateSystem {
         continue;
       }
       if (target && alarm.alertDuration > 0) {
-        this.brainOf(enemy).alert(enemy, this.context, target, alarm.alertDuration);
+        this.brainOf(enemy).alert(
+          enemy,
+          this.context,
+          target,
+          alarm.alertDuration,
+          alarm.alertMode === 'lastKnown' ? alarm.targetPosition : null,
+        );
+      }
+      if (alarm.frenzy && enemy.frenzy(this.simTime, alarm.frenzy, alarm.kind)) {
+        this.syncStagger(enemy);
+        this.events.emit('frenzied', { id: enemy.id, kind: alarm.kind, until: enemy.frenzyUntil });
       }
       if (alarm.haste && alarm.haste.multiplier > 1 && alarm.haste.duration > 0) {
         const now = this.simTime;
@@ -617,6 +640,15 @@ export class EnemyManager implements FixedUpdateSystem {
           until: enemy.hasteUntil,
         });
       }
+    }
+  }
+
+  /** Keeps combat's stagger threshold in step with a frenzy's stagger resistance. */
+  private syncStagger(enemy: Enemy): void {
+    const scale = enemy.staggerScale(this.simTime);
+    if (scale !== enemy.appliedStaggerScale && enemy.alive) {
+      enemy.appliedStaggerScale = scale;
+      this.combat.configure(enemy.id, damageProfile(enemy));
     }
   }
 
@@ -762,7 +794,7 @@ export class EnemyManager implements FixedUpdateSystem {
     }
     enemy.previousHeading = enemy.heading;
     const delta = angleDelta(enemy.heading, desired);
-    const maxTurn = config.turnSpeed * dt;
+    const maxTurn = config.turnSpeed * enemy.turnScale(this.simTime) * dt;
     enemy.heading = wrapAngle(
       enemy.heading + (Math.abs(delta) <= maxTurn ? delta : Math.sign(delta) * maxTurn),
     );
@@ -806,7 +838,8 @@ function damageProfile(enemy: Enemy): DamageProfile {
     zoneArmor: config.zoneArmor,
     plates: enemy.plates,
     resistance: config.resistance,
-    staggerThreshold: config.staggerThreshold,
+    // A frenzy's stagger resistance (D-046) raises it while active; `Infinity` stays immune.
+    staggerThreshold: config.staggerThreshold * enemy.appliedStaggerScale,
     ...(config.staggerZones ? { staggerZones: config.staggerZones } : {}),
   };
 }

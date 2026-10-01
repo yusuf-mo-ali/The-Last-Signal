@@ -15,6 +15,7 @@ import {
   type RigScale,
 } from './combat';
 import type { DropTableId } from './drops';
+import type { FrenzyParams } from './effects';
 
 /** Plan §10 body-part damage zones. */
 export const DAMAGE_ZONES = [
@@ -166,6 +167,8 @@ export interface EnemyArchetypeConfig {
     readonly radius: number;
     readonly alertDuration: number;
     readonly haste: { readonly multiplier: number; readonly duration: number };
+    /** A combat frenzy for those who hear it (D-046; clamped by `EFFECT_CLAMPS.frenzy`). */
+    readonly frenzy?: FrenzyParams;
   };
 
   // ---- idle behaviour -------------------------------------------------------------------------
@@ -373,6 +376,14 @@ export const ENEMY_STATS: Readonly<Record<ImplementedEnemyId, EnemyArchetypeConf
       radius: 18,
       alertDuration: 8,
       haste: { multiplier: 1.35, duration: 6 },
+      // A completed scream whips the horde into a frenzy (D-046): kill the Screamer first.
+      frenzy: {
+        duration: 6,
+        cooldownScale: 0.6,
+        windupScale: 0.85,
+        turnScale: 1.6,
+        staggerScale: 1.4,
+      },
     },
     patrol: { radius: 3, pauseMin: 2, pauseMax: 5, speedFactor: 0.4 },
     corpseTime: 5,

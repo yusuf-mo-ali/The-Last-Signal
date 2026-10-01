@@ -13,7 +13,7 @@
  *   still been spent, so interrupting a scream buys time.
  *
  * It never deals damage itself; what the alarm does is up to whoever listens (`EnemyManager`'s
- * prototype response: nearby enemies are told where the target is and hastened).
+ * response: nearby enemies are told where the target is, hastened and frenzied, D-046).
  */
 
 import { Vector3 } from 'three';
@@ -24,6 +24,7 @@ import type { BrainContext, EnemyBrain } from './brain';
 import {
   alertTo,
   checkProgress,
+  cooldownOf,
   enterIdle,
   followPath,
   horizontalDistance,
@@ -34,6 +35,7 @@ import {
   thinkIdle,
   transition,
   updatePatrol,
+  windupOf,
   yawToward,
 } from './common';
 
@@ -63,10 +65,11 @@ function startAbility(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): voi
   transition(enemy, 'ATTACK');
   const { config } = enemy;
   enemy.attackPhase = 'windup';
-  enemy.attackTimer = config.attack.windup;
+  const windup = windupOf(enemy, ctx.now);
+  enemy.attackTimer = windup;
   enemy.attackYaw = yawToward(enemy.motor.position, target.position);
   // Spent at the start: an interrupted scream still has to wait for its cooldown.
-  enemy.attackCooldown = config.attackCooldown;
+  enemy.attackCooldown = cooldownOf(enemy, ctx.now);
   enemy.attacks++;
   enemy.retreating = false;
   if (config.attackPose) {
@@ -75,7 +78,7 @@ function startAbility(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): voi
   ctx.events.emit('attackStarted', {
     id: enemy.id,
     targetId: target.id,
-    windup: config.attack.windup,
+    windup,
     kind: 'scream',
   });
 }
@@ -93,7 +96,9 @@ function release(enemy: Enemy, ctx: BrainContext): void {
     targetId: target?.id ?? null,
     targetPosition: target ? [target.position.x, target.position.y, target.position.z] : null,
     alertDuration: ability?.alertDuration ?? 0,
+    alertMode: 'live',
     haste: ability ? { ...ability.haste } : null,
+    frenzy: ability?.frenzy ? { ...ability.frenzy } : null,
     // The Screamer calls the horde in: the wave runtime pulls its next group forward (D-045).
     reinforcements: true,
     time: ctx.now,
@@ -260,8 +265,8 @@ export const screamerBrain: EnemyBrain = {
     stagger(enemy, ctx);
   },
 
-  alert(enemy, ctx, target, duration = Number.POSITIVE_INFINITY) {
-    alertTo(enemy, ctx, target, duration);
+  alert(enemy, ctx, target, duration = Number.POSITIVE_INFINITY, lastKnown = null) {
+    alertTo(enemy, ctx, target, duration, lastKnown);
   },
 
   forceAttack(enemy, ctx) {

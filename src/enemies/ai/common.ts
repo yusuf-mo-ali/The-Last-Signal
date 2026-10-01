@@ -9,6 +9,7 @@
 import { Vector3 } from 'three';
 import { countDown } from '../../weapons/timing';
 import type { AiState } from '../../config/enemies';
+import type { Vec3Tuple } from '../../weapons/types';
 import type { Enemy } from '../Enemy';
 import type { AttackCancelReason, TargetLossReason } from '../events';
 import type { EnemyTarget } from '../types';
@@ -18,6 +19,7 @@ const _eye = new Vector3();
 const _targetEye = new Vector3();
 const NEAR_NODES = 4;
 const _near: number[] = [];
+const _spotNear: number[] = [];
 /** Seconds a patrol walk may take before it is abandoned. */
 const PATROL_TIMEOUT = 8;
 /** Patrol point attempts per decision. */
@@ -119,6 +121,7 @@ export function loseTarget(enemy: Enemy, ctx: BrainContext, reason: TargetLossRe
   ctx.events.emit('targetLost', { id: enemy.id, targetId: target.id, reason });
   enemy.target = null;
   enemy.canSeeTarget = false;
+  enemy.investigating = false;
   enemy.navMode = 'none';
   enemy.route = [];
   enemy.directBlocked = false;
@@ -141,11 +144,22 @@ export function perceive(enemy: Enemy, ctx: BrainContext): void {
       enemy.canSeeTarget = sees(enemy, ctx, target);
       if (enemy.canSeeTarget) {
         enemy.lastSeenAt = ctx.now;
+        enemy.investigating = false; // found it
+      } else if (
+        enemy.investigating &&
+        horizontalDistance(pos, enemy.lastKnownTargetPosition) <=
+          ctx.rules.arrivalRadius + enemy.config.body.radius
+      ) {
+        // Reached the spot it was told about and the target is not there: the alert is spent;
+        // normal memory decides from here.
+        enemy.investigating = false;
+        enemy.alertUntil = Math.min(enemy.alertUntil, ctx.now);
       }
       // Told where the target is: it keeps hunting whatever the range or sight, and knows where
-      // to go. Otherwise it needs to have seen the target recently, and not too far away.
+      // to go (unless it was told only where the target was). Otherwise it needs to have seen
+      // the target recently, and not too far away.
       const told = ctx.now < enemy.alertUntil;
-      if (told || enemy.canSeeTarget) {
+      if ((told && !enemy.investigating) || enemy.canSeeTarget) {
         enemy.lastKnownTargetPosition.copy(target.position);
       }
       if (!told) {
@@ -184,11 +198,22 @@ export function perceive(enemy: Enemy, ctx: BrainContext): void {
   }
 }
 
+/**
+ * Where a chase heads: the target, or, while it only knows where the target was (a death cry,
+ * D-046) and cannot see it, that spot.
+ */
+export function chaseSpot(enemy: Enemy, target: EnemyTarget): Vector3 {
+  return enemy.investigating && !enemy.canSeeTarget
+    ? enemy.lastKnownTargetPosition
+    : target.position;
+}
+
 /** Straight at the target if a body can walk that line, otherwise along the route graph. */
 export function planChase(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
   const pos = enemy.motor.position;
   const radius = enemy.config.body.radius;
-  if (!enemy.directBlocked && ctx.lines.walkable(pos, target.position, radius)) {
+  const spot = chaseSpot(enemy, target);
+  if (!enemy.directBlocked && ctx.lines.walkable(pos, spot, radius)) {
     enemy.navMode = 'direct';
     return;
   }
@@ -197,7 +222,10 @@ export function planChase(enemy: Enemy, ctx: BrainContext, target: EnemyTarget):
     enemy.navMode = 'none';
     return;
   }
-  const goal = ctx.goalNodeFor(target);
+  const goal =
+    spot === target.position
+      ? ctx.goalNodeFor(target)
+      : (routes.nearest(spot, 1, _spotNear)[0] ?? ctx.goalNodeFor(target));
   const onRoute = enemy.navMode === 'route' && enemy.routeCursor < enemy.route.length;
   if (!onRoute) {
     // A new route: from the nearest node it can walk straight to.
@@ -276,9 +304,14 @@ export function followPath(
   stopDistance: number,
 ): void {
   const pos = enemy.motor.position;
+  const spot = chaseSpot(enemy, target);
+  if (spot !== target.position) {
+    // Heading for where the target was: all the way there, not to striking distance.
+    stopDistance = ctx.rules.arrivalRadius;
+  }
   if (enemy.navMode === 'direct') {
-    enemy.moveGoal.copy(target.position);
-    enemy.moveSpeed = horizontalDistance(pos, target.position) <= stopDistance ? 0 : 1;
+    enemy.moveGoal.copy(spot);
+    enemy.moveSpeed = horizontalDistance(pos, spot) <= stopDistance ? 0 : 1;
   } else if (enemy.navMode === 'route' && ctx.routes && enemy.route.length > 0) {
     let node = enemy.route[enemy.routeCursor];
     if (node !== undefined) {
@@ -291,7 +324,7 @@ export function followPath(
     if (node === undefined) {
       enemy.directBlocked = false; // the end of the route: the straight line may work now
     }
-    enemy.moveGoal.copy(node === undefined ? target.position : ctx.routes.position(node));
+    enemy.moveGoal.copy(node === undefined ? spot : ctx.routes.position(node));
     enemy.moveSpeed = 1;
   } else {
     enemy.moveGoal.copy(enemy.lastKnownTargetPosition);
@@ -299,7 +332,7 @@ export function followPath(
       horizontalDistance(pos, enemy.lastKnownTargetPosition) > ctx.rules.arrivalRadius ? 1 : 0;
   }
   if (enemy.moveSpeed === 0) {
-    enemy.faceYaw = yawToward(pos, target.position);
+    enemy.faceYaw = yawToward(pos, spot);
   }
 }
 
@@ -355,28 +388,51 @@ export function updatePatrol(enemy: Enemy, ctx: BrainContext): void {
 /**
  * Told about a target (hit by it, or alerted): notices it without needing to see it, and keeps it
  * for `duration` seconds whatever the range or sight (refreshed by later alerts).
+ *
+ * With `lastKnown` (a death cry, D-046) it is told only where the target was: it rushes that spot
+ * (`investigating`) and finds the target again only by seeing it. An enemy that can already see
+ * the target ignores the spot; a later live alert (a scream) replaces it.
  */
 export function alertTo(
   enemy: Enemy,
   ctx: BrainContext,
   target: EnemyTarget,
   duration: number,
+  lastKnown: Vec3Tuple | null = null,
 ): void {
   if (!enemy.alive || !target.isAlive()) {
     return;
   }
-  if (enemy.target === target) {
-    enemy.alertUntil = Math.max(enemy.alertUntil, ctx.now + duration);
+  if (enemy.target && enemy.target !== target) {
     return;
   }
-  if (enemy.target) {
-    return;
+  const had = enemy.target === target;
+  if (!had) {
+    setTarget(enemy, ctx, target, true);
   }
-  setTarget(enemy, ctx, target, true);
-  enemy.alertUntil = ctx.now + duration;
-  if (enemy.state === 'IDLE' || enemy.state === 'PATROL') {
+  enemy.alertUntil = had ? Math.max(enemy.alertUntil, ctx.now + duration) : ctx.now + duration;
+  if (lastKnown === null) {
+    enemy.investigating = false;
+  } else if (!(had && enemy.canSeeTarget)) {
+    enemy.lastKnownTargetPosition.set(lastKnown[0], lastKnown[1], lastKnown[2]);
+    enemy.investigating = true;
+    enemy.navMode = 'none';
+    enemy.route = [];
+    enemy.directBlocked = false;
+  }
+  if (!had && (enemy.state === 'IDLE' || enemy.state === 'PATROL')) {
     transition(enemy, 'DETECT');
   }
+}
+
+/** Its wind-up this attack (seconds): a frenzy shortens it, within the guardrail (D-046). */
+export function windupOf(enemy: Enemy, now: number): number {
+  return enemy.config.attack.windup * enemy.windupScale(now);
+}
+
+/** Its cooldown after starting an attack (seconds): a frenzy shortens it (D-046). */
+export function cooldownOf(enemy: Enemy, now: number): number {
+  return enemy.config.attackCooldown * enemy.cooldownScale(now);
 }
 
 /** A stagger from combat: whatever it was doing stops (a wind-up is lost), for its duration. */

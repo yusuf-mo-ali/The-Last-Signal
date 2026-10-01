@@ -276,7 +276,7 @@ describe('SignalMutationSystem: the lifecycle', () => {
       expect(a.region).toBe(w?.region);
       expect(a.count).toBeGreaterThan(0);
     });
-  });
+  }, 15_000); // ten simulated minutes of a full wave-12 HIVE wave
 
   it('BLOOD MOON: Elites in the wave, a red sky that lifts after it', () => {
     const h = harness();
