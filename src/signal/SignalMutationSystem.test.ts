@@ -354,19 +354,23 @@ describe('SignalMutationSystem: the run’s mutations', () => {
     const h = harness('schedule');
     h.startRun();
     const seed = h.waves.seed;
-    for (let wave = 1; wave <= 9; wave++) {
+    for (let wave = 1; wave <= 12; wave++) {
       h.toActive();
       h.clearWave();
       h.until(() => h.state.current === 'WAVE_START', 15);
     }
-    const expected = mutationSchedule(seed, 9);
+    const expected = mutationSchedule(seed, 12);
     const played = h.waves.mutations;
-    for (let n = 1; n <= 9; n++) {
+    // The BLOOD MOON guarantee (D-046) holds in a played run, not only in the schedule.
+    const first = played.find((m) => m.id === 'BLOOD_MOON')?.wave ?? 0;
+    expect(first).toBeGreaterThanOrEqual(9);
+    expect(first).toBeLessThanOrEqual(12);
+    for (let n = 1; n <= 12; n++) {
       expect(played.find((m) => m.wave === n)?.id ?? null, `wave ${n}`).toBe(expected[n]);
     }
     const recorded = h.waves.stats.snapshot().mutations;
     expect(recorded.filter((m) => m.wave <= 3).every((m) => m.id === null)).toBe(true);
-    expect(recorded.filter((m) => m.wave >= 4 && m.wave <= 9).every((m) => m.id !== null)).toBe(
+    expect(recorded.filter((m) => m.wave >= 4 && m.wave <= 12).every((m) => m.id !== null)).toBe(
       true,
     );
   });

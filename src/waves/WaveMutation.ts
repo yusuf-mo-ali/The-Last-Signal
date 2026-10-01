@@ -10,7 +10,12 @@
  * - never the previous wave's mutation, nor one from the same group (two visibility waves in a
  *   row);
  * - a draw weighted by the mutation's weight for the wave's tier, less likely if used in the last
- *   few waves.
+ *   few waves;
+ * - a guaranteed first appearance (D-046, BLOOD MOON on waves 9–12): until the mutation has
+ *   appeared, on each wave of its window it is chosen by its own roll alone, with chance 1 in the
+ *   waves left in the window (1/4, 1/3, 1/2, then certain), and the weighted draw never offers it.
+ *   So the first appearance is spread evenly over the window and certain by its end; afterwards
+ *   the normal rules apply.
  *
  * The history is the run's actually played sequence (the wave runtime keeps it). For normal play
  * it equals `mutationSchedule(runSeed)`, which previews use.
@@ -56,9 +61,20 @@ export function selectMutation(
   }
   const catalogue = options.catalogue ?? MUTATIONS;
   const tier = waveTier(wave);
-  const eligible = (options.pool ?? ENABLED_MUTATION_IDS).filter((id) => {
+  const candidates = (options.pool ?? ENABLED_MUTATION_IDS).filter(
+    (id) => catalogue[id].status === 'enabled',
+  );
+  // A guaranteed first appearance: its own roll is its only way in while its window is open.
+  const guaranteed = candidates.filter((id) => inGuaranteeWindow(catalogue[id], wave, history));
+  for (const id of guaranteed) {
+    const by = catalogue[id].guarantee?.by ?? wave;
+    if (rng.next() < 1 / (by - wave + 1)) {
+      return id;
+    }
+  }
+  const eligible = candidates.filter((id) => {
     const m = catalogue[id];
-    return m.status === 'enabled' && m.minWave <= wave && m.weights[tier] > 0;
+    return !guaranteed.includes(id) && m.minWave <= wave && m.weights[tier] > 0;
   });
   const previous = history.at(-1);
   const previousGroup = previous ? catalogue[previous].group : undefined;
@@ -84,6 +100,16 @@ export function selectMutation(
     }
   }
   return pool[pool.length - 1] ?? null;
+}
+
+/** Whether `m` has not appeared yet and wave `wave` is inside its guarantee window. */
+function inGuaranteeWindow(
+  m: MutationConfig,
+  wave: number,
+  history: readonly MutationId[],
+): boolean {
+  const g = m.guarantee;
+  return g !== undefined && wave >= m.minWave && wave <= g.by && !history.includes(m.id);
 }
 
 /**

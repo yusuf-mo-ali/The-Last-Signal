@@ -115,3 +115,121 @@ describe('mutation selection: properties over 50 runs × waves 1–60', () => {
     );
   });
 });
+
+/** An rng that returns scripted values, then 0.5 forever. */
+class ScriptedRng extends Rng {
+  private readonly values: number[];
+  constructor(values: readonly number[]) {
+    super('scripted');
+    this.values = [...values];
+  }
+  override next(): number {
+    return this.values.shift() ?? 0.5;
+  }
+}
+
+describe('BLOOD MOON: a guaranteed first appearance on waves 9–12, by its own roll only (D-046)', () => {
+  const g = MUTATIONS.BLOOD_MOON.guarantee;
+  const from = MUTATIONS.BLOOD_MOON.minWave;
+  const by = g?.by ?? 0;
+
+  it('the window is 9–12', () => {
+    expect([from, by]).toEqual([9, 12]);
+  });
+
+  it('inside the window and unseen: chosen exactly when the roll is under 1 / waves left', () => {
+    for (let n = from; n <= by; n++) {
+      const p = 1 / (by - n + 1);
+      expect(selectMutation(n, ['HUNGER'], new ScriptedRng([p - 1e-9])), `wave ${n}`).toBe(
+        'BLOOD_MOON',
+      );
+      if (p < 1) {
+        expect(selectMutation(n, ['HUNGER'], new ScriptedRng([p])), `wave ${n}`).not.toBe(
+          'BLOOD_MOON',
+        );
+      }
+    }
+  });
+
+  it('a failed roll is final: the weighted draw never offers it as a second path', () => {
+    for (let n = from; n < by; n++) {
+      const p = 1 / (by - n + 1);
+      for (let k = 0; k < 200; k++) {
+        const u = p + ((1 - p) * k) / 200;
+        for (const draw of [0, 0.25, 0.5, 0.75, 0.999999]) {
+          const id = selectMutation(n, ['HUNGER'], new ScriptedRng([u, draw]));
+          expect(id, `wave ${n} roll ${u} draw ${draw}`).not.toBe('BLOOD_MOON');
+          expect(id, `wave ${n} roll ${u} draw ${draw}`).not.toBeNull();
+        }
+      }
+    }
+  });
+
+  it('wave 12 always brings it when it has not appeared, whatever the stream', () => {
+    for (let k = 0; k < 200; k++) {
+      expect(selectMutation(by, ['HIVE'], mutationRng(`w12-${k}`, by))).toBe('BLOOD_MOON');
+    }
+  });
+
+  it('once it has appeared, the normal weighted rules apply (no forced roll, no repeat)', () => {
+    // The first draw is the weighted one: 0 picks the first eligible mutation, not BLOOD MOON.
+    const history: MutationId[] = ['BLOOD_MOON', 'HUNGER'];
+    expect(selectMutation(11, history, new ScriptedRng([0]))).not.toBe('BLOOD_MOON');
+    expect(selectMutation(12, ['BLOOD_MOON'], new ScriptedRng([0.999999]))).not.toBe('BLOOD_MOON');
+    let later = 0;
+    for (let k = 0; k < 400; k++) {
+      if (
+        selectMutation(11, ['BLOOD_MOON', 'HIVE'], mutationRng(`after-${k}`, 11)) === 'BLOOD_MOON'
+      ) {
+        later++;
+      }
+    }
+    expect(later).toBeGreaterThan(0);
+  });
+
+  it('a pool without it (debug) has no guarantee', () => {
+    expect(selectMutation(12, ['HIVE'], new Rng('p'), { pool: ['HUNGER', 'HIVE'] })).toBe('HUNGER');
+  });
+
+  describe('over 2000 runs', () => {
+    const RUNS = 2000;
+    const schedules = Array.from({ length: RUNS }, (_, i) => mutationSchedule(`bm-${i}`, 60));
+    const firsts = schedules.map((s) => s.indexOf('BLOOD_MOON'));
+
+    it('the first BLOOD MOON is always on waves 9–12; never on 1–8 or 20', () => {
+      for (const [i, first] of firsts.entries()) {
+        expect(first, `run ${i}`).toBeGreaterThanOrEqual(9);
+        expect(first, `run ${i}`).toBeLessThanOrEqual(12);
+        expect(schedules[i]?.[FINAL_WAVE], `run ${i}`).toBeNull();
+      }
+    });
+
+    it('evenly: 25 % of first appearances on each wave; 1/4, 1/3, 1/2, 1 given none before', () => {
+      let remaining = RUNS;
+      for (let n = 9; n <= 12; n++) {
+        const here = firsts.filter((f) => f === n).length;
+        expect(here / RUNS, `share on wave ${n}`).toBeGreaterThan(0.22);
+        expect(here / RUNS, `share on wave ${n}`).toBeLessThan(0.28);
+        expect(here / remaining, `conditional on wave ${n}`).toBeCloseTo(1 / (12 - n + 1), 1);
+        remaining -= here;
+      }
+      expect(remaining).toBe(0);
+    });
+
+    it('afterwards it comes back under the normal rules, never twice in a row', () => {
+      let reappeared = 0;
+      for (const s of schedules) {
+        const played = s.filter((id): id is MutationId => id !== null);
+        if (played.filter((id) => id === 'BLOOD_MOON').length > 1) {
+          reappeared++;
+        }
+        for (let i = 1; i < played.length; i++) {
+          if (played[i] === 'BLOOD_MOON') {
+            expect(played[i - 1]).not.toBe('BLOOD_MOON');
+          }
+        }
+      }
+      expect(reappeared / RUNS).toBeGreaterThan(0.5);
+    });
+  });
+});
