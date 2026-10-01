@@ -1373,9 +1373,7 @@ function registerAdaptiveCommands(commands: DebugCommands, context: DebugContext
       adaptive.clear();
       adaptive.force(a.id, level === 2 ? 2 : 1, variant, n);
       if (!waves.startWave(n, 'none')) {
-        throw new Error(
-          `Cannot start a wave in ${context.game.state.current} (start a run first)`,
-        );
+        throw new Error(`Cannot start a wave in ${context.game.state.current} (start a run first)`);
       }
       return nextWave();
     },
