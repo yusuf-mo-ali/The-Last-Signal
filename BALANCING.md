@@ -347,7 +347,7 @@ Ranged (GAME_DESIGN §7.6): it punishes standing still at range, and every shot 
 
 Measured with the survival tripwire (§2.15): unmutated wave 12, with its one Spitter, stays at 0 health lost in all 10 seeds, since the defender shoots Spitters early.
 
-### 2.17 The Adaptive System and the Climber (`src/config/adaptation.ts`, `enemies.ts`, Phase 8, D-047)
+### 2.17 The Adaptive System and the Climber (`src/config/adaptation.ts`, `enemies.ts`, Phase 8, D-047; quotas Phase 8.1, D-048)
 
 The horde reacts to persistent play, never to a moment, and only by changing the mix (GAME_DESIGN §10). The numbers are set so that two consistent waves are the least that can trigger anything, and so that no response, alone or paired, takes a wave past what the scripted defender clears.
 
@@ -368,23 +368,54 @@ The horde reacts to persistent play, never to a moment, and only by changing the
 | Mutation discounts | BLACKOUT long range, headshot, accuracy ×0.4; Signal Glitch headshot, accuracy ×0.5, long range ×0.7; HUNGER mobility ×0.5, close range ×0.7; DEATH CRY mobility, dwell ×0.7; HIVE strain, close range ×0.6; BLOOD MOON headshot ×0.8 | What the mutation pushes the player into counts less, never nothing |
 | Attribution | ×0.25 toward an adaptation's own signal for what it brought | Runners from SKIRMISHER barely raise mobility; Climbers barely raise close range |
 
-**Adaptations** (enter / exit; confidence enter / exit)
+**Adaptations** (enter / exit; confidence enter / exit). Responses are quotas since Phase 8.1 (D-048): an archetype's share of the wave's threat budget, or a share of the wave carrying a trait on top of the scheduled rolls. They hold on every seed.
 
-| Adaptation | Signal | Confidence | Level 1 → level 2 | Why |
-|---|---|---|---|---|
-| HIGH_GROUND | elevation 0.45 / 0.25 | 0.6 / 0.35 | 1 → 2 Climbers (before wave 8: Runners ×1.25 → ×1.4); spawn bias to the 2 regions nearest the perch | Under half the wave on the catwalk is still "using" it; under a quarter is not |
-| ENTRENCHED | dwell 0.7 / 0.5 (elevation ≤ 0.25) | 0.6 / 0.35 | bias + Spitters ×1.25 → + Runners ×1.25 | Only when not on high ground (that is HIGH_GROUND's) |
-| SKIRMISHER | mobility 0.45 / 0.3 | 0.6 / 0.35 | Runners ×1.3 → ×1.5 | The plan's "high mobility → more Runners" |
-| CLOSE_QUARTERS | close range 0.5 / 0.35 | 0.6 / 0.35 | Tanks ×1.3 → + Armored +0.08 | Fighting at arm's length meets bodies that take it |
-| LONG_RANGE | long range 0.45 / 0.3 | 0.6 / 0.35 | Runners ×1.3 → + Screamers ×1.2 | Closes the gap |
-| HEADHUNTER | headshot 0.55 / 0.4 (accuracy ≥ 0.4) | 0.65 / 0.4 | Helmeted +0.08 → +0.12 | The plan's "extreme headshot rate → Helmeted"; one Pistol headshot of 65 still breaks a 50 helmet |
-| WEAPON_FOCUS | role 0.75 / 0.55 | 0.65 / 0.4 | dormant | With only the Pistol it would always fire (D-047) |
-| NEGLECT | neglect 0.6 / 0.4 | 0.6 / 0.35 | that archetype ×1.3 → ×1.5, within its per-wave cap | Support zombies left alive bring more of them |
+| Adaptation | Signal | Confidence | From wave | Level 1 → level 2 | Why |
+|---|---|---|---|---|---|
+| HIGH_GROUND | elevation 0.45 / 0.25 | 0.6 / 0.35 | 5 | 1 → 2 Climbers (before wave 8: Runners 35 % → 45 % of the budget); spawn bias to the 2 regions nearest the perch | Under half the wave on the catwalk is still "using" it; under a quarter is not |
+| ENTRENCHED | dwell 0.7 / 0.5 (elevation ≤ 0.25) | 0.6 / 0.35 | 5 | bias + Runners 25 % + Spitters (to the cap) → Runners 30 % | Only when not on high ground (that is HIGH_GROUND's) |
+| SKIRMISHER | mobility 0.45 / 0.3 | 0.6 / 0.35 | 5 | Runners 40 % → 45 % + bias | The plan's "high mobility → more Runners"; 40 % is about twice a normal wave's Runners |
+| CLOSE_QUARTERS | close range 0.5 / 0.35 | 0.6 / 0.35 | 8 | Tanks to their cap + Armored +15 % → +25 % | Before wave 8 the Tank cap (1) and Armored's schedule left it nothing to do |
+| LONG_RANGE | long range 0.45 / 0.3 | 0.6 / 0.35 | 5 | Runners 35 % → + Screamers to their cap (15 %) | Closes the gap; Screamers call the rest in |
+| HEADHUNTER | headshot 0.55 / 0.4 (accuracy ≥ 0.4) | 0.65 / 0.4 | 8 | Helmeted +15 % → +25 % | The plan's "extreme headshot rate → Helmeted"; one Pistol headshot of 65 still breaks a 50 helmet; Helmeted is scheduled from 8 |
+| WEAPON_FOCUS | role 0.75 / 0.55 | 0.65 / 0.4 | — | dormant (Armored +15 / 25 %, Tanks 30 / 40 %, Runners 35 / 45 %) | With only the Pistol it would always fire (D-047) |
+| NEGLECT | neglect 0.6 / 0.4 | 0.6 / 0.35 | Screamer 9, Spitter 11 | that archetype at its per-wave cap (30 %); one level | Support zombies left alive bring as many as a wave may hold; it starts where the cap first allows more than a wave usually has |
+
+**Clamps (D-048), enforced in compose and again in the generator:**
+- archetype quotas: at most 45 % of the budget each and 50 % together; the larger of two asks wins, and they never stack;
+- trait quotas: at most +25 % per trait and +30 % together.
+
+**Pressure:** levels weigh 1 and 2, NEGLECT 4, with at most 4 in all. So two adaptations may both be at level 2, but NEGLECT stands alone. Paired with anything, even at level 1, the tripwire's defender died on wave 12 (seed 0, killed by frenzied Walkers).
+
+**Before and after Phase 8.1** (mean of 300 seeds, generator only; L1 / L2 against the unadapted wave):
+
+| Wave 8 | Unadapted | Phase 8 (weights) | Phase 8.1 (quotas) |
+|---|---|---|---|
+| HIGH_GROUND | Climbers 0 | 1 / 2 | 1 / 2 (unchanged) |
+| SKIRMISHER | Runners 3.97 | 4.45 / 4.74 | **8.08 / 8.66** |
+| CLOSE_QUARTERS | Tanks 0.63, Armored 0.82 | Tanks 0.69 / 0.67, Armored 0.82 / 2.27 | **Tanks 1.00 (cap), Armored 3.62 / 4.64** |
+| LONG_RANGE | Runners 3.97, Screamers 0.74 | Runners 4.45 / 4.44, Screamers 0.70 / 0.77 | **Runners 7.59 / 7.28, Screamers 0.48 / 1.00 (cap)** |
+| HEADHUNTER | Helmeted 0.77 | 2.16 / 2.94 | **3.73 / 5.46** |
+| ENTRENCHED | Runners 3.97 | 3.97 / 4.38 | **6.69 / 6.92** |
+
+| Wave 12 | Unadapted | Phase 8 | Phase 8.1 |
+|---|---|---|---|
+| SKIRMISHER | Runners 4.52 | 5.36 / 5.91 | **11.39 / 12.11** |
+| CLOSE_QUARTERS | Tanks 1.19, Armored 5.12 | Tanks 1.32 / 1.24, Armored 5.05 / 6.85 | **Tanks 2.00 (cap), Armored 7.82 / 9.39** |
+| LONG_RANGE | Runners 4.52, Screamers 1.33 | Runners 5.36 / 5.29, Screamers 1.25 / 1.40 | **Runners 10.48 / 9.93, Screamers 0.72 / 2.00 (cap)** |
+| NEGLECT (Screamer) | Screamers 1.33 | 1.50 / 1.60 | **2.00 (cap)** |
+| NEGLECT (Spitter) | Spitters 0.60 | 0.68 / 0.72 | **1.00 (cap)**; wave 15: 1.15 → **2.00** |
+| HEADHUNTER | Helmeted 5.22 | 7.10 / 7.97 | **9.16 / 11.30** |
+
+- **Waves left unchanged out of 300:**
+  - Phase 8: many. On the probe seed, SKIRMISHER, LONG_RANGE, NEGLECT and HEADHUNTER at wave 8 gave exactly the unadapted wave.
+  - Phase 8.1: 0 for every adaptation and wave above.
+- **Bodies:** quotas buy dearer enemies out of the same budget, so a wave may have fewer bodies, never more. CLOSE_QUARTERS takes wave 8 from 19.3 to 15.9 / 15.4 enemies.
 
 | Guardrail | Setting | Why |
 |---|---|---|
-| First wave / evidence | wave 5; ≥ 2 fought waves | D-026 |
-| Active | ≤ 2, from different families | Bounded and never compounding |
+| First wave / evidence | wave 5 (later where the answer cannot act yet, above); ≥ 2 fought waves | D-026, D-048 |
+| Active | ≤ 2, from different families, pressure ≤ 4 | Bounded and never compounding; NEGLECT alone |
 | Level 2 | after 2 waves at level 1, confidence ≥ 0.85, not while strained | Escalation must be earned by persistence too |
 | Rest | 2 waves after a fade; forced after 4 waves active | No permanent counter; the player sees the horde pull back |
 | Strain governor | strain ≥ 0.5 with confidence ≥ 0.6 | Half a health bar lost per wave, two waves running |
@@ -403,22 +434,46 @@ The horde reacts to persistent play, never to a moment, and only by changing the
 | Drops | ammo 30 % | Like the other specials |
 
 **Measured (Pass 1, automated):**
-- **Composition only** (`waves/adaptiveWaves.test.ts`): every one of the 23 allowed pairs at level 2 on 500 seeded waves (5–30): the budget, concurrency, pacing, tier, theme and mutation are identical to the unadapted wave and every cap holds. Over 150 seeds on each of 8 waves, the mean enemy count is ×0.91–1.00 of the unadapted mean and the maximum ×1.03 (the test allows ×0.85–1.1). The mutation selection is identical over 30 waves.
-- **The integration run:** a player camping the catwalk from wave 1 gets HIGH_GROUND on wave 5, level 2 on wave 7, 2 Climbers on wave 8 and a forced rest from wave 9; one who roams gets nothing.
-- **Survival tripwire** (`adaptive/adaptive.tripwire.test.ts`, `BALANCE_REPORT=1`): the mutation tripwire's defender (§2.15) on waves 8 and 12, plain, then with every allowed pair forced at level 2 (23 pairs, 10 seeds each). The plain waves must cost at most 50 health (they cost 0); every adapted run must clear.
+- **Composition only** (`waves/adaptiveWaves.test.ts`):
+  - **Every family pair at level 2, 500 seeded waves (5–30):** the budget, concurrency, pacing, tier, theme and mutation are identical to the unadapted wave, and every cap holds.
+  - **Bodies, over 150 seeds on each of 8 waves:** the mean enemy count is ×0.70–1.05 of the unadapted mean, and the maximum ×1.03 (the test allows ×0.7–1.1). The lowest is SKIRMISHER + CLOSE_QUARTERS on wave 10.
+  - **Every adaptation, variant and level, on 40 seeds × every wave from its first wave to 30:** it changes the wave and meets its quota.
+  - **Mutation selection** is identical over 30 waves.
+- **Acceptance** (`adaptive/adaptive.acceptance.test.ts`, the full headless game):
+  - for each tested adaptation and level, the preview = the generated wave = what actually spawned, and its signature against the same wave without adaptation holds;
+  - adaptive OFF gives exactly the unadapted wave;
+  - the same seed gives the same spawns;
+  - the drawn mutation is the same.
+- **The integration run:** a player camping the catwalk from wave 1 gets:
+  - HIGH_GROUND on wave 5 (Runner-heavy waves 5–7);
+  - level 2 on wave 7;
+  - 2 Climbers on wave 8;
+  - a forced rest from wave 9.
+  One who roams gets nothing.
+- **Survival tripwire** (`adaptive/adaptive.tripwire.test.ts`, `BALANCE_REPORT=1`, `ONLY=` for tuning runs):
+  - **Setup:** the mutation tripwire's defender (§2.15) on waves 8 and 12, plain, then with every single adaptation and every allowed pair at its highest level, 10 seeds each (8 singles + 11 pairs).
+  - **Pass condition:** the plain waves must cost at most 50 health (they cost 0); every adapted run must clear.
 
-| Wave 12, 10 seeds each | Health lost (runs that lost any) |
-|---|---|
-| Plain | 0 in all 10 |
-| HIGH_GROUND + LONG_RANGE | 15 in 1 |
-| HIGH_GROUND + HEADHUNTER | 75 in 1 |
-| HIGH_GROUND + NEGLECT (Screamer) | 90 in 1 (seed 0, the worst) |
-| HIGH_GROUND + NEGLECT (Spitter) | 15 in 1 |
-| ENTRENCHED + HEADHUNTER | 25 in 1 |
-| LONG_RANGE + HEADHUNTER | 25 in 1 |
-| The other 17 pairs | 0 in all 10 |
+| Wave 12, 10 seeds each | Phase 8 (weights, pairs only) | Phase 8.1 (quotas, singles + allowed pairs) |
+|---|---|---|
+| Plain | 0 in all 10 | 0 in all 10 |
+| HIGH_GROUND (alone) | — | 42 in 1 |
+| NEGLECT (Spitter) alone | — | 15 in 1 |
+| HIGH_GROUND + HEADHUNTER | 75 in 1 | 15 in 1 |
+| CLOSE_QUARTERS + HEADHUNTER | 0 | 10 in 1 |
+| HIGH_GROUND + NEGLECT (Screamer) | 90 in 1 | not allowed (pressure) |
+| Other rows | 15–25 in 1 (4 pairs) | 0 in all 10 |
 
-Wave 8: 0 in every run, plain and with every pair (Climbers arrive there). Overall, 6 of 460 adapted runs drew blood and none died. HIGH_GROUND pairs cost most: they add 2 Climbers and bias spawns toward the player's area, and the defender never moves, so it cannot use the counter-play. No value was changed for the tripwire.
+- **Wave 8:** 0 in every run.
+- **Tuning on the way to these numbers:**
+  - NEGLECT at its cap paired with HIGH_GROUND killed the defender (seed 0); so did HEADHUNTER + NEGLECT on a 30-seed run. NEGLECT was made exclusive (pressure 4).
+  - LONG_RANGE's Screamer quota went 0.2 → 0.15, so the two quotas no longer exceed the 50 % total and shrink the Runners.
+- **30 seeds** (a robustness run, not the gate): 1 death in 1,140 adapted runs, NEGLECT (Spitter) alone, wave 12, seed 21.
+  - The wave already has its one Spitter, so the quota adds nothing.
+  - Placing it first reshuffles the seeded fill: Runners 5 and Screamers 1, against 3 and 2, with the same 2 Tanks. The defender falls to Walkers.
+  - The worst survivor lost 85 (HIGH_GROUND + CLOSE_QUARTERS).
+  - Phase 8 had 0 deaths in 1,380, with responses that barely changed the waves.
+  - A defender that never moves is the limit here; the counter-play to every response is movement.
 
 ---
 
@@ -446,3 +501,4 @@ Wave 8: 0 in every run, plain and with every pair (Climbers arrive there). Overa
 | 2026-10-01 | BLOOD MOON | first appearance guaranteed on waves 9–12 (exclusive roll, 25 % each) | Playtest: often not seen early (D-046) |
 | 2026-10-01 | Spitter; wave rules | Initial Pass-1 values (§2.16); unlock 10, caps, weights, opening | Phase 7.1 (D-046). Verified by automated tests (timing, ranges, dodge, splash, lifecycle) and browser checks; not play-tested by hand |
 | 2026-10-01 | Adaptive System (signals, profile, eight adaptations, guardrails, caps) and the Climber | Initial Pass-1 values (§2.17) | Phase 8 (D-047). Verified by automated tests (exact profile maths, the director's rules, composition invariants over 500 seeds, the integration run, the survival tripwire with every allowed pair at level 2) and browser checks; not play-tested by hand |
+| 2026-10-01 | Adaptive responses → quotas; first waves; NEGLECT one level and exclusive; LONG_RANGE Screamers 0.15 | Weights (×1.25–1.5) → archetype and trait quotas (§2.17); CLOSE_QUARTERS and HEADHUNTER from wave 8, NEGLECT Screamer 9 / Spitter 11; pressure limit 4 | Phase 8.1 (D-048): the playtest found adaptations announced but not visible. Measured: weights moved the means by 12–19 % and caps cancelled whole responses; quotas double the signature archetype or trait. Tripwire (10 seeds) clear |

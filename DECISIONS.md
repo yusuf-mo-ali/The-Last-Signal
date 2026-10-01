@@ -60,7 +60,8 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-044 | Phase 6 wave system: budget curve, seeded composition, fair spawn points, the wave cycle and slots for mutations, bosses and adaptation | Accepted |
 | D-045 | Phase 7 Signal Mutations: six v1 mutations as data, one effect runtime, DEATH CRY kept apart from the Screamer, and guardrails | Accepted |
 | D-046 | Phase 7.1 Mutation & Combat Polish: silhouettes in the dark, Signal Glitch, frenzy and last-known alarms, a guaranteed BLOOD MOON, and the Spitter | Accepted |
-| D-047 | Phase 8 Adaptive System: behaviour signals, confidence and decay, a composition-only adaptation vocabulary, SIGNAL ANALYSIS, and the Climber | Accepted |
+| D-047 | Phase 8 Adaptive System: behaviour signals, confidence and decay, a composition-only adaptation vocabulary, SIGNAL ANALYSIS, and the Climber | Accepted (responses amended by D-048) |
+| D-048 | Phase 8.1: adaptive responses as quotas, so every announced adaptation is visible in the next wave; no silent no-ops; a pressure limit | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -1368,6 +1369,92 @@ The fixes had to keep the Phase 7 architecture and guardrails: data-driven mutat
   - browser frames within noise of Phase 7.1, with or without two Climbers;
   - 12 programs and 2 lights, unchanged.
 - **Weapon focus is ready but dormant.** It goes live when a second firearm can be owned (Phase 9 / the Supply Terminal, O-13).
+
+---
+
+## D-048 — Phase 8.1: adaptive responses as quotas, so every announced adaptation is visible in the next wave
+**Status:** Accepted · **Date:** 2026-10-01
+
+**Context.**
+- The Phase 8 playtest: SIGNAL ANALYSIS named the player's style correctly, but the next wave did not feel adapted.
+- **Diagnosis, with read-only probes and then tests: not a wiring bug.**
+  - Every forced adaptation reached `WaveManager.modifiers(wave)`, the generated `WaveDefinition` and the actual spawns, identically (preview = definition = spawned).
+  - The decision is taken on `waveCompleted` and the wave is generated on the following WAVE_START: the timing is right.
+- **The responses were the problem.**
+  - D-047's weight multipliers (×1.25–1.5) only nudged the seeded random fill. Over 300 seeds the means moved a little (Runners +12–19 % at wave 8). On a given seed the wave was often identical, and occasionally had fewer of the boosted archetype.
+  - The readability caps swallowed whole responses in exactly the waves adaptations first enter:
+    - CLOSE_QUARTERS on waves 6–7: Tanks are capped at 1, and Armored only starts at wave 8;
+    - NEGLECT (Screamer) on waves 5–8: Screamers are capped at 1.
+  - HIGH_GROUND's fallback before the Climber's unlock added +0.2 Runners.
+  - Two announced adaptations therefore changed nothing at all, while SIGNAL ANALYSIS said they had.
+  - **Measured before the fix:** on one seed, forced at level 2 on wave 8, SKIRMISHER, LONG_RANGE and NEGLECT spawned exactly the unadapted wave, and CLOSE_QUARTERS spawned no Tank at all.
+- The owner's brief: prove the pipeline end to end. If the effect is too subtle, redesign the responses so each one has a clear gameplay signature, without just raising multipliers. Keep the threat budget, `maxAlive`, spawn rate, the mutation choice and schedule, unlocks, caps, the hard clamps, at most 2 active adaptations, and no runaway.
+
+**Decision.**
+1. **Quotas instead of odds.** The adaptive source gains two composition fields; the generator ignores them from any other source.
+   - **`archetypeShares`:** the least share of the wave's budget spent on an archetype.
+     - It is placed after the guarantees and the Climbers, and before the Walker floor and the random fill.
+     - It stays within the archetype's unlock, its per-wave cap and the budget.
+     - Of two asks for the same archetype, the larger wins; they never stack.
+   - **`traitShares`:** a running quota of Armored or Helmeted *on top of* the scheduled rolls. Each trait-eligible enemy that did not roll the trait gets it while the forced count is behind its share.
+     - It draws no randomness.
+     - It applies only once the trait's schedule has started, and never to Elite.
+     - It holds to within one enemy; the last points of the budget may not pay for it.
+   - Both hold on **every seed**, so the player sees them.
+   - **Clamps** (`modifierClamp.adaptive`), enforced in compose and again in the generator:
+     - share at most 0.45 per archetype, and at most 0.5 in total (the 30 % Walker floor always survives);
+     - trait share at most +0.25 per trait and +0.3 in total.
+2. **Responses** (`config/adaptation.ts`):
+
+   | Adaptation | Level 1 | Level 2 |
+   |---|---|---|
+   | HIGH_GROUND | 1 Climber; before wave 8, Runner share 0.35; spawn bias toward the perch | 2 Climbers (before 8: 0.45) |
+   | SKIRMISHER | Runner share 0.40 | 0.45 + spawn bias |
+   | CLOSE_QUARTERS | Tanks to their cap (share 0.35) + Armored +0.15 | Armored +0.25 |
+   | LONG_RANGE | Runner share 0.35 | + Screamers to their cap (0.15) |
+   | NEGLECT | The ignored support archetype at its cap (share 0.3) | — (`maxLevel: 1`) |
+   | HEADHUNTER | Helmeted +0.15 | +0.25 |
+   | ENTRENCHED | Spawn bias, Runner share 0.25, Spitters (once unlocked) | Runner share 0.3 |
+3. **No silent no-op: an adaptation enters only where its answer can act.**
+   - `firstWave` per adaptation and per variant: CLOSE_QUARTERS and HEADHUNTER from wave 8; NEGLECT of the Screamer from 9 (its cap becomes 2), of the Spitter from 11 (wave 10 always has exactly one).
+   - `maxLevel` 1 for NEGLECT: the cap is the limit, so no hollow "escalation".
+   - **Proven by a property test:** every adaptation, variant and level, on 40 seeds × every wave from its first wave to 30, changes the generated wave and meets its quota.
+4. **A pressure limit.**
+   - Level 1 weighs 1 and level 2 weighs 2; NEGLECT weighs 4; the combined limit is 4.
+   - So two adaptations may both reach level 2, but NEGLECT (support zombies at their cap, frenzying Screamers or acid) stands alone.
+   - **Why:** paired with anything, even at level 1, the survival tripwire's defender died on wave 12.
+   - **Where it is held:**
+     - the director never enters or escalates past it;
+     - composition holds it for any state, forced ones included: it sets aside what cannot fit even at level 1, then lowers levels;
+     - debug `force` sets aside what no longer fits.
+5. **Evidence tools (dev only).**
+   - `adaptive/inspect.ts explainWave` generates the wave with and without the adaptive source from the same seed and mutation, and reports:
+     - the delta per archetype and per trait;
+     - what each active adaptation changed on its own (`affected`).
+   - `WaveManager.planFor(n)` gives the run seed and the mutation the next wave will draw, without changing anything. `WaveManager` also tallies what actually spawned each wave.
+   - `tls.adaptation().nextWave`: the prediction, `matchesGenerated` once the wave exists, and the spawned counts.
+   - `tls.adaptationScenario(id, level, key, wave)`: a deterministic forced check.
+
+**Why.**
+- **A quota is visible by construction.** Raising multipliers would still leave per-seed noise and the caps' silent no-ops, and would add pressure where nobody can see it.
+- **A quota spends the same budget differently:** dearer enemies (Runners, Tanks, armour) mean fewer bodies, never more threat.
+- **Entering only where the answer acts keeps SIGNAL ANALYSIS honest.** Every line it shows now has a counterpart in the next wave.
+- **Some answers are too strong to combine.** The pressure limit expresses that as data rather than as a special case.
+
+**Consequences.**
+- **Wave 8, mean of 300 seeds, against the unadapted wave** (BALANCING §2.17 has the full tables):
+  - HIGH_GROUND: Climbers 0 → 1 / 2;
+  - SKIRMISHER: Runners 4.0 → 8.1 / 8.7;
+  - CLOSE_QUARTERS: Tanks 0.63 → 1 (the cap) and Armored 0.8 → 3.6 / 4.6;
+  - LONG_RANGE: Runners 4.0 → 7.6, and at level 2 Screamers 0.74 → 1;
+  - HEADHUNTER: Helmeted 0.8 → 3.7 / 5.5.
+- **NEGLECT**, at its first waves:
+  - Screamers 1.3 → 2 at wave 9;
+  - Spitters 0.6 → 1 at wave 12 and 1.15 → 2 at wave 15.
+- **No wave was ever unchanged** (0 of 300 per adaptation and wave).
+- **Bodies may drop** (CLOSE_QUARTERS: ×0.82 at wave 8) and never rise. The threat budget, `maxAlive`, rate, groups and mutation are identical, and so is the spend, to within one point.
+- **Survival tripwire** (10 seeds, waves 8 and 12, every single adaptation and every allowed pair at its highest level): every run clears. At most 42 health was lost, on HIGH_GROUND wave 12; 4 of 380 adapted runs lost any. Extended to 30 seeds there was one death in 1,140 adapted runs (the worst survivor lost 85, HIGH_GROUND + CLOSE_QUARTERS): NEGLECT (Spitter) alone, wave 12, seed 21. There the quota adds nothing, because the wave already has its one Spitter; it reshuffles the seeded fill into an equally heavy wave (2 Tanks). Phase 8 had 0 deaths in 1,380, but its responses barely changed the waves.
+- **Performance:** `generateWave` takes about 70–135 µs per wave, within noise of Phase 8. The simulation step at 24 alive is 0.30–0.41 ms, also within noise. The preview runs only on `tls` calls.
 
 ---
 

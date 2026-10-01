@@ -50,7 +50,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 
 ---
 
-## 3. What is covered (Phases 0–8)
+## 3. What is covered (Phases 0–8.1)
 
 | Area | Unit / integration | End-to-end |
 |---|---|---|
@@ -129,6 +129,7 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
 | **Adaptive waves** | `waves/adaptiveWaves.test.ts` (6): 23 allowed pairs at level 2 × 500 seeded waves (5–30): only the mix changes (budget, concurrency, pacing, tier, theme, mutation, groups, surges identical; caps hold; Climbers only from wave 8, ≤ 2, trait-free, not in the opening); never more bodies (mean ×0.85–1.1, max ×1.1, over 150 seeds × 8 waves); the adaptive source cannot reach mutation-only fields, Elites or traits before their schedule; its own clamp is exact; the finale ignores it; mutation selection never depends on it | — |
 | **The Climber** | `enemies/climber.test.ts` (6): only a climbing body's routes use climb links, every other route identical over every pair of nodes; every climb clear for its body and landing on the top; it comes up onto the catwalk sooner than a Walker takes the stairs; it never attacks from the wall; a body shot knocks it off; killed on the wall it lies at the foot; elevated spawn points only for an all-Climber group and never while the player is up there. `WaveGenerator.test.ts`, `EnemyManager.test.ts`, `gameplayConfig.test.ts`: implemented, not in the roster | `adaptation.spec`: a Climber comes up the wall at the perch, a hit knocks it off, no new program |
 | **Adaptation in the loop** | `adaptive/adaptive.integration.test.ts` (5), wired as `main.ts`: a catwalk camper gets HIGH_GROUND on wave 5, level 2 on 7, 2 Climbers on wave 8 and a rest on 9, while a roamer gets nothing; nothing decided during a wave; counting only in WAVE_ACTIVE (not paused, not in the breather); a new run forgets everything; identical decisions and waves at 30, 60 and 144 Hz; the mutation schedule identical with and without adaptation. `adaptive/adaptive.tripwire.test.ts`: the survival tripwire (BALANCING §2.17) | `adaptation.spec` (5): SIGNAL ANALYSIS only between waves and the next wave carries the answer, mutations unchanged; a real camp on the catwalk is what the telemetry sees; the end screen names the adaptations and a new run forgets them; any build: the card sits under the HUD, hidden, never taking the mouse |
+| **Adaptation reaches the wave** (Phase 8.1, D-048) | `adaptive/adaptive.acceptance.test.ts` (16), the full headless game, each wave played to its end with every spawn recorded. **The pipeline end to end:** for HIGH_GROUND, SKIRMISHER, CLOSE_QUARTERS, LONG_RANGE and HEADHUNTER at L1 and L2, and NEGLECT (both variants), on their signature waves (8, 9, 12, 15): <br>• the preview (`explainWave`) = the generated definition = the actual `enemySpawned` counts and traits = the WaveManager tally; <br>• the reference is exactly the game without adaptation; <br>• the adaptation `affected` the wave; <br>• its signature holds (Climbers = level; the Runner quota met and more Runners than the reference; Tanks at the cap and Armored doubled; Screamers or Spitters at the cap; Helmeted ≥ the quota and above the schedule). <br>**The constraints:** same budget, spent within 1; no mutation fields. **Also:** adaptive OFF gives exactly the unadapted wave; deterministic spawn order; with a drawn mutation the preview rebuilds the wave and the mutation and the run's mutation log are unchanged; debug force never exceeds `maxLevel` and sets aside what no longer fits. **Quota properties** (`waves/adaptiveWaves.test.ts`, +2): every adaptation, variant and level on 40 seeds × every wave from its first wave to 30 changes the wave and meets its quota; the generator's own clamps; quotas from other sources ignored; trait quotas before their schedule ignored. **Rules** (`adaptive/adaptive.test.ts`, +3): first waves, `maxLevel`, pressure (NEGLECT alone, two at level 2, `withinPressure`), quotas taking the larger ask | `adaptation.spec` (Phase 8.1): HIGH_GROUND L2 predicts 2 Climbers against a wave with none, and both spawn in normal play (every spawned archetype as generated); SKIRMISHER L2 predicts its Runner quota and the spawned Runners and traits match; switched off with SKIRMISHER forced, the generated wave is exactly the unadapted one |
 | **Sandbox mode** | — | The Phase 2–5 specs open `?sandbox=1` (training range, test encounter, one open-ended wave) through `openGame`; `waves.spec` opens the real wave-driven run |
 
 **Every end-to-end test also asserts a clean page:** no console errors or warnings, page errors, failed requests or HTTP errors. The only exceptions are ones a test deliberately provokes, and those are listed in the test.
@@ -154,6 +155,30 @@ VERCEL_AUTOMATION_BYPASS_SECRET=<secret> E2E_BASE_URL=https://… npm run test:e
     - enemies: the speed cap ignored, the acceleration stat never read;
     - the effect runtime and environment: speed, death-cry radius and STATIC opacity unclamped, bursts closer than the photosensitivity limit, the blackout below its visibility floor, overlays blended out of priority order.
   - Phase 7 first run: 31 of 32. The survivor (the acceleration multiplier never read) had no direct test; a new one gives the two stats different multipliers and checks the enemy's ground acceleration and a leap's. Every file was restored byte-identically (hash-checked), in a separate git worktree.
+  - Phase 8.1: 20 of 20 unit-level bugs caught (15 of 21 on the first run), each applied alone against the adaptive, acceptance, wave and config tests, with the file restored byte-identically (hash-checked):
+    - quotas ignored, above the cap, honoured from any source, unclamped per archetype or in total, stacking instead of the larger winning;
+    - the trait quota before its schedule, counting rolled traits (not on top), never forcing;
+    - `maxLevel` and a variant's `firstWave` ignored by the director; CLOSE_QUARTERS without its first wave; NEGLECT as light as any other; pressure ignored when entering, or by composition;
+    - debug force past `maxLevel`; adaptive OFF still applying; the preview using another seed or ignoring the mutation; the spawned tally not counting.
+
+    **The five misses were hardened with exact checks:**
+    - the generator's own quota clamp (an over-ask is the clamp, exactly);
+    - a trait quota before its schedule (the plain wave, exactly);
+    - stacking (a pair that does not hit the per-archetype clamp);
+    - composition past the pressure limit;
+    - force past `maxLevel`.
+
+    **The new composition check found a real bug:** `withinPressure` lowered the first adaptation's level before setting the second aside.
+
+    The sixth, "pressure ignored when escalating", cannot bind with today's data: the only heavy answer has one level and stands alone. It is an equivalent mutant, kept as a guard.
+  - Phase 8.1, end-to-end: 5 of 5 planted bugs caught by `adaptation.spec`, in a separate git worktree:
+    - adaptation never reaching the waves (`main.ts`);
+    - the spawned tally never counting;
+    - the preview drawing its own mutation for a generated wave;
+    - Runner quotas ignored by the generator;
+    - adaptation shaping waves while switched off.
+
+    The last one first passed: the forced SKIRMISHER had faded at the wave's end, so "off" compared two unadapted waves. It now forces SKIRMISHER again while off.
   - Phase 8: 28 of 28 unit-level bugs caught (23 of 29 on the first run), each applied alone with the adaptive, wave, navigation and Climber tests run and the file restored byte-identically (hash-checked):
     - the profile: one wave enough (full mass 1), no decay, persistence ignored in confidence, a mutation discount ignored, attribution off;
     - the director: hysteresis inverted, the rest ignored, a third adaptation, two from one family, the governor never on, escalation without waiting, no forced fade;
@@ -380,6 +405,12 @@ Record the date, browser version and results in PROGRESS.md.
 - [ ] **Other styles:** kiting at a sprint (Runners), staying in one room (spawns around it, Spitters), letting Screamers scream (more Screamers), headshots only (helmets from wave 8). Each change is told between waves.
 - [ ] **Bleeding:** take heavy damage two waves running: "You are bleeding. The horde hesitates, for now." Nothing new comes.
 - [ ] **End screens** name what the horde adapted to; a new run starts clean (`tls.adaptation()` empty).
+- [ ] **Phase 8.1: the next wave visibly carries the answer.**
+  - Sprint-kite for two waves: the next wave is clearly Runner-heavy (about twice the usual).
+  - Fight up close from wave 8: Tanks at their limit and many armoured bodies.
+  - Headshot-only from wave 8: many helmets.
+  - Let Screamers scream from wave 9: two (or three from wave 14) every wave.
+  - `tls.adaptation().nextWave.delta` shows the difference before the wave starts, and `tls.wave().spawnedComposition` shows it as it spawns.
 
 ### Resilience
 - [ ] **Context loss** (dev, real GPU): `tls.loseContext()` shows "Graphics paused"; `tls.restoreContext()` restores the scene and "Paused" → click resumes.
@@ -676,6 +707,17 @@ Occasional single steps of 11–191 ms appeared in some runs and not in others. 
 - **Within noise:** the run-to-run spread (4.1–6.7 FPS) is wider than any difference between builds; our CPU cost per frame did not rise.
 - **No recompiles, no new lights:** 12 programs and 2 lights in every run, 0 errors. The Climber shares the enemy program; its pose and look are per-archetype geometry.
 
+**Phase 8.1 (2026-10-01, adaptive quotas; alternating runs against the Phase 8 commit `8705063`):**
+
+| Scenario | Phase 8 | Phase 8.1 |
+|---|---|---|
+| `generateWave`, waves 12 and 19, plain and with SKIRMISHER L2, HIGH_GROUND L2 + HEADHUNTER L2, CLOSE_QUARTERS L2 + LONG_RANGE L2 (3,000 waves each) | 66–117 µs | 71–135 µs |
+| Simulation step, wave 19 at 24 alive, plain / HIGH_GROUND + HEADHUNTER at L2 | 0.33–0.38 / 0.31–0.33 ms | 0.30–0.33 / 0.32–0.41 ms |
+
+- **Within noise:** run-to-run spread is wider than any difference. A wave is generated once, in its intro.
+- **The added code:** the spawned tally is one map update per spawn. The preview (`explainWave`, two or three extra generations) runs only on `tls` calls.
+- Programs and lights are unchanged: the same archetypes, traits and pools. The Climber E2E checks that program ids stay constant.
+
 **Phase 1 details:**
 - **Player simulation (Node, headless):** 5.0 µs per step standing, 6.0 µs sprinting in the open, 10.3 µs pushing into a wall. At 60 steps/s that is under 0.1 % of a frame. Level collision: 480 triangles; world build ≈ 50 ms once at startup (including JIT warm-up).
 - **Reading:** our CPU work is ~1 ms per frame. SwiftShader's CPU rasteriser is the entire bottleneck (7 FPS at 1080p), so these rates say nothing about the GTX 750. The blockout is far inside every budget (draw calls 11 of 250).
@@ -686,7 +728,7 @@ Occasional single steps of 11–191 ms appeared in some runs and not in others. 
 
 ## 8. Known gaps
 
-- **Wall-clock-sensitive e2e tests.** Four Phase 1–3 development-build tests (`player.spec` WASD / jump / collision, `combat.spec` body-shot marker) hold keys or watch for a marker over a fixed real time. They assume ~10 FPS of software rendering; below ~7 FPS simulated time falls behind (at most 5 steps per frame) and they fail. Seen on the slower host of the Phase 4 final run, reproduced on the unchanged Phase 3 commit on that host, and passing on the earlier host. Seen again in Phase 5 on a host at 2–6 FPS, where two more fail for the same reason (`player.spec` sprint/crouch and `smoke.spec`'s fixed-step loop check, both timed in real time). All six fail identically on the unchanged Phase 4 commit on that host (control run). The Phase 4–5 enemy specs wait on simulated state with generous timeouts, so they pass at those frame rates. In the Phase 6 run, `combat.spec`'s headshot-marker test joined them (the marker is visible for about 120 ms and the page ran at 2–5 FPS); it and the body-shot test fail identically on the unchanged Phase 5 commit on the same host (control run), and the Phase 0 fixed-step check passed. In the Phase 7 run the same four `player.spec` tests and three `combat.spec` marker tests failed on a ~5 FPS host (the marker is shown for ~120 ms, shorter than a frame there); run alone on the unchanged Phase 6 commit on that host, the body-shot test failed both times and the headshot test once of two, so they are not Phase 7's. In the final Phase 7 run only the body-shot test failed of these, and once `enemies.spec`'s Walker chase, which reads `nav` in the instant between the Walker entering CHASE and its next decision (it passed 3 of 3 alone). In the Phase 7.1 run (a ~6 FPS host) the four `player.spec` tests and both `combat.spec` marker tests failed this way again. The Walker chase race also recurred; it is fixed (below). In the Phase 8 run two `player.spec` tests (WASD, collision) and the body-shot marker failed; re-run alone, the two `player.spec` tests passed and the marker test failed again. Fix when CI arrives: drive them by simulated time (as `enemies.spec` does) or run the suite at a smaller viewport.
+- **Wall-clock-sensitive e2e tests.** Four Phase 1–3 development-build tests (`player.spec` WASD / jump / collision, `combat.spec` body-shot marker) hold keys or watch for a marker over a fixed real time. They assume ~10 FPS of software rendering; below ~7 FPS simulated time falls behind (at most 5 steps per frame) and they fail. Seen on the slower host of the Phase 4 final run, reproduced on the unchanged Phase 3 commit on that host, and passing on the earlier host. Seen again in Phase 5 on a host at 2–6 FPS, where two more fail for the same reason (`player.spec` sprint/crouch and `smoke.spec`'s fixed-step loop check, both timed in real time). All six fail identically on the unchanged Phase 4 commit on that host (control run). The Phase 4–5 enemy specs wait on simulated state with generous timeouts, so they pass at those frame rates. In the Phase 6 run, `combat.spec`'s headshot-marker test joined them (the marker is visible for about 120 ms and the page ran at 2–5 FPS); it and the body-shot test fail identically on the unchanged Phase 5 commit on the same host (control run), and the Phase 0 fixed-step check passed. In the Phase 7 run the same four `player.spec` tests and three `combat.spec` marker tests failed on a ~5 FPS host (the marker is shown for ~120 ms, shorter than a frame there); run alone on the unchanged Phase 6 commit on that host, the body-shot test failed both times and the headshot test once of two, so they are not Phase 7's. In the final Phase 7 run only the body-shot test failed of these, and once `enemies.spec`'s Walker chase, which reads `nav` in the instant between the Walker entering CHASE and its next decision (it passed 3 of 3 alone). In the Phase 7.1 run (a ~6 FPS host) the four `player.spec` tests and both `combat.spec` marker tests failed this way again. The Walker chase race also recurred; it is fixed (below). In the Phase 8 run two `player.spec` tests (WASD, collision) and the body-shot marker failed; re-run alone, the two `player.spec` tests passed and the marker test failed again. The Phase 8.1 run failed the same three, plus `smoke.spec`'s fixed-step check (real-time drift 0.52 s against < 0.15 s). On the unchanged Phase 8 commit on the same host that check failed 2 of 2 (control run), and here it failed once and passed once. Fix when CI arrives: drive them by simulated time (as `enemies.spec` does) or run the suite at a smaller viewport.
 - **Fixed in Phase 7.1: a Signal Glitch frame could hold black.**
   - **What was seen:** two `mutations.spec` glitch tests failed in a full run and passed alone.
   - **Repro:** 12 held bursts gave one black hold (centre mean 10.6 against 121), with no GL error.
@@ -703,6 +745,11 @@ Occasional single steps of 11–191 ms appeared in some runs and not in others. 
   - **Result:** 13 of 13.
 - **Fixed in Phase 7.1: the Walker chase race in `enemies.spec`.** In the step a Walker enters CHASE, its route reads `none` until its next decision. The test now polls state and route together: 4 of 4.
 - **Phase 8: WEAPON_FOCUS is dormant.** Its measurement and responses exist and are tested as data, but nothing exercises them in play until a second firearm can be owned (Phase 9 / the Supply Terminal).
+- **Phase 8.1: one tripwire death in a 30-seed robustness run** (not the 10-seed gate, which is clear): NEGLECT (Spitter) alone, wave 12, seed 21.
+  - The quota adds nothing there, because the wave already has its one Spitter.
+  - Placing it first reshuffles the seeded fill into an equally heavy wave, and the defender, which never moves, falls to Walkers.
+  - Plain wave 15 already kills this defender on 4 of 30 seeds, so it cannot judge later waves at all.
+  - A defender that moves would test the counter-play the responses expect (BALANCING §2.17).
 - **Phase 8: the tripwire's defender never moves,** so it cannot test the Climber's real counter-play (coming down off the perch); the integration run and the E2E spec cover the climb itself. Adaptation feel needs the manual checklist (§6).
 - **No CI yet.** Recommended next infrastructure step: a GitHub Actions workflow running `npm ci`, `npm run check`, `npm run build` and `npm run test:e2e` on every PR. That would make "green" objective for every change.
 - **Vercel preview not reachable from the Claude Code container.** Its network policy denies `*.vercel.app`; allowing it would let the e2e suite run against each preview (`E2E_BASE_URL`).

@@ -464,22 +464,29 @@ The mutation is only read (which one the wave had); it is never changed.
 
 Eight adaptations in four families. **At most one per family and 2 in all** are active, so contradictory or compounding pairs never meet (for example, Climbers and extra Runners).
 
-| Adaptation | Family | Enters when (signal ≥, confidence ≥) | Level 1 | Level 2 | Counter-play |
-|---|---|---|---|---|---|
-| **HIGH_GROUND** | stance | elevation 0.45, 0.6 | 1 Climber (before wave 8: Runners ×1.25); spawns biased toward where the player stands | 2 Climbers (before wave 8: Runners ×1.4) | Come down; shoot Climbers off the wall |
-| **ENTRENCHED** | stance | dwell 0.7, 0.6 (only when not on high ground) | Spawns biased toward the player's area; Spitters ×1.25 (once unlocked) | Runners ×1.25 too | Relocate between waves; use cover against acid |
-| **SKIRMISHER** | stance | mobility 0.45, 0.6 | Runners ×1.3 | Runners ×1.5 | Hold a chokepoint; Runners die to body shots |
-| **CLOSE_QUARTERS** | range | closeRange 0.5, 0.6 | Tanks ×1.3 (once unlocked) | Armored +0.08 (once scheduled) | Keep your distance; headshot Tanks |
-| **LONG_RANGE** | range | longRange 0.45, 0.6 | Runners ×1.3 | Screamers ×1.2 too | Fight closer; kill Runners and Screamers first |
-| **HEADHUNTER** | precision | headshot 0.55, 0.65 (accuracy ≥ 0.4) | Helmeted +0.08 (once scheduled) | Helmeted +0.12 | Knock the helmet off with one shot, then headshot |
-| **WEAPON_FOCUS** | precision | weapon role 0.75, 0.65 | **Dormant in V1** (only the Pistol exists): shotgun → Armored, automatic → Tanks, precision → Runners | | Switch weapons |
-| **NEGLECT** | priority | neglect of the Screamer or the Spitter 0.6, 0.6 | That archetype ×1.3 (never above its cap) | ×1.5 | Kill support zombies first |
+**Every answer is visible in the next wave (D-048).** Each response is a quota, not odds:
+- **An archetype quota:** a share of the wave's threat budget spent on that archetype, within its unlock and cap.
+- **A trait quota:** a share of the wave carrying Armored or Helmeted on top of the scheduled rolls.
+
+Either one holds on every seed. The budget is the same, so the wave has a different mix and often fewer bodies, never more threat. The "Wave 8" columns are the mean of 300 seeds against the unadapted wave (BALANCING.md §2.17).
+
+| Adaptation | Family | Enters when (signal ≥, confidence ≥) | Level 1 | Level 2 | Wave 8 | Counter-play |
+|---|---|---|---|---|---|---|
+| **HIGH_GROUND** | stance | elevation 0.45, 0.6 | 1 Climber (before wave 8: Runners take 35 % of the budget); spawns biased toward where the player stands | 2 Climbers (before wave 8: 45 %) | Climbers 0 → 1 / 2 | Come down; shoot Climbers off the wall |
+| **ENTRENCHED** | stance | dwell 0.7, 0.6 (only when not on high ground) | Spawns biased toward the player's area; Runners 25 %; Spitters (once unlocked) | Runners 30 % | Runners 4.0 → 6.7 / 6.9 | Relocate between waves; use cover against acid |
+| **SKIRMISHER** | stance | mobility 0.45, 0.6 | Runners 40 % of the budget | 45 % + spawn bias | Runners 4.0 → 8.1 / 8.7 | Hold a chokepoint; Runners die to body shots |
+| **CLOSE_QUARTERS** | range | closeRange 0.5, 0.6, **from wave 8** | Tanks up to their cap; Armored on +15 % of the wave | Armored +25 % | Tanks 0.6 → 1, Armored 0.8 → 3.6 / 4.6 | Keep your distance; headshot Tanks |
+| **LONG_RANGE** | range | longRange 0.45, 0.6 | Runners 35 % | + Screamers up to their cap | Runners 4.0 → 7.6 / 7.3, Screamers → cap | Fight closer; kill Runners and Screamers first |
+| **HEADHUNTER** | precision | headshot 0.55, 0.65 (accuracy ≥ 0.4), **from wave 8** | Helmeted on +15 % of the wave | +25 % | Helmeted 0.8 → 3.7 / 5.5 | Knock the helmet off with one shot, then headshot |
+| **WEAPON_FOCUS** | precision | weapon role 0.75, 0.65 | **Dormant in V1** (only the Pistol exists): shotgun → Armored, automatic → Tanks, precision → Runners | | — | Switch weapons |
+| **NEGLECT** | priority | neglect of the Screamer (**from wave 9**) or the Spitter (**from 11**) 0.6, 0.6 | That archetype at its per-wave cap, every wave | — (the cap is the limit) | Screamers 1.3 → 2 (wave 9) | Kill support zombies first |
 
 **Each adaptation, every time:**
 - **Hysteresis:** it leaves only when its signal drops under a lower exit threshold (for example HIGH_GROUND: 0.25) or its confidence under 0.35 (HEADHUNTER: 0.4).
-- **Level 2** only after 2 waves at level 1 with confidence 0.85 or more, and never while the player is bleeding (§10.4).
+- **Level 2** only after 2 waves at level 1 with confidence 0.85 or more, and never while the player is bleeding (§10.4). NEGLECT has one level.
 - **A forced rest** after 4 waves active, then 2 waves before it may enter again; the same 2-wave rest follows a fade.
-- Not before wave 5, not before 2 fought waves, and **never on the final wave** (20), which is hand-tuned. Endless keeps adapting.
+- Not before wave 5 (later where its answer cannot act yet, see the table), not before 2 fought waves, and **never on the final wave** (20), which is hand-tuned. Endless keeps adapting.
+- **Pressure (D-048):** level 1 weighs 1, level 2 weighs 2, NEGLECT 4; together at most 4. Two adaptations may both reach level 2, but NEGLECT stands alone: support zombies at their cap, paired with anything else, overwhelmed the survival tripwire's defender.
 
 ### 10.3 Confidence and decay (the profile)
 
@@ -503,16 +510,18 @@ confidence  = min(1, mass / 2) × above / mass
 2. **Minimum evidence:** two consistent waves (§10.3), from wave 5.
 3. **Hysteresis, levels, rests:** §10.2.
 4. **Bounded influence**, clamped in the generator whatever is active:
-   - weights ×0.75–1.6 per archetype from adaptation;
-   - Armored + Helmeted +0.15 in total, only once their schedule has started; never Elite;
+   - archetype quotas at most 45 % of the budget each and 50 % together (the 30 % Walker floor always survives); weights ×0.75–1.6 per archetype;
+   - trait quotas at most +25 % per trait and +30 % together; trait chances +0.15 in total; only once a trait's schedule has started; never Elite;
    - at most 2 Climbers, from wave 8, trait-free, not in the opening;
    - spawn bias toward at most 2 regions.
 5. **Composition only:** the budget, concurrency, spawn rate, groups, surges, Elite limits, unlocks, per-archetype caps, the mutation, tier and theme are untouched. With a fixed budget, adaptation can only change the mix, never add threat.
-6. **No runaway:**
+6. **Never a silent answer (D-048):** an adaptation enters only from the wave its answer can act on (its `firstWave`), and every answer changes the next wave on every seed (a property test). What SIGNAL ANALYSIS says is in the wave.
+7. **No runaway:**
    - **Attribution:** what an active adaptation brought counts ×0.25 toward its own signal, so a response cannot feed its cause (for example, Runners making the player run).
    - **The strain governor:** with heavy damage on consecutive waves, nothing enters, nothing escalates, and level 2 drops to level 1. Pressure only rises while the player copes. It never secretly eases the waves.
-7. **Fair spawns:** Climbers obey every spawn rule; only they may use an elevated spawn point, and never while the player is up there.
-8. **Run-scoped:** a new run forgets everything. The profile is versioned and keyed by signal, so a later meta-progression can store or seed it without a schema migration.
+   - **The pressure limit (D-048):** at most two at level 2 together; NEGLECT, the heaviest answer, never pairs.
+8. **Fair spawns:** Climbers obey every spawn rule; only they may use an elevated spawn point, and never while the player is up there.
+9. **Run-scoped:** a new run forgets everything. The profile is versioned and keyed by signal, so a later meta-progression can store or seed it without a schema migration.
 
 ### 10.5 SIGNAL ANALYSIS (communication)
 

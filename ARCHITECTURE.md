@@ -729,9 +729,16 @@ EnemyView: a climbing pose (arms up), shared program and per-archetype pool like
   - The spend is within 1 of the budget.
   - Heavies are kept out of the opening 15% of the spawn order.
   - Only `DEFAULT_ROSTER` archetypes are drawn; an archetype outside the roster comes only from the adaptive source, from its `WAVE_RULES.adaptiveUnlocks` wave (the Climber: 8), trait-free and at most `extraArchetypeMax` (2) per wave. `extraCounts` places exactly that many (within the budget), never drawn.
-- **Plug-in channel: `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, extraCounts, budgetMultiplier, spawnBias}`.** Adaptive (Phase 8) and mutation (Phase 7) effects arrive this way. Adaptation never changes the budget (D-026); only a mutation's `budgetMultiplier` may, clamped.
+- **Plug-in channel: `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, extraCounts, archetypeShares, traitShares, budgetMultiplier, spawnBias}`.** Adaptive (Phase 8) and mutation (Phase 7) effects arrive this way. Adaptation never changes the budget (D-026); only a mutation's `budgetMultiplier` may, clamped.
   - Phase 8 (D-047): the adaptive source is clamped on its own first (`modifierClamp.adaptive`: weights ×0.75–1.6 per archetype, Armored + Helmeted ≤ +0.15 in total and only once a trait's schedule has started, never Elite, ≤ 2 bias regions), then everything together as before. Mutation-only fields from it are ignored, and the finale ignores the adaptive source entirely.
   - `WaveManagerOptions.modifiers(wave)` is called once per generated wave with that wave's number; `AdaptiveSystem.modifiers` composes from a state that changes only when a wave ends (§7.9).
+  - **Phase 8.1 (D-048): quotas.** Two adaptive-only fields make a response visible on every seed:
+    - **`archetypeShares`:** an archetype's least share of the budget, placed after the guarantees and counted extras and before the Walker floor and the seeded fill, within the unlock, cap and budget. The larger of two asks wins.
+    - **`traitShares`:** a running quota in `add()`. An eligible enemy that did not roll the trait gets it while the forced count is behind `share × eligible`. It draws no randomness; it applies only once the trait is scheduled and never to Elite; where the budget cannot pay, the extra trait is dropped.
+    - **Clamps:** `modifierClamp.adaptive.share` / `shareTotal` (0.45 / 0.5) and `traitShare` / `traitShareTotal` (0.25 / 0.3).
+  - **Evidence:**
+    - `WaveManager.planFor(n)` gives the run seed and the mutation the next `beginWave` would draw, and changes nothing;
+    - `WaveStatus.spawnedComposition` / `spawnedTraits` count what actually spawned this wave.
   - Phase 7 (D-045): `generateWave` turns the mutation's `spawnRule` data into a `source: 'mutation'` modifier itself (`mutationModifiers(id, n)`), so previews, debug jumps and play build the same wave. Mutation-only fields: `eliteMaxBonus` (≤ 3), `eliteMinimum` (≤ 2, Walkers promoted within the budget) and `surges` (→ `definition.surges`, each `{at, size, warning}`, clamped).
 - **`WaveMutation.selectMutation(n, history, rng)` selects the wave's mutation ID** (pure; D-045): none on waves 1–3 and 20, one on every other wave; enabled mutations whose `minWave` has come; never the previous one or the previous `vision` group; tier weights with a recent-use penalty; stream `${runSeed}:mutation:${n}`. `WaveManager` keeps the played history (a regenerated wave replaces its entry) and a debug override. **`SignalMutationSystem` applies it** (§4) and reverts it. Selection and application are deliberately separate systems.
 - **`SpawnDirector` picks a fair spawn point for each group** from the level's authored `spawnPoints`:
@@ -792,13 +799,22 @@ changes → adaptationDecided ─► ui/SignalAnalysis (breather only) · end sc
 | `adaptive/measure.ts` | sim (pure) | Telemetry → evidence |
 | `adaptive/profile.ts` | sim (pure) | Fold, confidence, `normalizeProfile` (drops unknown keys, clamps values: future persistence) |
 | `adaptive/director.ts` | sim (pure) | `decide`, `governorOn`, `analysisText` |
-| `adaptive/compose.ts` | sim (pure) | Active adaptations → one modifier (levels, the Climber's fallback before its unlock, the dwell regions); `boostedArchetypes` for attribution |
+| `adaptive/compose.ts` | sim (pure) | Active adaptations → one modifier (levels, quotas and trait quotas with their clamps, the Climber's fallback before its unlock, the dwell regions); `withinPressure` / `pressureOf` / `totalPressure` (D-048); `boostedArchetypes` for attribution |
+| `adaptive/inspect.ts` | debug/tests (pure) | `explainWave`: the wave with and without the adaptive source (same seed and mutation), the delta per archetype and trait, what each active adaptation changed alone (D-048) |
 | `adaptive/AdaptiveSystem.ts` | sim | The lifecycle (a `FixedUpdateSystem`): reset on PLAYING, count in WAVE_ACTIVE/BOSS, decide on `waveCompleted`; `adaptationDecided` / `adaptationReset`; debug `force`, `clear`, `feed`, `setEnabled` |
 | `ui/SignalAnalysis.ts` | presentation | The SIGNAL ANALYSIS card: shown only in WAVE_COMPLETE or UPGRADE_SELECTION and only with changes (`data-changes`) |
 
 - **Mutation ownership (D-024, D-045).** The adaptive code never imports `signal/` or the mutation selector (an import-boundary test). It reads only the wave's mutation id from `waveStarting`, to discount evidence; the generator ignores mutation-only fields from the adaptive source. Tests show the mutation schedule is identical with and without adaptation.
 - **Determinism.** Sampling runs on step counts; events arrive in step order; the pure stages break ties by priority, id and key. The same seed and play give the same decisions and waves at 30, 60 and 144 Hz (integration test).
 - **Wiring** (`main.ts`): `waves.modifiers = (wave) => adaptive.modifiers(wave)`; the sandbox has no adaptive system. The debug tools (D-020) read `snapshot` and call `force`, `clear`, `feed`, `setEnabled`.
+- **Phase 8.1 (D-048).**
+  - **Responses are quotas** (§7.8), so an announced adaptation is in the next wave on every seed.
+  - **No answer that cannot act:** an adaptation or variant enters only from its `firstWave`, and `maxLevel` caps escalation.
+  - **The pressure limit:** levels weigh 1 / 2, NEGLECT 4, with at most 4 in all. It is held three times:
+    - the director never enters or escalates past it;
+    - `composeModifiers` applies `withinPressure` to any state, setting aside what cannot fit at level 1, then lowering levels;
+    - debug `force` sets aside what no longer fits.
+  - **Inspection** (dev): `tls.adaptation().nextWave` is `explainWave` for the wave the adaptations shape, plus `matchesGenerated` and the spawned tallies once it exists. `tls.adaptationScenario(id, level, key, wave)` forces one and starts that wave with no mutation.
 - **Reset and persistence.** Everything is run-scoped. The profile is versioned and keyed by signal id, so a later phase can store it or seed a run with scaled-down priors without a schema migration (unknown keys dropped, missing keys empty).
 
 ### 7.10 World, environment and signal (D-028)
@@ -996,17 +1012,19 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 - simulation per step unchanged by any mutation (~0.2 ms at 24 alive); a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms;
 - **no real-time lights were added.** Three emergency and one muzzle point light, present from load, cost ~25 % of the frame in software rendering in every wave, even at intensity 0; they were replaced by emissive lamps with unlit floor pools and a fill-light rise while the muzzle flash shows. Frame rates are within noise of Phase 6; the program count is constant (11).
 
-**Phase 8 baseline** (the Adaptive System; TESTING.md §7.4):
-- **Simulation:** within noise with telemetry on (0.20 vs 0.22 ms per step at 24 alive, alternating runs; +2 Climbers 0.21 ms); one decision (measure, fold, decide, compose) ~10 µs per wave.
-- **Browser, wave 19 at 24 alive (4 alternating rounds):** Phase 7.1 mean 5.2 fps, Phase 8 4.9 fps, Phase 8 with 2 Climbers 5.5 fps: within the run-to-run spread (4.1–6.7). Our CPU cost per frame 5.1 / 4.5 / 4.3 ms.
-- **Programs and lights:** 12 programs and 2 lights in every run, unchanged; the Climber shares the enemy program.
-
 **Phase 7.1 baseline** (TESTING.md §7.4):
 - **Simulation:** within noise of Phase 7, acid included: 0.31–0.49 ms per step at 24 alive; 24 deaths in one step under DEATH CRY, with frenzy and last-known alerts, 0.68–0.70 ms.
 - **Browser:** within the run-to-run spread outside Signal Glitch bursts.
 - **Program count:** 12 (the glitch quad, compiled at load), constant through every mutation and burst.
 - **Burst frames:** with a burst forced every second, frames are ~16 % slower (budget ≤ 25 % while a burst shows). A multisampled glitch target would cost ~27 %, so it is single-sample.
 - **Draw calls:** + the acid blobs and splats while they show. Each enemy is still one draw call (the shader patch adds none).
+
+**Phase 8 baseline** (the Adaptive System; TESTING.md §7.4):
+- **Simulation:** within noise with telemetry on (0.20 vs 0.22 ms per step at 24 alive, alternating runs; +2 Climbers 0.21 ms); one decision (measure, fold, decide, compose) ~10 µs per wave.
+- **Browser, wave 19 at 24 alive (4 alternating rounds):** Phase 7.1 mean 5.2 fps, Phase 8 4.9 fps, Phase 8 with 2 Climbers 5.5 fps: within the run-to-run spread (4.1–6.7). Our CPU cost per frame 5.1 / 4.5 / 4.3 ms.
+- **Programs and lights:** 12 programs and 2 lights in every run, unchanged; the Climber shares the enemy program.
+
+**Phase 8.1 baseline** (adaptive quotas; TESTING.md §7.4): `generateWave` takes 70–135 µs per wave with or without quotas, within noise of Phase 8. The simulation step at 24 alive is 0.30–0.41 ms on both versions, alternating runs. The spawned tally is one map update per spawn. The preview (`explainWave`) runs only on `tls` calls.
 
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);

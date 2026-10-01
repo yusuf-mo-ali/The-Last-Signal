@@ -10,6 +10,18 @@
 
 ## Current Phase
 
+**Phase 8.1: Adaptive System fix. Complete** (D-048), after the Phase 8 playtest found that SIGNAL ANALYSIS named the right playstyle but the next wave did not feel adapted.
+- **Diagnosis: not a wiring bug.**
+  - Every forced adaptation reached the generated wave and the actual spawns, identically.
+  - The weight-based responses only nudged the seeded fill: often no change on a given seed.
+  - The per-wave caps silently cancelled CLOSE_QUARTERS and NEGLECT where they first entered.
+- **Fix:**
+  - Responses are now **quotas**: an archetype's share of the same threat budget, or a share of the wave carrying a trait. They are visible on every seed. On wave 8, Runners go 4.0 → 8.1–8.7 (SKIRMISHER) and Helmeted 0.8 → 3.7–5.5 (HEADHUNTER).
+  - An adaptation enters only where its answer can act.
+  - A **pressure limit** keeps NEGLECT alone.
+  - **Dev evidence:** `tls.adaptation().nextWave` (with and without adaptation, the delta, `matchesGenerated`, what spawned) and `tls.adaptationScenario()`.
+- **Kept:** the budget, `maxAlive`, rate, the mutation and its schedule, unlocks, caps and the clamps.
+
 **Phase 8: Adaptive System. Complete** (D-047, amending D-026). The horde watches how the player keeps playing and changes **which zombies later waves bring**, never how many, never a mutation and never during a wave:
 - **Ten observed categories** become signals, each with a decayed memory and a confidence. One wave can never trigger anything; two consistent waves can.
 - **Eight adaptations** in four exclusive families (at most 2 active, 2 levels each, hysteresis, rests, a forced rest after 4 waves), from wave 5. Weapon focus is dormant until a second firearm exists.
@@ -18,7 +30,7 @@
 - **SIGNAL ANALYSIS** explains every change between waves; nothing marks an adapted zombie during one. The end screens name what the horde adapted to.
 - **The Climber** (adaptive only, wave 8+): the answer to camping the catwalk. It climbs three one-way climb links, can be shot off the wall and never attacks from it.
 
-Phase 9 has not started and is awaiting approval. See "Phase 8 acceptance review" below.
+Phase 9 has not started and is awaiting approval. See "Phase 8.1 acceptance review" and "Phase 8 acceptance review" below.
 
 - Phase 7.1 (Mutation & Combat Polish) is complete (D-046): BLACKOUT silhouettes, Signal Glitch, DEATH CRY and Screamer frenzies, the BLOOD MOON guarantee, and the Spitter.
 
@@ -364,9 +376,51 @@ Phase 9 has not started and is awaiting approval. See "Phase 8 acceptance review
     - `npm run test:e2e` (development and production, run in four parts): 106 passed, 3 failed, all documented wall-clock failures (TESTING §8): two `player.spec` tests (both passed when re-run alone) and `combat.spec`'s body-shot marker (failed again alone, as on earlier hosts). `adaptation.spec` 5 of 5 in both builds.
     - Performance against Phase 7.1, alternating runs (TESTING.md §7.4): the simulation step within noise (0.20 vs 0.22 ms at 24 alive), a decision ~10 µs per wave, browser frames within noise with or without two Climbers, 12 programs and 2 lights throughout.
 
+- [x] **Phase 8.1: Adaptive System fix** (D-048), after the Phase 8 playtest. The plan was approved: diagnose first, then quotas.
+  - **Diagnosis:**
+    - Read-only probes, then an acceptance suite: the pipeline works end to end (preview = definition = spawned).
+    - **Before the fix:** over 300 seeds the means moved 12–19 % (Runners at wave 8). On the probe seed SKIRMISHER, LONG_RANGE, NEGLECT and HEADHUNTER left wave 8 exactly unchanged, and CLOSE_QUARTERS brought no Tank.
+  - **Evidence tools:**
+    - `adaptive/inspect.ts` (`explainWave`);
+    - `WaveManager.planFor` and the spawned tallies (`tls.wave().spawnedComposition` / `spawnedTraits`);
+    - `tls.adaptation().nextWave`;
+    - `tls.adaptationScenario(id, level, key, wave)`.
+  - **The generator:**
+    - `archetypeShares` (budget quotas before the seeded fill, within unlocks, caps and the budget);
+    - `traitShares` (a running quota on top of the scheduled rolls, no extra randomness);
+    - clamps 0.45 / 0.5 and +0.25 / +0.3.
+  - **Responses** (BALANCING §2.17):
+    - Runners 40 / 45 % (SKIRMISHER) and 35 % (LONG_RANGE, plus Screamers to the cap at L2);
+    - Tanks to the cap with Armored +15 / 25 % (CLOSE_QUARTERS);
+    - Helmeted +15 / 25 % (HEADHUNTER);
+    - the ignored support archetype at its cap (NEGLECT);
+    - Runners before the Climber's unlock (HIGH_GROUND);
+    - ENTRENCHED with Runners and Spitters.
+  - **No silent no-op:**
+    - per-variant first waves: CLOSE_QUARTERS and HEADHUNTER from 8, NEGLECT Screamer 9 and Spitter 11;
+    - `maxLevel` 1 for NEGLECT.
+  - **Pressure:** levels weigh 1 / 2 and NEGLECT 4, at most 4. Held by the director, by composition (`withinPressure`) and by debug force.
+  - Verified:
+    - **Tests:** 1343 in the suite (21 new), including:
+      - the acceptance suite (16);
+      - every adaptation's signature on every seed and wave it may act on;
+      - adaptive OFF identical to the unadapted wave;
+      - mutations unchanged.
+    - **Browser:** `adaptation.spec` HIGH_GROUND L2 → 2 Climbers spawned in normal play; SKIRMISHER L2 → the predicted Runner-heavy wave spawned; off → the unadapted wave.
+    - **Planted bugs:** 20 of 20 unit-level (15 of 21 on the first run; five tests hardened; one equivalent mutant) and 5 of 5 end-to-end (one test hardened). One real bug found and fixed: `withinPressure`'s order.
+    - **Survival tripwire:** waves 8 and 12, 10 seeds, every single adaptation and allowed pair: all cleared, at most 42 health lost.
+      - NEGLECT paired had killed the defender, so it is now exclusive.
+      - The 30-seed robustness run had 1 death in 1,140 adapted runs: a reshuffle of a heavy seed (BALANCING §2.17, TESTING §8).
+    - **Performance:** within noise of Phase 8 (`generateWave` 70–135 µs per wave; step 0.30–0.41 ms at 24 alive).
+    - **Build and check:** `npm run check` passes; `npm run build` has no warnings (game 243.2 kB, 79.0 kB gzipped); no debug code in `dist/`; the plan's hash is unchanged.
+    - **`npm run test:e2e`** (development and production, four parts): 106 passed, 4 failed, all wall-clock (TESTING §8):
+      - two `player.spec` tests and `combat.spec`'s body-shot marker, as in Phase 8;
+      - `smoke.spec`'s fixed-step check, which failed 2 of 2 on the unchanged Phase 8 commit on the same host (control run) and passed on a re-run here.
+      - `adaptation.spec`: 6 of 6 in both builds.
+
 ## Active Task
 
-None. Phase 8 is complete; waiting for approval to start **Phase 9**.
+None. Phase 8.1 is complete; waiting for approval to start **Phase 9**.
 
 ## Known Bugs
 
@@ -378,6 +432,9 @@ None. Phase 8 is complete; waiting for approval to start **Phase 9**.
 
 **Needed from you:**
 - Approval to start Phase 9.
+- A hands-on replay of the adaptation playtest after Phase 8.1 (TESTING.md §6, "Phase 8.1"):
+  - each style should now be visible in the next wave;
+  - `tls.adaptation().nextWave.delta` shows the difference before the wave starts.
 - A hands-on playtest of the Adaptive System (TESTING.md §6, "Adaptive System and the Climber"):
   - camp the catwalk for a few waves, then read SIGNAL ANALYSIS and meet the Climbers from wave 8;
   - change style and see the horde let go;
@@ -524,6 +581,29 @@ Reviewed 2026-09-25 against the code on this branch.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
 - O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 8.1 acceptance review (D-048)
+
+Reviewed 2026-10-01 against the owner's Phase 8.1 brief and the approved plan.
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Diagnose the whole pipeline (telemetry → decision → frozen modifiers → `WaveManager.modifiers()` → `generateWave()` → definition → spawns) with hard evidence | Done | Read-only probes, then `adaptive.acceptance.test` (preview = definition = spawned = tally) and `adaptation.spec` (spawned counts in the browser). **Verdict:** not a wiring bug; the responses were too weak, and caps cancelled some |
+| Dev inspection: active, levels, frozen modifiers, next composition, reference, delta, per-modifier effect | Done | `tls.adaptation().nextWave` (`adapted`, `reference`, `delta`, `perAdaptation[].affected`, `matchesGenerated`, `spawned`), `tls.wave().spawnedComposition` |
+| A deterministic scenario: HIGH_GROUND L2, Climbers generated and spawned, others rebalanced | Done | `tls.adaptationScenario`; acceptance test; E2E: 2 Climbers spawned in normal play; Walkers and Runners give way within the same budget |
+| SKIRMISHER, CLOSE_QUARTERS, LONG_RANGE, NEGLECT, HEADHUNTER visibly different from baseline | Done | BALANCING §2.17 before/after tables (300 seeds); acceptance signatures on every tested seed and wave; property test: never unchanged |
+| Measure the deltas; redesign if too subtle, without just raising multipliers | Done | Weights moved means 12–19 % → quotas (Runners ×2, Helmeted ×4–5 at wave 8, the subject at its cap) |
+| Budget, `maxAlive`, rate, mutation choice and schedule, unlocks, caps, hard clamps, ≤ 2 active, no runaway | Done | Generator and acceptance invariants; clamps; pressure limit; attribution and governor unchanged |
+| Next wave only; no mid-wave spawning or secret changes | Done | Unchanged: modifiers frozen until the wave ends (integration test) |
+| Acceptance tests and browser E2E | Done | 16 acceptance tests, 2 property tests, 3 rule tests; `adaptation.spec` Phase 8.1 test; planted bugs 20/20 + 5/5 |
+| Tune after proving | Done | Tripwire-driven: NEGLECT exclusive; LONG_RANGE Screamer quota 0.15 |
+
+**Open items that do not block Phase 9:**
+- a hands-on replay of the Phase 8 playtest (TESTING §6, "Phase 8.1");
+- a moving tripwire defender (TESTING §8);
+- the earlier open items below.
 
 ---
 
