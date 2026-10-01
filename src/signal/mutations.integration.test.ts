@@ -360,18 +360,26 @@ describe('the Spitter’s acid in the run (D-046)', () => {
     if (!acid) {
       throw new Error('no projectile');
     }
-    const lob = () => g.projectiles.fire('spitter-x', 'spitter', [0, 20, 0], [0, 1, 0], acid);
+    // Hanging in the air for good: only clearing can remove it.
+    const hanging = { ...acid, gravity: 0, lifetime: 1e6 };
+    const lob = () => g.projectiles.fire('spitter-x', 'spitter', [0, 20, 0], [0, 0, 0], hanging);
     lob();
-    g.frames(2);
+    g.frames(120);
     expect(g.projectiles.count).toBe(1);
     // The wave ends: gone at once, no impact.
     g.killWave();
-    g.until(() => g.game.state.current === 'WAVE_COMPLETE', 10);
+    g.until(() => {
+      g.killWave();
+      return g.game.state.current !== 'WAVE_ACTIVE';
+    }, 120);
+    expect(g.game.state.current).toBe('WAVE_COMPLETE');
     expect(g.projectiles.count).toBe(0);
     // Death ends the run: gone.
     g.waves.startWave(13, 'none');
     g.until(() => g.game.state.current === 'WAVE_ACTIVE', 10);
     lob();
+    g.frames(30);
+    expect(g.projectiles.count).toBe(1);
     g.playerHealth.godMode = false;
     g.playerHealth.damage({ amount: g.playerHealth.max, source: { kind: 'debug' } });
     g.frames(1);
@@ -379,6 +387,7 @@ describe('the Spitter’s acid in the run (D-046)', () => {
     expect(g.projectiles.count).toBe(0);
     // And a new run starts with none.
     lob();
+    expect(g.projectiles.count).toBe(1);
     g.startRun();
     expect(g.projectiles.count).toBe(0);
   });
