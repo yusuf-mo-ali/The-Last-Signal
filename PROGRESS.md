@@ -10,15 +10,17 @@
 
 ## Current Phase
 
-**Phase 7.1: Mutation & Combat Polish. Complete** (D-046), after the Phase 7 hands-on playtest:
-- **BLACKOUT:** zombies are dark silhouettes with glowing eyes, and one close to the player is lifted out of the dark.
-- **Signal Glitch** (STATIC): the 3D image tears, splits and lags the zombies, with a clear centre and at most 3 pattern changes a second.
-- **DEATH CRY:** frenzies the zombies around a kill and sends them to where the player stood.
-- **Screamer:** a completed scream frenzies the pack.
-- **BLOOD MOON:** first appears on one of waves 9–12, 25 % on each.
-- **The Spitter** joins at wave 10: a ranged zombie with telegraphed, dodgeable acid.
+**Phase 8: Adaptive System. Complete** (D-047, amending D-026). The horde watches how the player keeps playing and changes **which zombies later waves bring**, never how many, never a mutation and never during a wave:
+- **Ten observed categories** become signals, each with a decayed memory and a confidence. One wave can never trigger anything; two consistent waves can.
+- **Eight adaptations** in four exclusive families (at most 2 active, 2 levels each, hysteresis, rests, a forced rest after 4 waves), from wave 5. Weapon focus is dormant until a second firearm exists.
+- **Composition only:** clamped twice (the adaptive source on its own, then everything). The budget, concurrency, pacing, unlocks, caps, Elites and the mutation are untouched; the finale is never adapted.
+- **No runaway:** a response barely counts toward its own cause (×0.25), and a strain governor holds the horde back while the player is bleeding (no hidden easing).
+- **SIGNAL ANALYSIS** explains every change between waves; nothing marks an adapted zombie during one. The end screens name what the horde adapted to.
+- **The Climber** (adaptive only, wave 8+): the answer to camping the catwalk. It climbs three one-way climb links, can be shot off the wall and never attacks from it.
 
-Phase 8 (Adaptive System) has not started and is awaiting approval. See "Phase 7.1 acceptance review" below.
+Phase 9 has not started and is awaiting approval. See "Phase 8 acceptance review" below.
+
+- Phase 7.1 (Mutation & Combat Polish) is complete (D-046): BLACKOUT silhouettes, Signal Glitch, DEATH CRY and Screamer frenzies, the BLOOD MOON guarantee, and the Spitter.
 
 - Phase 7 (Signal Mutations) is complete (D-045): six data-driven mutations from wave 4, one effect runtime, guardrails and a survival tripwire.
 
@@ -347,9 +349,24 @@ Phase 8 (Adaptive System) has not started and is awaiting approval. See "Phase 7
       - a burst forced every second costs ~16 % with the shipped single-sample glitch target (a multisampled one cost ~27 %; the first, screen-copying version ~11 % but could show a black frame);
       - one more program (the glitch quad), constant throughout.
 
+- [x] **Phase 8: Adaptive System** (plan §15, D-047); the plan was approved with decisions D1–D6 as proposed (the Climber from wave 8, no adaptation on the finale, WEAPON_FOCUS dormant, a governor instead of easing, trait-free Climbers, fades shown).
+  - **Data** (`config/adaptation.ts`): signals and how they are measured, the profile rules, mutation discounts, eight adaptations (families, thresholds, two levels, analysis lines), guardrails. The plan's §15 metrics map onto the signals.
+  - **The pure core** (`adaptive/`): `measureWave` (telemetry → a score and a weight per signal, with mutation discounts and attribution), `foldEvidence` (decayed memory and confidence), `decide` (fade, rest, hold, escalate, enter), `composeModifiers` (one capped adaptive modifier).
+  - **Runtime:** `BehaviorTelemetry` (fixed-step samples and events, WAVE_ACTIVE/BOSS only), `AdaptiveSystem` (reset on a new run, decide on `waveCompleted`, `adaptationDecided`), wired in `main.ts` through `WaveManager.modifiers(wave)`; not in the sandbox.
+  - **The generator:** the adaptive source clamped on its own (weights ×0.75–1.6, Armored + Helmeted ≤ +0.15 and only once scheduled, no Elite, ≤ 2 regions), `extraCounts` for the Climber from `adaptiveUnlocks` (wave 8), trait-free and out of the opening; the finale ignores adaptation.
+  - **The Climber:** config, look and drops; climb links in the facility (`NavLink.climb`, `RouteGraph.findPath(…, climb)`); climbing in `EnemyManager` through `PlayerMotor.carry`; no attacks from the wall; a stagger knocks it off; elevated spawn points only for Climbers, never while the player is up there; a climbing pose.
+  - **Presentation and debug:** `ui/SignalAnalysis` (breather only), the end-screen line; `tls.adaptation()`, `forceAdaptation`, `clearAdaptation`, `setAdaptive`, `feedEvidence`, an overlay line, `enemy().climbing`.
+  - **Balance (BALANCING §2.17):** Pass-1 values; the survival tripwire with every allowed pair at level 2 on waves 8 and 12 (10 seeds each): every run cleared, 6 of 460 lost any health, at most 90.
+  - Verified:
+    - 62 new unit, property, integration and view tests (1322 in the suite), including the exact profile maths, the director's rules, composition invariants over 23 pairs × 500 seeds, the mutation schedule identical with and without adaptation, an import boundary, the Climber's routes and climbs, a camper and a roamer played through waves 1–9, and identical decisions at 30 / 60 / 144 Hz.
+    - Planted bugs: 28 of 28 unit-level (23 of 29 on the first run; five tests hardened, one equivalent mutant) and 6 of 6 end-to-end.
+    - `npm run check` passes (1322 tests); `npm run build` has no warnings (game 239.7 kB, 78.0 kB gzipped); no debug code in `dist/`; the plan's hash is unchanged.
+    - `npm run test:e2e` (development and production, run in four parts): 106 passed, 3 failed, all documented wall-clock failures (TESTING §8): two `player.spec` tests (both passed when re-run alone) and `combat.spec`'s body-shot marker (failed again alone, as on earlier hosts). `adaptation.spec` 5 of 5 in both builds.
+    - Performance against Phase 7.1, alternating runs (TESTING.md §7.4): the simulation step within noise (0.20 vs 0.22 ms at 24 alive), a decision ~10 µs per wave, browser frames within noise with or without two Climbers, 12 programs and 2 lights throughout.
+
 ## Active Task
 
-None. Phase 7.1 is complete; waiting for approval to start **Phase 8**.
+None. Phase 8 is complete; waiting for approval to start **Phase 9**.
 
 ## Known Bugs
 
@@ -357,25 +374,15 @@ None. Phase 7.1 is complete; waiting for approval to start **Phase 8**.
 
 ## Next Task
 
-**Phase 8: Adaptive Zombie System (plan §15).** The signature mechanic: a lightweight player behaviour profile (weapon usage, headshot rate, average distance, time in one area, high-ground use, sprinting, melee, accuracy, damage taken, kiting) that changes later waves through thresholds and cooldowns, never instantly, so it feels like natural adaptation rather than punishment. The slots are ready:
-1. **Composition only (D-026):** responses arrive through `WaveManager`'s `modifiers()` as `CompositionModifier`s with `source: 'adaptive'` (archetype weights, trait chances, spawn bias, `extraArchetypes`), all clamped; adaptation never changes the budget, never picks or suppresses mutations, never raises alarms.
-2. **Evaluation at `WAVE_COMPLETE`** (GAME_DESIGN §10, ARCHITECTURE §7.9), with hysteresis, minimum samples and cooldowns; explained to the player after the wave ("SIGNAL ANALYSIS").
-3. **Mutation-aware metrics:** `RunStats` records each wave's mutation, and DEATH CRY alarms carry `kind: 'deathCry'`, so mutation-caused events can be discounted.
-4. **The Climber** (D-043) as possible adaptive content against high-ground play, if Phase 8 brings it in.
-5. **Verify:** thresholds and cooldowns, clamps, the budget untouched, determinism, explanations, E2E, performance.
+**Phase 9: Progression System (plan §16), awaiting approval.** It plugs into the slots left open: the upgrade screen and the Supply Terminal in `UPGRADE_SELECTION`, XP and Scrap, and a second firearm (which wakes WEAPON_FOCUS, D-047). It will start with plan mode.
 
 **Needed from you:**
-- Approval to start Phase 8.
-- A hands-on playtest of the Phase 7.1 changes (TESTING.md §6, "Signal Mutations" and "Phase 7.1"):
-  - the silhouettes and eyes in BLACKOUT, and whether a flashlight is still wanted (O-10);
-  - Signal Glitch comfort;
-  - DEATH CRY and Screamer frenzies;
-  - dodging the Spitter.
-- A decision on **HUNGER's speed**. The survival tripwire allows ×1.15 at most: ×1.16–×1.18 each lose one wave-12 seed to plain walkers. Options:
-  - keep ×1.15 and judge it by hand;
-  - make the tripwire's defender stronger (for example, let it step back);
-  - accept a stronger HUNGER on waves 12+ only.
-- Run the performance measurement on the reference machine (TESTING.md §7.2, with `tls.startWave(19, 'BLACKOUT')` and a forced `tls.staticBurst()`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
+- Approval to start Phase 9.
+- A hands-on playtest of the Adaptive System (TESTING.md §6, "Adaptive System and the Climber"):
+  - camp the catwalk for a few waves, then read SIGNAL ANALYSIS and meet the Climbers from wave 8;
+  - change style and see the horde let go;
+  - does it feel like the horde learning, not punishment?
+- Still open from Phase 7.1: **HUNGER's speed** (the tripwire allows ×1.15 at most), O-10 (a flashlight), and the reference-machine measurement (TESTING.md §7.2; confirm the GTX 750's VRAM).
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -412,7 +419,7 @@ None. Phase 7.1 is complete; waiting for approval to start **Phase 8**.
   - The full HUD (low-health vignette and heartbeat, damage direction), healing, and a real game-over screen (wave reached, cause of death: GAME_DESIGN §16).
   - Final zombie models and animation (D-030).
 - **From 5:**
-  - The Climber (deferred, D-043): its data, a climbing behaviour and climb links in the level's navigation, if the adaptive system (Phase 8) brings it in against high-ground play.
+  - ~~The Climber (deferred, D-043)~~ done in Phase 8 as adaptive content (D-047).
   - Alarm consumers: wave reinforcements (done in Phase 6: the next group is pulled forward), SCREAM (done in Phase 7 as DEATH CRY, its own alarm kind), adaptive metrics (Phase 8), scream audio (Phase 11).
   - Hard enemy–enemy collision (separation is a push; brief brush-throughs are accepted and bounded by a test).
   - Short animation leans (a wind-up, a leap) are drawn without the hit volumes following; resting postures are in the rigs.
@@ -438,6 +445,12 @@ None. Phase 7.1 is complete; waiting for approval to start **Phase 8**.
   - Spitter audio (the gurgle of the wind-up, the splat) and a proper acid trail (Phase 11 / VFX); the Spitter in the sandbox encounter, if the earlier specs move away from its range.
   - A frenzy cue in audio (Phase 11); frenzied eyes are the only cue for now.
   - Leading shots for ranged enemies: deliberately not done (no lead keeps the acid dodgeable).
+
+- **From 8:**
+  - WEAPON_FOCUS goes live when a second firearm can be owned (Phase 9 / the Supply Terminal).
+  - Persisting the behaviour profile across runs (meta-progression): `BehaviorProfile` is versioned and normalized, ready for priors (D-047 §8).
+  - More climb links with the Phase 10 facility; a Climber climb animation and audio (Phase 11).
+  - Adaptive priority signals for future support archetypes and bosses (data only).
 
 ## Blocked Tasks
 
@@ -511,6 +524,29 @@ Reviewed 2026-09-25 against the code on this branch.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
 - O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 8 acceptance review (plan §15, D-047)
+
+Reviewed 2026-10-01 against the approved Phase 8 plan and the code on this branch.
+
+| Phase 8 requirement | Status | Evidence |
+|---|---|---|
+| Persistent behaviour, not single actions: normalized signals, confidence thresholds, decay | Done | `adaptive.test` (exact maths: one wave 0.5, two 0.85, decay ×0.7); `adaptation.test` (one perfect wave never enters); planted bugs (one wave enough, no decay, persistence ignored) |
+| Observed behaviour separate from the decision | Done | `measure` / `profile` (observed) vs `director` / `compose` (decision), all pure; ARCHITECTURE §7.9 |
+| The 10 categories | Done | GAME_DESIGN §10.1; weapon focus measured but dormant (D3) |
+| Decisions only between waves; invisible during a wave; explained in SIGNAL ANALYSIS | Done | Integration test (modifiers unchanged through every wave second); `adaptation.spec` (card only in the breather); planted bugs (decide on wave start, card during a wave) |
+| Deterministic | Done | Same decisions and waves at 30 / 60 / 144 Hz; no randomness in the core; ties by priority, id, key |
+| Composition only; never select, suppress, replace or modify a mutation | Done | 23 pairs × 500 seeds: only the mix changes; the mutation schedule identical with and without adaptation (unit, integration, E2E); an import-boundary test |
+| Unlocks, maxAlive, spawn safety, threat budget, Phase 7.1 limits | Done | `adaptiveWaves.test` (budget, concurrency, caps, unlocks, traits before schedule, no Elite, finale); `climber.test` (elevated spawns) |
+| No impossible or unfair compositions; anti-runaway | Done | Families, ≤ 2, ≤ level 2, forced rests, attribution, governor (unit and property tests); the survival tripwire (460 adapted runs, none died) |
+| Per adaptation: evidence, threshold, cooldown, change, caps, counterplay, no recursion | Done | `config/adaptation.ts`, GAME_DESIGN §10.2, BALANCING §2.17 |
+| The Climber only from the Adaptive System, against persistent high-ground play | Done | Not in the roster; `adaptiveUnlocks`; a camper meets 2 on wave 8, a roamer none; `climber.test`; `adaptation.spec` (a real climb, shot off) |
+| Reset between runs; future persistence without a migration | Done | Integration and E2E (a new run forgets); `BehaviorProfile` versioned, `normalizeProfile` |
+| Tests, planted bugs, E2E, performance | Done | 28/28 + 6/6 planted bugs; TESTING §7.4; the E2E run above |
+
+**Open items that do not block Phase 9:** a hands-on playtest of adaptation (TESTING §6), HUNGER's speed, O-10, reference-machine measurement, the Vercel preview from the container, no CI yet, the known wall-clock-sensitive E2E tests.
 
 ---
 
@@ -705,7 +741,7 @@ Reviewed 2026-09-25 against the code on this branch.
 |---|---|---|---|
 | **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | Done in code with Phase 6 (a player can enter the map, shoot zombies, survive waves, die and restart); sign-off waits on the manual QA pass (TESTING.md §6) |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | In progress: Phase 5 (archetypes and traits) and Phase 6 (waves: scaling, fair spawns, victory at 20, endless) done; 3 weapons, menus and settings persistence to come |
-| **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | In progress: Phase 7 (Signal Mutations) and Phase 7.1 (polish, the Spitter) done |
+| **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | In progress: Phase 7 (Signal Mutations), Phase 7.1 (polish, the Spitter) and Phase 8 (Adaptive System, the Climber) done |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
 | **M5 Polish** | 16 audio · 17 VFX · lighting · UI polish · 18 performance · 21 stability · deployment | Feels like a finished indie browser game | Not started |
 
@@ -721,5 +757,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed; Phase 6: wave curves, generator properties, spawn fairness, runtime and full-loop wave coverage, planted bugs, manual QA, wave performance; Phase 7: mutation data, effect runtime, selection, lifecycle, full loop and tripwire, presentation E2E, planted bugs, manual QA, light and mutation performance; Phase 7.1: silhouettes, Signal Glitch, frenzy, BLOOD MOON guarantee, the Spitter, planted bugs, glitch performance) |
-| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation; Phase 6 waves (budget curve, concurrency, pacing, unlocks, caps, themes, traits, spawn rules); Phase 7 Signal Mutations (selection, the six mutations, overlays, floors, clamps, tripwire); Phase 7.1 (BLACKOUT channels, Signal Glitch, DEATH CRY and Screamer frenzies, BLOOD MOON guarantee, the Spitter, tripwire tuning) |
+| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed; Phase 6: wave curves, generator properties, spawn fairness, runtime and full-loop wave coverage, planted bugs, manual QA, wave performance; Phase 7: mutation data, effect runtime, selection, lifecycle, full loop and tripwire, presentation E2E, planted bugs, manual QA, light and mutation performance; Phase 7.1: silhouettes, Signal Glitch, frenzy, BLOOD MOON guarantee, the Spitter, planted bugs, glitch performance; Phase 8: adaptation data, core, waves, the Climber, the loop and tripwire, E2E, planted bugs, manual QA, adaptive performance) |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation; Phase 6 waves (budget curve, concurrency, pacing, unlocks, caps, themes, traits, spawn rules); Phase 7 Signal Mutations (selection, the six mutations, overlays, floors, clamps, tripwire); Phase 7.1 (BLACKOUT channels, Signal Glitch, DEATH CRY and Screamer frenzies, BLOOD MOON guarantee, the Spitter, tripwire tuning); Phase 8 Adaptive System and the Climber (signals, profile, adaptations, guardrails, tripwire) |

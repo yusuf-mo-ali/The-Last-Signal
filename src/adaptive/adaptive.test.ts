@@ -563,3 +563,33 @@ describe('guardrails over many behaviour sequences (properties)', () => {
     }
   });
 });
+
+describe('mutation ownership: an import boundary (D-024, D-045, D-047)', () => {
+  // Every adaptive module and the adaptation data, as source text (not the tests, and not the
+  // headless harness, which wires the whole game as main.ts does).
+  const sources = {
+    ...import.meta.glob<string>(['./*.ts', '!./*.test.ts', '!./testGame.ts'], {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }),
+    ...import.meta.glob<string>('../config/adaptation.ts', {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }),
+  };
+
+  it('nothing adaptive imports the mutation system, its selector or its effects', () => {
+    expect(Object.keys(sources).length).toBeGreaterThanOrEqual(8);
+    for (const [file, text] of Object.entries(sources)) {
+      const imports = [...text.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1] ?? '');
+      expect(imports.length, file).toBeGreaterThan(0);
+      for (const from of imports) {
+        expect(from, `${file} imports ${from}`).not.toMatch(
+          /(^|\/)signal\/|WaveMutation|SignalMutationSystem|config\/effects|config\/environment/,
+        );
+      }
+    }
+  });
+});

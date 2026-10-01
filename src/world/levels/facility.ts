@@ -269,8 +269,8 @@ export const FACILITY_NAVIGATION: NavGraphDefinition = {
 /**
  * Where wave enemies enter (D-044): the edges and rooms of the map, on route nodes (so every
  * archetype's body fits and can reach the graph; `facility.test.ts` checks both), all at least
- * 12 m from the player's spawn. The catwalk point is `elevated`: reserved for adaptive content (a
- * future Climber), never used by normal waves.
+ * 12 m from the player's spawn. The catwalk point is `elevated`: reserved for the adaptive Climber
+ * (D-047: an all-Climber group, never while the player is up there), never used by normal waves.
  */
 export const FACILITY_SPAWN_POINTS: readonly SpawnPointDefinition[] = [
   { id: 'control-nw', position: [-7, 0, -22], region: 'north', tags: ['indoor'] },

@@ -222,9 +222,9 @@ Multipliers are configurable, and archetypes can override them (a Tank's body re
 | **Tank** | Forces focus fire; blocks chokepoints | Very slow, very high health, body-shot resistant; only headshots stagger it | Aim for the head weak point; kite | Yes |
 | **Screamer** | Forces target prioritisation | Keeps its distance; screams to alert, hasten and frenzy nearby zombies; the scream triggers a screen/audio effect | Kill it first; interrupt the scream | Yes |
 | **Spitter** (D-046) | Punishes standing still at range | Keeps its distance (10–16 m); a telegraphed lob of acid at where the player is | Keep moving; rush it (it backs off before it spits); interrupt the wind-up | Yes (from wave 10) |
-| **Climber** | Counters camping on high ground | Scales walls using climb links; medium health | Move; watch the climb points | **Deferred** (O-3 resolved, D-043): not in normal waves; possible adaptive response |
+| **Climber** (D-047) | Counters camping on high ground | Scales walls using climb links; medium health | Move; shoot it off the wall; watch the climb points | **Adaptive only** (D-043, D-047): never in normal waves; brought only by HIGH_GROUND (§10), from wave 8 |
 
-**The v1 roster (O-3, resolved by D-043; the Spitter added by D-046).** Walker, Runner, Tank, Screamer and (from wave 10) Spitter are the default roster: they are what normal waves are built from. The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically (climb links, vertical navigation, climb animations) and only matters against one play style, so it is **deferred and kept as adaptive content**: later, the adaptive system (§10) may bring Climbers in as its response to heavy high-ground use, rather than them appearing in every run. Until it exists, the "elevated position" adaptation rule falls back to Runners with spawns biased toward flanking routes. The code keeps room for it (an archetype is data plus a behaviour; climb links belong in the level's navigation data).
+**The v1 roster (O-3, resolved by D-043; the Spitter added by D-046).** Walker, Runner, Tank, Screamer and (from wave 10) Spitter are the default roster: they are what normal waves are built from. The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically (climb links, vertical navigation, climb animations) and only matters against one play style, so it is **kept as adaptive content**: since Phase 8 (D-047) the adaptive system (§10) brings Climbers in only as its response to persistent high-ground play, never in every run. Before wave 8 that response falls back to Runners with spawns biased toward where the player stands (§7.5b).
 
 **Modifiers (traits)** (overlays on any archetype, D-012; implemented in Phase 5, §7.4):
 - **Armored:** flat armor on torso and limbs.
@@ -305,6 +305,18 @@ A ranged zombie: it punishes standing still at range, and every shot can be seen
 - **Waves:** from wave 10, exactly one on its first wave, then up to 1 + ⌊(n − 10)/5⌋; more in ambush waves, fewer in heavy ones; never in a wave's opening.
 - **Look:** sickly yellow-green, hunched, a swollen throat and acid-green eyes.
 
+### 7.5b The Climber (Phase 8, D-047)
+
+The answer to the catwalk. Holding it means watching two chokepoints, the stairs and the ramp; the Climber opens a third way up, and an exposed one. It never appears in normal waves. BALANCING.md §2.17.
+
+- **Only by adaptation:** HIGH_GROUND (§10.2) brings exactly 1 at level 1 and 2 at level 2, from wave 8, never in a wave's opening, never with a trait.
+- **The climbs:** three one-way climb links in the facility's navigation: through the gap in the catwalk's railing onto its middle, over the railing near the head of the stairs, and up the dock's face. Only a Climber's route ever uses them; every other zombie's routes are unchanged.
+- **On the wall (the telegraph):** it walks to the foot of the wall, then goes straight up at 1.5 m/s with its arms raised (about 1.7 s for the catwalk), and over the top. It cannot attack while climbing.
+- **Shoot it off:** a body shot of 25 or more (one Pistol body shot) staggers it off the wall: it drops to the ground, then tries again. Killed on the wall, it lies at the foot.
+- **Spawning:** it may enter at the catwalk's `elevated` spawn point, but only in an all-Climber group and never while the player is up there; every other spawn rule still applies (at least 12 m away, out of view, the concurrency cap).
+- **Fragile:** 70 health (two headshots or three body shots); 3 m/s; a 12-damage swipe after a 0.7 s wind-up.
+- **Look:** pale grey-blue, long-armed and crouched low, with cold blue eyes.
+
 ### 7.6 Traits: Armored, Helmeted, Elite (Phase 5, D-043)
 
 Any archetype can carry any combination. Traits change the body's outline, so they read without relying on colour. BALANCING.md §2.10.
@@ -315,7 +327,7 @@ Any archetype can carry any combination. Traits change the body's outline, so th
 | **Helmeted** | A helmet absorbs up to 50 headshot damage. When it breaks, it falls off and the zombie staggers; after that, headshots land in full | A steel dome on the head, gone once broken | Knock the helmet off, then headshot |
 | **Elite** | 1.6× health, 1.1× speed, 1.3× damage, harder to stagger, always drops extra ammo | Bone spikes on the shoulders and spine, hot pale eyes | Focus it; worth the ammo |
 
-- Traits come from data: the wave generator (Phase 6), the adaptive system (Phase 8: "armored", "protected-head") and BLOOD MOON ("elite", Phase 7) will choose them. For now, the test encounter and the debug tools apply them.
+- Traits come from data: the wave generator (Phase 6) schedules them, BLOOD MOON adds Elites (Phase 7), and the adaptive system (Phase 8) may raise the Armored and Helmeted chances a little, once their schedule has started; it never adds Elites. The debug tools apply them too.
 
 ---
 
@@ -411,35 +423,109 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 
 ## 10. Adaptive horde (signature mechanic)
 
-The game builds a lightweight behaviour profile from the plan §15 metrics:
+Implemented in Phase 8 (D-047, amending D-026). The game watches how the player actually plays, wave after wave, and changes **which zombies later waves bring**:
+- never the threat budget, the number of enemies alive at once or the pacing;
+- never a mutation: it never selects, suppresses, replaces or modifies one (D-024, D-045);
+- never during a wave;
+- always explained afterwards (SIGNAL ANALYSIS, §10.5).
 
-`shotgunUsage, rifleUsage, headshotRate, averageDistance, timeSpentInOneArea, elevatedPositionUsage, sprintUsage, meleeUsage, accuracy, damageTaken, kiteFrequency`
+It reacts to **persistent** behaviour, never to one moment. Values are in `src/config/adaptation.ts`, and the reasoning is in BALANCING.md §2.17.
 
-### 10.1 Rules
+**Two layers, kept apart:**
+- **Observed behaviour** (the profile): each wave is measured, and each signal keeps a decayed memory with a confidence.
+- **The adaptation decision:** when a signal stays high with enough confidence, an adaptation enters; it may escalate, and it fades when the evidence goes.
 
-The first four rules come from the plan. Exact thresholds go in `config/adaptation.ts`.
+### 10.1 Signals (what is watched)
 
-| Observed behaviour | Response |
-|---|---|
-| High shotgun usage | Higher chance of the **Armored** modifier |
-| Frequent high-ground use | **Climbers** (deferred archetype, introduced only as this response, D-043; until it exists: Runners plus flank-biased spawns) |
-| High mobility (sprint and kite frequency) | More **Runners** |
-| Extreme headshot rate | Higher chance of the **Helmeted** modifier |
-| Camping in one area **[Proposed]** | Spawns biased toward that area's flanks; more Screamers |
-| Struggling (low accuracy, heavy damage taken) **[Proposed]** | A subtle, silent easing of composition. Adaptation should feel like natural difficulty, not punishment |
+Counted only while a wave is fought (WAVE_ACTIVE or a boss fight), never in the intro, the breather or a pause. Positions are sampled 4 times a second while wave enemies are alive. Each signal gets a **score** (0–1) and a **weight** (how much evidence the wave carried: a full wave is about 45 s of fighting, 40 hits or 3 spawns of an archetype).
 
-### 10.2 Guardrails [Proposed, D-026]
+| # | Category | Signal | Score per wave |
+|---|---|---|---|
+| 1 | High ground / camping | `elevation` | Share of samples with the player's feet 1.2 m or more above the floor |
+| 2 | One area too long | `dwell` | Share of ground samples in the most-used 9 × 9 m area |
+| 3 | Sprinting / constant movement | `mobility` | Half sprinting share, half kiting (moving away from the nearest zombie within 10 m) |
+| 4 | Close-range combat | `closeRange` | Share of hits at 5 m or closer (melee counts) |
+| 5 | Long-range shooting | `longRange` | Share of hits at 18 m or more |
+| 6 | Target priority | `priority.<screamer, spitter>` | Share of that archetype killed before its ability (a scream, a spit) |
+| 7 | Weapon focus | `weaponFocus.<role>` | Damage share by weapon role; counts only while 2 or more firearms are owned (dormant in V1) |
+| 8 | Ignoring enemy types | `neglect.<screamer, spitter>` | The opposite of priority |
+| 9 | Accuracy / hit zones | `headshot`, gated by `accuracy` | Head share of firearm hits; accuracy is hits ÷ shots |
+| 10 | Damage taken | `strain` | Damage taken ÷ 100 (it drives the governor, §10.4, not an adaptation) |
 
-1. **Evaluated only between waves,** never mid-fight.
-2. **Minimum evidence.** At least 2 waves and enough relevant events before a rule can fire.
-3. **Hysteresis and cooldown.** Separate enter and exit thresholds; a rule cannot re-fire for several waves.
-4. **Bounded influence.** Each weight multiplier is capped, and at most 2 adaptations are active at once.
-5. **Changes the mix, never the total.** Adaptation changes *which* enemies appear, never the total threat budget.
-6. **Decay.** Responses fade when the player changes behaviour, which rewards adapting back.
-7. **Never before wave 5.**
-8. **Always communicated.** After the wave, a "SIGNAL ANALYSIS" line appears on the upgrade screen, for example: *"The horde has noticed your perch. Climbers are coming."*
+The plan's §15 metrics (`shotgunUsage`, `rifleUsage`, `headshotRate`, `averageDistance`, `timeSpentInOneArea`, `elevatedPositionUsage`, `sprintUsage`, `meleeUsage`, `accuracy`, `damageTaken`, `kiteFrequency`) all map onto these signals (`PLAN_METRIC_SIGNALS`).
 
-**Why communication is essential.** An invisible adaptive system looks exactly like randomness. Unexplained counters feel like punishment, and both outcomes defeat the pillar "the game reacts, fairly".
+**Mutated waves count less** for what the mutation itself pushes the player into. For example:
+- BLACKOUT: long-range shots, headshots and accuracy count ×0.4;
+- HUNGER: mobility ×0.5 and close range ×0.7.
+
+The mutation is only read (which one the wave had); it is never changed.
+
+### 10.2 The adaptation vocabulary
+
+Eight adaptations in four families. **At most one per family and 2 in all** are active, so contradictory or compounding pairs never meet (for example, Climbers and extra Runners).
+
+| Adaptation | Family | Enters when (signal ≥, confidence ≥) | Level 1 | Level 2 | Counter-play |
+|---|---|---|---|---|---|
+| **HIGH_GROUND** | stance | elevation 0.45, 0.6 | 1 Climber (before wave 8: Runners ×1.25); spawns biased toward where the player stands | 2 Climbers (before wave 8: Runners ×1.4) | Come down; shoot Climbers off the wall |
+| **ENTRENCHED** | stance | dwell 0.7, 0.6 (only when not on high ground) | Spawns biased toward the player's area; Spitters ×1.25 (once unlocked) | Runners ×1.25 too | Relocate between waves; use cover against acid |
+| **SKIRMISHER** | stance | mobility 0.45, 0.6 | Runners ×1.3 | Runners ×1.5 | Hold a chokepoint; Runners die to body shots |
+| **CLOSE_QUARTERS** | range | closeRange 0.5, 0.6 | Tanks ×1.3 (once unlocked) | Armored +0.08 (once scheduled) | Keep your distance; headshot Tanks |
+| **LONG_RANGE** | range | longRange 0.45, 0.6 | Runners ×1.3 | Screamers ×1.2 too | Fight closer; kill Runners and Screamers first |
+| **HEADHUNTER** | precision | headshot 0.55, 0.65 (accuracy ≥ 0.4) | Helmeted +0.08 (once scheduled) | Helmeted +0.12 | Knock the helmet off with one shot, then headshot |
+| **WEAPON_FOCUS** | precision | weapon role 0.75, 0.65 | **Dormant in V1** (only the Pistol exists): shotgun → Armored, automatic → Tanks, precision → Runners | | Switch weapons |
+| **NEGLECT** | priority | neglect of the Screamer or the Spitter 0.6, 0.6 | That archetype ×1.3 (never above its cap) | ×1.5 | Kill support zombies first |
+
+**Each adaptation, every time:**
+- **Hysteresis:** it leaves only when its signal drops under a lower exit threshold (for example HIGH_GROUND: 0.25) or its confidence under 0.35 (HEADHUNTER: 0.4).
+- **Level 2** only after 2 waves at level 1 with confidence 0.85 or more, and never while the player is bleeding (§10.4).
+- **A forced rest** after 4 waves active, then 2 waves before it may enter again; the same 2-wave rest follows a fade.
+- Not before wave 5, not before 2 fought waves, and **never on the final wave** (20), which is hand-tuned. Endless keeps adapting.
+
+### 10.3 Confidence and decay (the profile)
+
+Per signal, with w the wave's weight (after the mutation discount and attribution, §10.4):
+
+```text
+w < 0.15                → no evidence: memory only decays
+mass        = w + 0.7 × mass′
+mean        = (w × score + 0.7 × mass′ × mean′) / mass
+above       = w × [score ≥ enter threshold] + 0.7 × above′
+confidence  = min(1, mass / 2) × above / mass
+```
+
+- **One extreme wave gives a confidence of 0.5. Nothing enters below 0.6**, so at least two consistent waves are needed.
+- Two full waves give 0.85; old evidence halves in about two waves.
+- One high wave and one low one never reach 0.6.
+
+### 10.4 Guardrails (D-026, D-047)
+
+1. **Decided only when a wave ends.** The next wave's composition is frozen until the following wave ends. Nothing changes mid-fight.
+2. **Minimum evidence:** two consistent waves (§10.3), from wave 5.
+3. **Hysteresis, levels, rests:** §10.2.
+4. **Bounded influence**, clamped in the generator whatever is active:
+   - weights ×0.75–1.6 per archetype from adaptation;
+   - Armored + Helmeted +0.15 in total, only once their schedule has started; never Elite;
+   - at most 2 Climbers, from wave 8, trait-free, not in the opening;
+   - spawn bias toward at most 2 regions.
+5. **Composition only:** the budget, concurrency, spawn rate, groups, surges, Elite limits, unlocks, per-archetype caps, the mutation, tier and theme are untouched. With a fixed budget, adaptation can only change the mix, never add threat.
+6. **No runaway:**
+   - **Attribution:** what an active adaptation brought counts ×0.25 toward its own signal, so a response cannot feed its cause (for example, Runners making the player run).
+   - **The strain governor:** with heavy damage on consecutive waves, nothing enters, nothing escalates, and level 2 drops to level 1. Pressure only rises while the player copes. It never secretly eases the waves.
+7. **Fair spawns:** Climbers obey every spawn rule; only they may use an elevated spawn point, and never while the player is up there.
+8. **Run-scoped:** a new run forgets everything. The profile is versioned and keyed by signal, so a later meta-progression can store or seed it without a schema migration.
+
+### 10.5 SIGNAL ANALYSIS (communication)
+
+An invisible adaptive system looks exactly like randomness, and unexplained counters feel like punishment, so every change is told and nothing is hidden.
+- **When:** after a wave, in the breather and on the upgrade screen only. Never during a wave. Nothing marks an adapted zombie mid-fight.
+- **What:** one line per change.
+  - **Enter:** "The horde has noticed your perch. Climbers are coming."
+  - **Escalate:** "More of them are learning to climb."
+  - **Fade:** "The signal has lost your perch."
+  - **Rest:** "The horde pulls back to regroup. For now."
+  - **The governor:** "You are bleeding. The horde hesitates, for now."
+- **Silence:** with no change, no card.
+- **End screens:** the run summary adds "The horde adapted to: High ground, Neglect" (every adaptation that entered during the run).
 
 ---
 

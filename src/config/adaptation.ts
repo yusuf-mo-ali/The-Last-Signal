@@ -478,18 +478,17 @@ export const ADAPTATION_GUARDRAILS = {
   attribution: 0.25,
   /** No adaptation on the final wave (it is hand-tuned, like its mutation-free rule). */
   noAdaptationOnFinale: true as boolean,
+  /** Said when an adaptation is made to rest after `maxActiveWaves` (the evidence may remain). */
+  restText: 'The horde pulls back to regroup. For now.',
   /**
    * The strain governor: while strain is high with this confidence, nothing enters, nothing
    * escalates and level 2 drops to level 1. Pressure only rises while the player copes.
    */
-  /** Said when an adaptation is made to rest after `maxActiveWaves` (the evidence may remain). */
-  restText: 'The horde pulls back to regroup. For now.',
   strain: {
     threshold: 0.5,
     confidence: 0.6,
     text: 'You are bleeding. The horde hesitates, for now.',
   },
-  /** Hard caps on what adaptation may do to a wave, whatever is active. */
   /**
    * Hard caps on what adaptation may do to a wave, whatever is active: the generator's own
    * adaptive clamps (`WAVE_RULES.modifierClamp.adaptive`), enforced there too.

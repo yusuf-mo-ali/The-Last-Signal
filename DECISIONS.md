@@ -39,7 +39,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-023 | Additions to the plan's folder tree | Accepted |
 | D-024 | Mutation selection vs mutation application | Accepted |
 | D-025 | IMPLEMENTATION_PLAN.md committed verbatim | Accepted |
-| D-026 | Adaptive system guardrails | Proposed |
+| D-026 | Adaptive system guardrails | Accepted (implemented and amended by D-047) |
 | D-027 | Erasable TypeScript syntax only (no `enum`) | Accepted |
 | D-028 | Layering of world changes | Accepted |
 | D-029 | Player can only be damaged during WAVE_ACTIVE / BOSS | Proposed (implemented by D-042) |
@@ -60,6 +60,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-044 | Phase 6 wave system: budget curve, seeded composition, fair spawn points, the wave cycle and slots for mutations, bosses and adaptation | Accepted |
 | D-045 | Phase 7 Signal Mutations: six v1 mutations as data, one effect runtime, DEATH CRY kept apart from the Screamer, and guardrails | Accepted |
 | D-046 | Phase 7.1 Mutation & Combat Polish: silhouettes in the dark, Signal Glitch, frenzy and last-known alarms, a guaranteed BLOOD MOON, and the Spitter | Accepted |
+| D-047 | Phase 8 Adaptive System: behaviour signals, confidence and decay, a composition-only adaptation vocabulary, SIGNAL ANALYSIS, and the Climber | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -1251,6 +1252,122 @@ The fixes had to keep the Phase 7 architecture and guardrails: data-driven mutat
   - with a burst forced every second, frames cost ~16 % more (the single-sample render-target pass, §3);
   - one more program (the glitch quad), constant throughout.
 - Open: HUNGER's speed (above), and a flashlight (O-10) after the next playtest.
+
+---
+
+## D-047 — Phase 8 Adaptive System: behaviour signals, confidence and decay, a composition-only adaptation vocabulary, SIGNAL ANALYSIS, and the Climber
+**Status:** Accepted · **Date:** 2026-10-01
+
+**Context.**
+- Plan §15 asks for the signature mechanic: the game watches how the player plays and changes later waves, through thresholds and cooldowns, so it feels like natural adaptation rather than punishment.
+- D-026 set the guardrails. D-044 left the slot (`CompositionModifier`, source `adaptive`). D-043 kept the Climber as possible adaptive content.
+- The project owner's Phase 8 brief:
+  - persistent evidence, not single actions;
+  - composition only;
+  - never select, suppress, replace or modify a mutation;
+  - decisions only between waves, explained after the wave (SIGNAL ANALYSIS) and invisible during it;
+  - deterministic;
+  - the Climber only as a response to persistent high-ground play.
+- The plan was approved with six decisions taken as proposed:
+  - **D1.** The Climber's earliest wave is 8.
+  - **D2.** No adaptation on the final wave.
+  - **D3.** WEAPON_FOCUS is dormant while only one firearm exists.
+  - **D4.** The strain governor holds the horde back; there is no silent easing.
+  - **D5.** Climbers are trait-free.
+  - **D6.** The analysis shows fades.
+
+**Decision.**
+1. **Observed behaviour and adaptation decisions are separate layers** (`src/adaptive/`).
+   - `BehaviorTelemetry` counts one wave on fixed steps and events:
+     - position samples every 15 steps while wave enemies are alive;
+     - hits on wave enemies (from combat `damaged`, which carries the distance), shots;
+     - support abilities used, and damage taken.
+   - `measureWave` turns that into a score and a weight per signal. `foldEvidence` keeps each signal's decayed memory, and `decide` changes the adaptations. `composeModifiers` turns them into one capped adaptive modifier.
+   - All four are pure functions with no randomness. `AdaptiveSystem` owns the lifecycle:
+     - a new run forgets everything;
+     - counting happens only in WAVE_ACTIVE or BOSS;
+     - decisions happen only when `waveCompleted` fires.
+   - **The ten observed categories map to signals:**
+     - high ground → `elevation`;
+     - one area → `dwell`;
+     - sprinting and kiting → `mobility`;
+     - close range → `closeRange`;
+     - long range → `longRange`;
+     - target priority → `priority.<support>`;
+     - weapon focus → `weaponFocus.<role>`;
+     - ignored types → `neglect.<support>`;
+     - accuracy and hit zones → `headshot`, gated by `accuracy`;
+     - damage → `strain`.
+     The plan's eleven §15 metrics map onto them (`PLAN_METRIC_SIGNALS`).
+2. **Confidence needs persistence.**
+   - The memory: mass = w + 0.7 × mass′, a weighted mean, and persistence = the share of the mass at or above the signal's threshold. Confidence = min(1, mass / 2) × persistence.
+   - **One extreme wave gives 0.5. Nothing enters below 0.6**, so at least two consistent waves are needed.
+   - Old evidence decays by 0.7 a wave.
+   - A mutated wave's evidence is discounted for what that mutation pushes the player into. For example, BLACKOUT's long-range shots and headshots count at ×0.4.
+3. **The adaptation vocabulary is data** (`config/adaptation.ts`): eight adaptations in four exclusive families.
+   - stance: HIGH_GROUND, ENTRENCHED, SKIRMISHER;
+   - range: CLOSE_QUARTERS, LONG_RANGE;
+   - precision: HEADHUNTER, WEAPON_FOCUS (dormant);
+   - priority: NEGLECT, with variants for the Screamer and the Spitter.
+   - **Each adaptation has two levels and hysteresis** on both the signal and the confidence.
+   - **The timers:**
+     - none before wave 5 or before two fought waves;
+     - a rest of 2 waves after it ends;
+     - a forced rest after 4 waves active, its own change kind `rest`: the player may still be doing it, so it is never called a fade;
+     - level 2 only after 2 waves at level 1 with confidence ≥ 0.85.
+   - At most 2 are active, from different families.
+4. **Composition only, enforced twice.**
+   - The adaptive source is clamped on its own (`modifierClamp.adaptive`), then everything is clamped together:
+     - weights ×0.75–1.6 per archetype;
+     - Armored + Helmeted +0.15 in total, only once their schedule has started, never Elite;
+     - two spawn regions.
+   - **Untouched:** the budget, concurrency, pacing, groups, surges, Elite limits, the mutation, tier and theme, and the roster's unlocks and caps.
+   - **The finale ignores adaptation.**
+   - **Proven over 23 pairs × 500 seeds:**
+     - the budget is spent the same way;
+     - the mean enemy count stays within ×0.85–1.1, and the maximum within ×1.1: never more bodies;
+     - the mutation selection is identical with or without adaptation.
+   - `WaveManager.modifiers(wave)` composes for the wave actually generated, from a state that changes only when a wave ends.
+5. **Anti-runaway:**
+   - **Attribution:** what an active adaptation brought counts ×0.25 toward its own signal, so a response cannot feed its cause.
+   - **The strain governor:** with heavy damage on consecutive waves, nothing enters or escalates and level 2 drops to level 1. Pressure only rises while the player copes, and the waves are never secretly eased.
+   - Families, the 2-adaptation limit, the level cap and the forced rest.
+6. **SIGNAL ANALYSIS.**
+   - After a wave, in the breather only, one line per change: enter, escalate, fade, rest, or the governor.
+   - Nothing marks an adapted enemy mid-wave.
+   - The end screens name what the horde adapted to.
+7. **The Climber is adaptive-only.**
+   - It is implemented but not in the roster; `WAVE_RULES.adaptiveUnlocks.climber` = 8.
+   - **It comes only as HIGH_GROUND's response:** 1 Climber at level 1, 2 at level 2. Before wave 8 the response falls back to Runners and a spawn bias.
+   - **The climbs are facility nav links** (`NavLink.climb`, one way, up): through the catwalk railing's gap, over the railing by the stairs' head, and up the dock's face.
+   - **Only climbing bodies route through them.** Every other body's routes are identical to before (tested over every pair of nodes).
+   - **On a wall:**
+     - it moves straight up at 1.5 m/s, then over the top;
+     - its hit volumes follow it;
+     - it cannot attack;
+     - a stagger knocks it off;
+     - killed on the wall, it lies at the foot.
+   - **Spawning:** only an all-Climber group may use an `elevated` spawn point, and never while the player stands up there.
+   - It shares the enemy shader program: no new program.
+8. **Reset and future persistence.**
+   - Everything is run-scoped.
+   - `BehaviorProfile` is versioned and keyed by signal id. `normalizeProfile` drops unknown keys and clamps values, so a later meta-progression can store or seed priors without a schema migration.
+
+**Why.**
+- **Persistence over spikes** is what makes adaptation read as the horde learning, not as punishment for one clutch moment.
+- **Keeping the budget fixed** bounds difficulty by construction: the designer's threat measure is unchanged, and only the mix moves.
+- **The forced rest and attribution** stop the obvious feedback loops. For example, more Runners make the player run more, which would bring more Runners.
+- **The governor** answers the plan's "not punishment" without hidden easing, which would make the game lie about difficulty.
+- **The Climber as the answer to the catwalk:** the catwalk has two chokepoints, the stairs and the ramp. The Climber opens a third way up, and an exposed one: it is easy to shoot off the wall.
+
+**Consequences.**
+- **Survival tripwire:** the scripted defender that clears plain waves 8 and 12 comfortably clears them with every allowed pair at level 2 on 10 seeds. The most it lost was 90 health.
+- **Measured costs (TESTING §7.4):**
+  - simulation within noise (0.20 vs 0.22 ms per step at 24 alive);
+  - a decision about 10 µs per wave;
+  - browser frames within noise of Phase 7.1, with or without two Climbers;
+  - 12 programs and 2 lights, unchanged.
+- **Weapon focus is ready but dormant.** It goes live when a second firearm can be owned (Phase 9 / the Supply Terminal, O-13).
 
 ---
 

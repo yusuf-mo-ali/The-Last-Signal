@@ -303,7 +303,9 @@ src/
 │                               TrainingEncounter (temporary); ai/: EnemyStateMachine, brain, meleeBrain,
 │                               brains. zombie/ is not needed: archetypes are config)
 ├── waves/                      WaveManager, WaveGenerator, WaveDifficulty, WaveMutation
-│ + adaptive/                   PlayerBehaviorProfile, AdaptationRules, AdaptiveDirector
+│ + adaptive/                   (Phase 8, D-047) BehaviorTelemetry, measure, profile, director,
+│                               compose, AdaptiveSystem, types (the plan's PlayerBehaviorProfile,
+│                               AdaptationRules and AdaptiveDirector)
 ├── progression/                XPSystem, ScrapSystem, UpgradeSystem, PlayerBuild, + SupplyTerminal (D-039)
 ├── signal/                     SignalSystem, SignalMutationSystem, SignalProgression
 │                               (Phase 7: SignalMutationSystem, events, actions (the deathCry trigger action))
@@ -642,6 +644,25 @@ alarm (+ alertMode 'live' | 'lastKnown', frenzy | null)
 - **The Screamer and the Spitter share the standoff.** The band, the retreat with its walkable check and the cornered rule are one implementation in `common.ts`. The Screamer's behaviour is unchanged (its tests are untouched).
 - **Projectiles are not enemies.** They have their own pool, so the enemy cap, separation and combat never see them. They never hit enemies.
 
+**Phase 8 implementation (D-047): the Climber.** A melee body (the melee brain, no new behaviour) with `config.climb {speed}`; it is the only body that routes through climb links (§7.5).
+
+```text
+EnemyManager.fixedUpdate, per enemy, before move:
+  climb(enemy, dt):
+    not climbing: the route's next leg is a climb link and the body is within 0.8 m of its foot
+                  → climbing = {foot, top, over, phase: 'up'}
+    'up':   straight up at climb.speed to `over` (+ 0.05 m clearance), gravity off (PlayerMotor.carry)
+    'over': across to the top node at the same height, then released onto the ledge (≤ 0.3 m: arrived)
+  a stagger → climbing = null: it falls (gravity) and re-plans; dead on the wall → its body is moved to the foot
+ai/common.ts: inAttackRange is false while climbing (it never attacks from a wall)
+SpawnDirector: an `elevated` point only for an all-Climber group (groupClimbs), and never while the
+               viewer's eye is at or above the point
+EnemyView: a climbing pose (arms up), shared program and per-archetype pool like every enemy
+```
+
+- **Kinematic, through the motor.** `PlayerMotor.carry(position)` moves the capsule without collision resolution or gravity. Every climb in the facility is checked clear for the Climber's body by a test, so the body never overlaps the level on the way.
+- **Hit volumes follow it** (the rig is posed from the motor as always), so it is shootable throughout.
+
 ### 7.5 Navigation (D-008)
 
 - **Flow fields.** Every zombie chases the same target, so one Dijkstra pass over the nav grid from the player's cell steers all of them. Cost scales with map size, not enemy count.
@@ -658,7 +679,7 @@ alarm (+ alertMode 'live' | 'lastKnown', frenzy | null)
 - **Stuck detection** (no progress for `stuckTime`): a failed straight walk means something the rays cannot see (a kerb below knee height, a beam above the chest), so the enemy follows the route link by link, without cutting corners, until the route ends or it reaches the target; a failed route is re-planned.
 - **Enemies collide like the player:** they move through `PlayerMotor` against the level octree, so walls and floors hold them even where navigation is wrong (the plan's nav-grid binding is not needed).
 - **Validation:** tests walk every link of the facility both ways with each archetype's body (Walker, Runner, Tank, Screamer; Phase 5) through the real collision, and chase a target into every area.
-- **Climb links** (for the deferred Climber, D-043) are not in the level data yet; they arrive with the Climber if the adaptive system brings it in.
+- **Climb links** (Phase 8, D-047): `NavLink.climb` marks a one-way link up a wall (`over`: the height to clear on the way, e.g. a railing). `RouteGraph.findPath(start, goal, climb)` uses them only when `climb` is true (bodies with `config.climb`, i.e. the Climber, `ai/common.ts canClimb`), with a cost ×2 so a climber still prefers stairs when they are shorter; every other body's routes are exactly as before (tested over every pair of nodes). `climbsFrom`, `climbsInto` and `climbBetween` let `EnemyManager` notice when a route reaches a climb (§7.4).
 - **Spawn validation:** `bodyFits` (level brush data: a body inside a brush counts as blocked even though it touches none of its faces) and `hasGround`, combined in `EnemyManager.canStand`, used by the debug spawn commands and by the wave `SpawnDirector` for every group member (§7.8).
 - **The seam for later:** the brain only reads `lines`, `routes` and `goalNodeFor` from its context, so a flow field (D-008) or a navmesh can replace the route graph without touching behaviour.
 
@@ -707,8 +728,10 @@ alarm (+ alertMode 'live' | 'lastKnown', frenzy | null)
   - Unlocks and per-wave caps apply, plus guarantees: an archetype's first wave has exactly one of it, Walkers are ≥ 30% of the budget, and the finale has ≥ 2 Tanks and ≥ 2 Screamers.
   - The spend is within 1 of the budget.
   - Heavies are kept out of the opening 15% of the spawn order.
-  - Only `DEFAULT_ROSTER` archetypes are drawn; extras come only from adaptive modifiers for implemented archetypes (the Climber never appears).
-- **Plug-in channel: `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, budgetMultiplier, spawnBias}`.** Adaptive (Phase 8) and mutation (Phase 7) effects arrive this way. Adaptation never changes the budget (D-026); only a mutation's `budgetMultiplier` may, clamped.
+  - Only `DEFAULT_ROSTER` archetypes are drawn; an archetype outside the roster comes only from the adaptive source, from its `WAVE_RULES.adaptiveUnlocks` wave (the Climber: 8), trait-free and at most `extraArchetypeMax` (2) per wave. `extraCounts` places exactly that many (within the budget), never drawn.
+- **Plug-in channel: `CompositionModifier {source, archetypeWeights, traitChance, extraArchetypes, extraCounts, budgetMultiplier, spawnBias}`.** Adaptive (Phase 8) and mutation (Phase 7) effects arrive this way. Adaptation never changes the budget (D-026); only a mutation's `budgetMultiplier` may, clamped.
+  - Phase 8 (D-047): the adaptive source is clamped on its own first (`modifierClamp.adaptive`: weights ×0.75–1.6 per archetype, Armored + Helmeted ≤ +0.15 in total and only once a trait's schedule has started, never Elite, ≤ 2 bias regions), then everything together as before. Mutation-only fields from it are ignored, and the finale ignores the adaptive source entirely.
+  - `WaveManagerOptions.modifiers(wave)` is called once per generated wave with that wave's number; `AdaptiveSystem.modifiers` composes from a state that changes only when a wave ends (§7.9).
   - Phase 7 (D-045): `generateWave` turns the mutation's `spawnRule` data into a `source: 'mutation'` modifier itself (`mutationModifiers(id, n)`), so previews, debug jumps and play build the same wave. Mutation-only fields: `eliteMaxBonus` (≤ 3), `eliteMinimum` (≤ 2, Walkers promoted within the budget) and `surges` (→ `definition.surges`, each `{at, size, warning}`, clamped).
 - **`WaveMutation.selectMutation(n, history, rng)` selects the wave's mutation ID** (pure; D-045): none on waves 1–3 and 20, one on every other wave; enabled mutations whose `minWave` has come; never the previous one or the previous `vision` group; tier weights with a recent-use penalty; stream `${runSeed}:mutation:${n}`. `WaveManager` keeps the played history (a regenerated wave replaces its entry) and a debug override. **`SignalMutationSystem` applies it** (§4) and reverts it. Selection and application are deliberately separate systems.
 - **`SpawnDirector` picks a fair spawn point for each group** from the level's authored `spawnPoints`:
@@ -736,13 +759,47 @@ alarm        → reinforcements? pull the next group forward toward the alarm's 
 surge point  → surgeWarning{region} → (warning) → group of min(size, queued, room) there → surgeSpawned
 ```
 
-### 7.9 Adaptive system (D-026)
+### 7.9 Adaptive system (D-026, D-047)
 
-- **`PlayerBehaviorProfile`** subscribes to events and samples the player's position at ~2 Hz. It keeps per-wave aggregates and exponential moving averages of the plan §15 metrics.
-- **`AdaptiveDirector` evaluates only at `WAVE_COMPLETE`,** never mid-wave.
-- **Rules live in `config/adaptation.ts`,** each with: `metric, enterThreshold, exitThreshold` (hysteresis)`, minSamples, cooldownWaves, response, maxStacks`.
-- **Responses change which enemies appear, never the total threat.** Multipliers are clamped, and responses fade when the player's behaviour changes.
-- **It emits `adaptation:applied` events** so the UI can tell the player what changed (GAME_DESIGN §10).
+Implemented in Phase 8. Observed behaviour and the adaptation decision are separate layers; four of the five stages are pure functions with no randomness.
+
+```text
+                  (sim, fixed step; WAVE_ACTIVE or BOSS only)
+events ──► BehaviorTelemetry ── one wave's raw counters (WaveTelemetry)
+  combat.damaged (hits on wave enemies, with distance)   weapon.shot   playerHealth.damaged
+  waves.enemySpawned   enemies.alarm (scream) / spat      + a position sample every 15 steps
+                                    │ waves.waveCompleted
+                                    ▼
+measureWave(telemetry, {sampleSeconds, boosted}) → WaveEvidence           [pure]
+   per signal: score 0–1, weight 0–1 (× mutation discount, × attribution 0.25)
+                                    ▼
+foldEvidence(profile, evidence) → BehaviorProfile                         [pure] observed behaviour
+   per signal: mass, decayed mean, above → confidence (GAME_DESIGN §10.3)
+                                    ▼
+decide(profile, state, nextWave) → {state, changes, governor}            [pure] the decision
+   fade / rest / hold / escalate, then enter (priority, families, ≤ 2, governor, finale)
+                                    ▼  frozen until the next waveCompleted
+modifiers(wave) = composeModifiers(active, {wave, dwellRegions})          [pure]
+   → one CompositionModifier (source 'adaptive') → generateWave (clamped, §7.8)
+changes → adaptationDecided ─► ui/SignalAnalysis (breather only) · end screens (history)
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `config/adaptation.ts` | data | Signals, how they are measured, the profile rules, mutation discounts, the eight adaptations (families, thresholds, levels, analysis lines), guardrails |
+| `adaptive/types.ts` | sim | `WaveTelemetry`, `WaveEvidence`, `SignalMemory`, `BehaviorProfile` (`v: 1`), `ActiveAdaptation`, `AdaptationState`, `AdaptationChange` (`enter`, `escalate`, `fade`, `rest`, `hold`) |
+| `adaptive/BehaviorTelemetry.ts` | sim | Counts one wave: samples (elevation, the dwell grid, sprint and kite), hits by distance, zone and weapon role, shots, support spawns and abilities, damage taken |
+| `adaptive/measure.ts` | sim (pure) | Telemetry → evidence |
+| `adaptive/profile.ts` | sim (pure) | Fold, confidence, `normalizeProfile` (drops unknown keys, clamps values: future persistence) |
+| `adaptive/director.ts` | sim (pure) | `decide`, `governorOn`, `analysisText` |
+| `adaptive/compose.ts` | sim (pure) | Active adaptations → one modifier (levels, the Climber's fallback before its unlock, the dwell regions); `boostedArchetypes` for attribution |
+| `adaptive/AdaptiveSystem.ts` | sim | The lifecycle (a `FixedUpdateSystem`): reset on PLAYING, count in WAVE_ACTIVE/BOSS, decide on `waveCompleted`; `adaptationDecided` / `adaptationReset`; debug `force`, `clear`, `feed`, `setEnabled` |
+| `ui/SignalAnalysis.ts` | presentation | The SIGNAL ANALYSIS card: shown only in WAVE_COMPLETE or UPGRADE_SELECTION and only with changes (`data-changes`) |
+
+- **Mutation ownership (D-024, D-045).** The adaptive code never imports `signal/` or the mutation selector (an import-boundary test). It reads only the wave's mutation id from `waveStarting`, to discount evidence; the generator ignores mutation-only fields from the adaptive source. Tests show the mutation schedule is identical with and without adaptation.
+- **Determinism.** Sampling runs on step counts; events arrive in step order; the pure stages break ties by priority, id and key. The same seed and play give the same decisions and waves at 30, 60 and 144 Hz (integration test).
+- **Wiring** (`main.ts`): `waves.modifiers = (wave) => adaptive.modifiers(wave)`; the sandbox has no adaptive system. The debug tools (D-020) read `snapshot` and call `force`, `clear`, `feed`, `setEnabled`.
+- **Reset and persistence.** Everything is run-scoped. The profile is versioned and keyed by signal id, so a later phase can store it or seed a run with scaled-down priors without a schema migration (unknown keys dropped, missing keys empty).
 
 ### 7.10 World, environment and signal (D-028)
 
@@ -938,6 +995,11 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 **Phase 7 baseline** (Signal Mutations; TESTING.md §7.4):
 - simulation per step unchanged by any mutation (~0.2 ms at 24 alive); a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms;
 - **no real-time lights were added.** Three emergency and one muzzle point light, present from load, cost ~25 % of the frame in software rendering in every wave, even at intensity 0; they were replaced by emissive lamps with unlit floor pools and a fill-light rise while the muzzle flash shows. Frame rates are within noise of Phase 6; the program count is constant (11).
+
+**Phase 8 baseline** (the Adaptive System; TESTING.md §7.4):
+- **Simulation:** within noise with telemetry on (0.20 vs 0.22 ms per step at 24 alive, alternating runs; +2 Climbers 0.21 ms); one decision (measure, fold, decide, compose) ~10 µs per wave.
+- **Browser, wave 19 at 24 alive (4 alternating rounds):** Phase 7.1 mean 5.2 fps, Phase 8 4.9 fps, Phase 8 with 2 Climbers 5.5 fps: within the run-to-run spread (4.1–6.7). Our CPU cost per frame 5.1 / 4.5 / 4.3 ms.
+- **Programs and lights:** 12 programs and 2 lights in every run, unchanged; the Climber shares the enemy program.
 
 **Phase 7.1 baseline** (TESTING.md §7.4):
 - **Simulation:** within noise of Phase 7, acid included: 0.31–0.49 ms per step at 24 alive; 24 deaths in one step under DEATH CRY, with frenzy and last-known alerts, 0.68–0.70 ms.
