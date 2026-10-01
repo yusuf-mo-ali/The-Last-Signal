@@ -223,14 +223,16 @@ test.describe('adaptation (development build)', () => {
     expect(runnersPlayed.spawnedComposition.runner).toBe(adaptedRunners);
     expect(runnersPlayed.spawnedComposition).toEqual(runners.adapted.composition);
     expect(runnersPlayed.spawnedTraits).toEqual(runners.adapted.traits);
-    // Switched off, the same wave is exactly the unadapted one.
+    // Switched off, with SKIRMISHER forced active again, the same wave is exactly the unadapted
+    // one (the wave really generated, not only the preview).
     await page.evaluate(() => window.tls!.setAdaptive(false));
-    const off = await page.evaluate(() => {
-      window.tls!.startWave(9, 'none');
-      return window.tls!.adaptation().nextWave;
-    });
+    const off = await page.evaluate(() =>
+      window.tls!.adaptationScenario('SKIRMISHER', 2, 'default', 9),
+    );
+    expect((await adaptation(page)).active.map((x) => x.id)).toEqual(['SKIRMISHER']);
     expect(off.adapted).toEqual(runners.reference);
     expect(off.matchesGenerated).toBe(true);
+    expect((await wave(page)).composition).toEqual(runners.reference.composition);
     expect(issues.problems()).toEqual([]);
   });
 
