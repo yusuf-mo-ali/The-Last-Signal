@@ -1,0 +1,746 @@
+# Game Design — THE LAST SIGNAL
+
+> **Status:** Design baseline derived from `IMPLEMENTATION_PLAN.md`. Implemented so far: movement
+> (Phase 1), weapons (Phase 2), combat (Phase 3), the Walker and player health (Phase 4), the
+> Runner, Tank, Screamer and traits (Phase 5) and waves (Phase 6); each section notes what exists.
+>
+> - Numbers in this document are **design intents**: roles, time-to-kill goals, ranges.
+>   - Exact tunable values will live in `src/config/*`.
+>   - Every tuning change will be logged in `BALANCING.md`.
+> - Items marked **[Proposed]** interpret or extend the plan. Items marked **[Open O-n]** need a
+>   decision; see `DECISIONS.md`. Everything else restates the plan.
+
+---
+
+## 1. Pitch
+
+**THE LAST SIGNAL** is a browser first-person shooter. The player is trapped in a failing communications facility, survives escalating zombie waves, and restores a mysterious signal tower.
+
+Two systems make it different:
+
+1. **The horde adapts to how you play.**
+2. **Every wave carries a Signal Mutation** that bends the rules of combat.
+
+> Core principle (plan §40): **The next wave is a new tactical problem, never just "more zombies."**
+>
+> Target feeling at the end of a run: *"The game actually reacted to the way I played."*
+
+## 2. Design pillars
+
+1. **Feel first.** Responsive movement and aim, punchy weapons, clear hit feedback.
+2. **Readable pressure.** The player understands the situation within one second of glancing at the HUD, and always knows why they died.
+3. **The game reacts, fairly.** Adaptation is gradual, bounded, and communicated. It never feels like punishment.
+4. **Short, distinct runs.** Mutations, adaptation, upgrades and environment changes combine so that two runs feel meaningfully different.
+
+---
+
+## 3. Run structure
+
+A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared and the signal transmitted) or in death.
+
+| Waves | Difficulty tier (§13) | Signal phase (§19) | New threats introduced [Proposed] |
+|---|---|---|---|
+| 1–3 | Introduction | Collect components | Walker; Runner from wave 3 |
+| 4–5 | More variety | Collect components | Screamer; first mutations |
+| 6–7 | More variety | Restore power | Tank |
+| 8–10 | Higher pressure | Restore power | First adaptations (Armored / Helmeted modifiers); BLOOD MOON first on 9–12; the Spitter at 10 |
+| 11–12 | Higher pressure | Repair transmitter | Stronger adaptations (the Climber only as an adaptive response to high-ground play, D-043) |
+| 13–15 | Complex combinations | Repair transmitter | Elite modifier |
+| 16–19 | Complex combinations | Charge transmitter | Mixed compositions; strongest mutations |
+| 20 | Boss / major event | Transmit final signal | The Siren (boss) |
+
+**Pacing target [Proposed].**
+- Waves last about 45 s early, rising to about 90 s late.
+- Each wave ends with a short breather (about 10–15 s), the upgrade screen and the Supply Terminal (§5.3).
+- A full run is therefore roughly 25–35 minutes.
+
+**Implemented (Phase 6, D-044):** the introduction order in the table: Runner from wave 3, Screamer from 4, Tank from 6, Armored and Helmeted from 8, Elite from 13. The Climber is never part of a normal wave. There is a 3 s announcement and a 10 s breather. Until the Siren exists (Phase 13), wave 20 is a finale wave with guaranteed Tanks and Screamers. The signal phases and upgrades are not built yet.
+
+**Implemented (Phase 7, D-045):** Signal Mutations (§9). Waves 1–3 and wave 20 have none; every other wave (endless included) has exactly one.
+
+**Implemented (Phase 7.1, D-046):** the Spitter from wave 10 (one on its first wave); BLOOD MOON first appears on one of waves 9–12 in every run.
+
+This maps onto the plan's first-session curve (§33):
+
+| Plan timestamp | Run moment |
+|---|---|
+| 0:00–2:00 Learn controls | Pre-wave free movement + wave 1 |
+| 2:00–5:00 First meaningful pressure | Waves 2–4 |
+| 5:00–10:00 First build choices | Upgrade screens after waves 1–7 |
+| 10:00–15:00 Mutations noticeable | Mutations from wave 4, stronger ones from ~wave 8 |
+| 15:00–20:00 Adaptation apparent | First adaptation earliest after wave 5, typically noticed ~wave 8–12 |
+| 20:00+ Recognisable build, major milestone | Waves 13–20, boss at wave 20 |
+
+---
+
+## 4. Player
+
+### 4.1 Controls
+
+Plan §3 controls are kept. Controls must be rebindable later, so bindings live in `config/input.ts`.
+
+| Action | Default | Notes |
+|---|---|---|
+| Move | W A S D | Read by physical key position (`KeyboardEvent.code`), so AZERTY and other layouts work |
+| Look | Mouse | Pointer lock; sensitivity, vertical clamp, invert-Y setting |
+| Fire | Left click | |
+| Aim / alternate action | Right click | Aim down sights for Pistol and AR. Shotgun alternate action: to be decided |
+| Reload | R | |
+| Sprint | Shift | Hold. A toggle option can come later |
+| Crouch | **C** | Ctrl is available as an opt-in rebind. As a default, **Ctrl+W (crouch while moving forward) closes the browser tab**, and pages cannot block it (D-017) |
+| Jump | Space | |
+| Equip Primary | 1 | Loadout §5.1 (D-039) |
+| Equip Secondary | 2 | Does nothing (brief "locked" feedback) until the Secondary slot is unlocked |
+| Equip melee weapon | 3 | Holds the melee weapon as the active weapon: Fire then attacks with it |
+| Cycle weapons | Mouse wheel | Cycles the available **firearms** (Primary ↔ Secondary; a locked or empty one is skipped); from melee it returns to a firearm |
+| Pause | Esc | The game pauses when pointer lock is lost; the browser consumes this Esc press |
+| **Interact** | **E** [Proposed, O-6] | Signal objectives (hold to repair or activate) |
+| **Quick melee** | **V** (proposed default key) | **Always available** (D-039): a melee attack from whatever weapon is held, without switching away from it. Needed by Heavy Hands, the `meleeUsage` metric and the "Shotgun + Melee" build |
+
+### 4.2 Core stats (intent)
+
+- **Health:** 100. No armor in v1; the plan says "armor if implemented".
+- **No passive health regeneration [Proposed].** Healing comes from upgrades (Vampire, Second Wind), rare pickups, and a partial heal at wave completion. This keeps the Survival build meaningful.
+- **Movement intents** (Phase 1 values in `src/config/player.ts`, D-038; feel still to be confirmed by hand):
+  - Walking is brisk: 5 m/s, full speed in 0.1 s, a stop in about 0.13 s.
+  - Sprint is 1.5× walk speed (7.5 m/s), forward only; any shot or swing cancels it for 0.35 s (Phase 2). Lowering the weapon while sprinting is a later visual.
+  - Crouch is 0.5× walk speed, held on C; it lowers the eyes from 1.62 m to 0.95 m, fits under 1.25 m, and tightens weapon spread (× 0.6 for the Pistol, Phase 2).
+  - A jump reaches 1.15 m: it clears low cover (up to ~1 m) and the loading dock, not a 1.6 m crate. Small forgiveness windows: 0.1 s coyote time, 0.12 s jump buffer.
+  - Mouse look: 60° vertical FOV (about 90° horizontal at 16:9), pitch limited to ±89°, subtle head bob (3 cm) while moving on the ground only.
+- **Damage window [Proposed, D-029].** The player can only take damage during `WAVE_ACTIVE` and `BOSS`. This removes a whole class of edge cases, such as dying on the upgrade screen.
+- **Phase 4 implementation (D-042).** Health 100 (`src/config/player.ts`). Enemy hits lower it only inside the damage window; at 0 the player dies once, the run ends (`GAME_OVER`, "You died"), and a click starts a new run at full health with the enemies reset. Until the wave system exists, a run goes straight into one open-ended wave (`WAVE_ACTIVE`), so the player can be hurt during play. No healing yet (upgrades and pickups later).
+
+---
+
+## 5. Weapons
+
+All weapons share one framework, and each is a config entry (D-011). The player carries them in an explicit three-part **loadout** (D-039, resolves O-2).
+
+### 5.1 Loadout: Melee, Primary, Secondary
+
+The loadout is modelled around **three named categories**, never as "weapon slots 1–3":
+
+| Category | At run start | Later | Rules |
+|---|---|---|---|
+| **Melee** | **Bare Hands** (fists) | Melee weapons bought or unlocked, e.g. a **Knife** | **Always available**, whatever firearm is held: quick melee (V) attacks without switching away. Never empty: Bare Hands is the fallback |
+| **Primary** | **Pistol** | Assault Rifle, Shotgun; later e.g. an SMG | Holds one firearm. The Pistol is the initial firearm |
+| **Secondary** | **Locked** | Unlocked through progression / a milestone (O-13); then holds one firearm such as a secondary pistol, machine pistol or revolver | Exists in the data from the first run, but cannot be equipped while locked |
+
+- **Switching:** 1 equips the Primary, 2 the Secondary (once unlocked and filled), 3 holds the melee weapon; the mouse wheel cycles the available firearms. Quick melee (V) works from any of them.
+- **Each weapon declares the categories it fits.** Assault Rifle and Shotgun fit Primary; secondary pistols fit Secondary; a Knife fits Melee. The starter Pistol fits Primary *and* Secondary [Proposed], so once the Secondary slot unlocks the player can keep it as a sidearm.
+- **One weapon per category.** Acquiring a weapon for a category that is already filled replaces the weapon there [Proposed: no refund in v1; the Pistol stays cheap to buy back].
+- **No soft-locks.** Melee is always usable, so the player can always deal damage; the Pistol keeps unlimited reserve ammo [Proposed], and the Supply Terminal sells ammunition [Proposed].
+
+**Initial run:** Bare Hands · Pistol (Primary) · Secondary locked.
+
+### 5.2 Weapons
+
+| Weapon | Category | Role | Fire mode | Design intent |
+|---|---|---|---|---|
+| **Bare Hands** | Melee | Always-available fallback | Melee swing | Weak but reliable; pushes back or finishes a weakened enemy. The baseline every melee weapon improves on |
+| **Pistol** | Primary (also fits Secondary [Proposed]) | Reliable starter; precision | Semi-automatic | The initial firearm. **Unlimited reserve ammo [Proposed]**: the magazine still needs reloading |
+| **Assault Rifle** | Primary | Sustained damage at mid range | Automatic | High fire rate, medium damage, recoil that climbs with sustained fire |
+| **Shotgun** | Primary | Close-range burst | Pump action, N pellets | Damage is spread across pellets. Devastating up close, but **weak against armor** (see §6) |
+| *Knife* (later) | Melee | Melee build | Melee swing | Bought or unlocked; faster and stronger than fists |
+| *SMG, secondary pistol, machine pistol, revolver* (later) | Primary / Secondary | Future content | — | Added as config entries; no new weapon code (D-011) |
+
+**Phase 2 (D-040):** the Pistol and Bare Hands are implemented; their values are in BALANCING.md. Bare Hands is a placeholder swing (a 1.6 m reach check with a 0.5 s cooldown); since Phase 3 its swings (held or quick melee) deal damage through the same combat path as bullets. The Assault Rifle and Shotgun are future Primary purchases; the framework already supports automatic fire and pellets.
+
+**Time-to-kill intents**, wave 1 Walker:
+- Pistol: 1–2 headshots or 4–5 body shots.
+- Assault Rifle: about 6–8 body hits.
+- Shotgun: one point-blank shot.
+- Bare Hands: a last resort (several hits), not a primary damage source.
+
+### 5.3 Acquisition (resolves O-2, D-039)
+
+- **Where:** the **Supply Terminal**, a shop available **between waves**.
+- **Currency:** **Scrap** is the primary purchase currency.
+- **What it sells:** firearms for Primary (and Secondary once unlocked), melee weapons, and ammunition [Proposed]. The stock and prices are balance data (BALANCING.md, from the progression / economy phases).
+- **When and how it is presented** (a screen in the between-wave flow, or a terminal in the facility) is open question O-13; the default is a screen right after the upgrade choice, so the between-wave breather never becomes a walking section (§12, plan §19).
+- **Unlocks:** the Secondary slot, and weapons that must be unlocked before they can be bought, come from progression / milestones (O-13).
+- The earlier recommendation (weapon cards on the upgrade screens after waves 2 and 4) is withdrawn.
+
+---
+
+## 6. Damage model
+
+**Body-part zones and multipliers (§10):**
+
+| Zone | Multiplier |
+|---|---|
+| HEAD | 2.5× |
+| TORSO | 1.0× |
+| ARM_LEFT / ARM_RIGHT | 0.65× |
+| LEG_LEFT / LEG_RIGHT | 0.5× |
+
+Multipliers are configurable, and archetypes can override them (a Tank's body resists damage; its head does not).
+
+- **Headshots use the weapon's own headshot multiplier** (Phase 3, D-041). The Pistol's 2.5× is the plan's HEAD value; Bare Hands hits the head for 1.5×. A target's HEAD override scales every weapon's headshot in proportion (a head twice as vulnerable doubles each weapon's value).
+- **Critical damage.** A crit is a headshot or a boss weak-point hit. There are **no random crits**, which would blur skill feedback in an FPS. Implemented for headshots (Phase 3); boss weak points come with bosses.
+- **Armor is a flat reduction per hit,** with a minimum-damage floor.
+  - This naturally punishes many small hits (shotgun pellets, AR spray) more than a few large ones.
+  - That is the mechanical meaning of "shotgun use → more armored enemies" (§15). It creates a real problem the player can solve by switching weapon or aiming better.
+- **Helmets (the "protected-head" counter)** absorb head damage until they break. Headshot-focused players are slowed down, not shut out, and knocking the helmet off feels good.
+- **Phase 5 (D-043):** armor can differ per zone (the Armored trait: torso 10, limbs 6, head none); helmets are breakable plates (50 durability) whose breaking staggers the wearer; a hit that armor or a helmet reduced shows a steel-blue hit marker, so the player can tell the target is protected. A Tank's stagger counts head damage only.
+- **Distance falloff** is configured per weapon.
+- **Hit reactions.** Enough damage within a short window triggers `STAGGER`. Tanks resist stagger except from headshots. Phase 3 implements the rule and the `staggered` event (damage within 1 s of the previous hit adds up; each target has a threshold, or none to be immune). Phase 4: a staggered enemy stops for its stagger duration and loses the attack it was winding up (§7.1).
+- **Feedback:**
+  - hit marker, with a distinct marker and sound for headshots
+  - kill confirmation
+  - optional damage numbers (settings toggle)
+  - directional damage indicator when the player is hit
+- **Phase 3 placeholder feedback (D-041):** a hit marker on the crosshair (white for a hit, gold for a headshot, red and larger for a kill), floating damage numbers (gold for headshots; on by default until the settings toggle exists), a short spark where a bullet hits a body, and the target flashing and rocking away from the hit. Blood, gore and hit sounds come with the VFX and audio phases.
+
+### 6.1 Health and death (Phase 3, D-041)
+
+- **One health model for everything that can be hurt:** training dummies now; zombies, bosses and the player later. Health stays between 0 and the maximum; reaching 0 is death; death happens once, and a dead target ignores further damage and healing.
+- **A dead target is no longer hit:** shots pass through it to whatever is behind.
+- **Healing** never goes above the maximum; a maximum can change (upgrades such as Thick Skin), keeping the current fraction or clamping.
+
+### 6.2 Ammo drops (Phase 3 foundation, D-041)
+
+- A death can leave pickups, rolled from a **drop table** (each entry has its own chance; the Scavenger upgrade will raise them).
+- **Ammo pickups** give whole magazines to every carried firearm whose reserve is limited. The starter Pistol's reserve is unlimited (D-039), so it takes nothing, and a pickup that nobody needs stays on the ground until it expires (30 s).
+- Enemy drop tables, other pickup kinds (health, components) and the ammo economy come with the phases that need them.
+
+### 6.3 Training dummies (temporary, Phase 3)
+
+- **Validation targets, not a gameplay feature.** Three dummies stand in the yard facing the spawn until real enemies exist: a *standard* dummy straight ahead (100 health, standing in for a wave-1 Walker; it can drop ammo), another standard dummy, and a *zone* dummy with each body part painted (400 health, for checking where hits land).
+- They use exactly what zombies will: a hitbox rig with the six zones, health, stagger and a drop table. They never move or attack and do not block the player.
+- A killed dummy falls, stays down for 3 s and stands up again. Every new run restores the range.
+- The range is removed from normal play when waves arrive; the debug tools can still place dummies.
+
+---
+
+## 7. Enemies
+
+| Archetype | Gameplay purpose | Behaviour | Counter-play | v1 roster |
+|---|---|---|---|---|
+| **Walker** | Baseline; teaches headshots | Slow, high health, melee | Headshots, positioning | Yes |
+| **Runner** | Punishes standing still; dangerous in groups | Fast, low health, lunges | Crowd control, retreat paths | Yes |
+| **Tank** | Forces focus fire; blocks chokepoints | Very slow, very high health, body-shot resistant; only headshots stagger it | Aim for the head weak point; kite | Yes |
+| **Screamer** | Forces target prioritisation | Keeps its distance; screams to alert, hasten and frenzy nearby zombies; the scream triggers a screen/audio effect | Kill it first; interrupt the scream | Yes |
+| **Spitter** (D-046) | Punishes standing still at range | Keeps its distance (10–16 m); a telegraphed lob of acid at where the player is | Keep moving; rush it (it backs off before it spits); interrupt the wind-up | Yes (from wave 10) |
+| **Climber** (D-047) | Counters camping on high ground | Scales walls using climb links; medium health | Move; shoot it off the wall; watch the climb points | **Adaptive only** (D-043, D-047): never in normal waves; brought only by HIGH_GROUND (§10), from wave 8 |
+
+**The v1 roster (O-3, resolved by D-043; the Spitter added by D-046).** Walker, Runner, Tank, Screamer and (from wave 10) Spitter are the default roster: they are what normal waves are built from. The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically (climb links, vertical navigation, climb animations) and only matters against one play style, so it is **kept as adaptive content**: since Phase 8 (D-047) the adaptive system (§10) brings Climbers in only as its response to persistent high-ground play, never in every run. Before wave 8 that response falls back to Runners with spawns biased toward where the player stands (§7.5b).
+
+**Modifiers (traits)** (overlays on any archetype, D-012; implemented in Phase 5, §7.4):
+- **Armored:** flat armor on torso and limbs.
+- **Helmeted:** breakable head armor.
+- **Elite:** stat boost, a visual tell, and bonus rewards.
+
+**AI states (§11):** `IDLE, PATROL, DETECT, CHASE, ATTACK, STAGGER, DEAD`.
+- During a wave, the horde is drawn to the signal, so spawned zombies know roughly where the player is.
+- `IDLE` and `PATROL` serve ambient placements, ambushes and the future Hunter boss.
+- `DETECT` is a short, readable "noticed you" tell before `CHASE`.
+
+**Fairness rules:**
+- Every attack has a wind-up tell (animation and sound).
+- Zombies never spawn in the player's view or within a minimum distance of them.
+
+### 7.1 The Walker (Phase 4, D-042)
+
+The first zombie, and the baseline the others are measured against. Values are in `src/config/enemies.ts`; the reasoning is in BALANCING.md §2.6.
+
+- **Slow and durable:** it walks at 1.6 m/s (the player walks at 5) and has 120 health, so it takes two Pistol headshots or five body shots. It never runs, lunges or attacks from range.
+- **Senses:** it notices the player within 12 m if it can see them, turns toward them for a moment (0.6 s, the "noticed you" tell), then walks at them. It keeps chasing while it can see the player, or for 5 s after losing sight of them, up to 24 m away. A shot that hits it tells it where the shooter is, whatever the range.
+- **Finds its way:** straight at the player when nothing is in the way; otherwise along the facility's routes (through doorways, up the stairs and the ramp to the catwalk, onto the dock), never through walls.
+- **Attack (the telegraph):** within 1.5 m it stops, raises its arms forward and glows orange for 0.7 s, then strikes once for 15. The strike is committed: it lands only if the player is still within 1.9 m, in front of it and not behind a wall, so stepping back or aside during the wind-up dodges it. It attacks again at most every 1.6 s. Seven hits kill a player at full health.
+- **Stagger:** 35 damage within 1 s (any headshot does it) stops it for 0.7 s and cancels a wind-up in progress.
+- **Death:** it falls, lies there for 5 s, sinks and is gone. It sometimes drops ammo (20%).
+- **Idle:** without a target it stands, or wanders a few metres around where it was placed.
+- **Placeholder look:** a grey-box humanoid built from its own hit volumes (pale green head and arms, dark shirt and trousers, yellow eyes), so what you see is exactly what you can hit. Final models and animation come later (D-030).
+
+### 7.2 The test encounter (temporary, Phases 4–5)
+
+Until waves exist (Phase 6), every new run places one of each archetype, with each trait shown once:
+- a **Helmeted Walker** and an **Armored Tank** standing guard to either side of the yard (8 m off the path north from the spawn);
+- a **Runner** wandering the north-east yard;
+- a **Screamer** by the north wall;
+- an **Elite Walker** wandering the north-west yard.
+
+Each stands beyond its own detection range from the spawn, so a player who stays at the spawn is left alone. An enemy whose body has gone comes back 10 s later. The encounter is on in every build, like the training dummies, so the roster can be played in production; the wave system replaces it.
+
+### 7.3 The Runner (Phase 5, D-043)
+
+Pressure through movement: it changes *when* and *from where* the player must shoot. Values are in `src/config/enemies.ts`; the reasoning is in BALANCING.md §2.7.
+
+- **Fast and fragile:** 5.2 m/s, faster than the player walks (5) but slower than a sprint (7.5), so it can be outrun but not out-walked. It has 60 health: three Pistol body shots or one headshot, and any body shot staggers it.
+- **Sharp senses:** it notices the player from 15 m and reacts in 0.3 s.
+- **Weaves:** in the open, between 12 and 4 m, it zig-zags about 35° either side of its line to the player, so it is harder to track. It runs straight when a wall is in the way of the zig-zag, and in corridors and on routes.
+- **Leaps (the telegraph):** from about 3 m it crouches for 0.4 s (arms forward, an amber glow), then leaps about 2 m straight at where the player was and strikes for 10. The leap is committed: a side-step during the crouch makes it miss. After landing it recovers for 0.8 s, and it attacks at most every 1.8 s.
+- **Counter-play:** shoot it before it closes; a single body shot during its crouch or leap staggers it out of the attack; sidestep the leap.
+- **Look:** slighter and shorter than a Walker, leaning forward like a sprinter (the lean is part of its hit volumes: its head is where it is drawn), grey skin, a torn dark red top, red eyes.
+
+### 7.4 The Tank (Phase 5, D-043)
+
+A slow wall that must be shot in the head: it changes *where* the player must shoot. BALANCING.md §2.8.
+
+- **Tough body, weak head:** 360 health. Body shots do half damage and limb shots a third, and only damage to the head can stagger it: one Pistol headshot does (threshold 60). It takes six headshots, or about 28 body shots, to kill.
+- **Slow:** 1.1 m/s with a slow turn, so it can be kited, but it blocks corridors and doorways.
+- **Hits very hard:** a long, obvious 1.1 s wind-up (a red glow), then a wide swing for 35 within 2.4 m. Three hits kill a player at full health. No ranged attack.
+- **Look:** huge, dark and hunched, with a paler head so the weak point stands out.
+
+### 7.5 The Screamer (Phase 5, D-043)
+
+Support that never hurts the player itself: it changes *what* to shoot first. BALANCING.md §2.9.
+
+- **Keeps its distance:** it closes to about 11 m, holds its ground between 6 and 11 m facing the player, and backs away if the player comes closer than 6 m.
+- **The scream (the telegraph):** within 14 m and in sight, it throws its arms up and glows violet for 1.2 s, then screams. Everyone hears it within 18 m: nearby zombies learn where the player is (for 8 s) and move 35% faster for 6 s. The player sees a violet shockwave ring and, if within earshot, a violet pulse and shudder at the screen's edges. It can scream again 10 s after the last scream started.
+- **Interrupt it:** any hit of 25 or more during the wind-up staggers it and cancels the scream, and the cooldown is still spent.
+- **Frenzy (D-046):** a completed scream also frenzies everyone within 18 m for 6 s: they attack sooner (cooldown ×0.6), wind up faster (×0.85, never below 70 %), turn faster (×1.6) and shrug off staggers (×1.4: one Pistol body shot no longer staggers a frenzied Runner). Their eyes flare violet. The scream reads as a violet **sonic wave**: three rings in a row and a column of light. An interrupted scream frenzies nobody.
+- **Fragile:** 80 health (four body shots or two headshots).
+- **Look:** tall and thin with a big pale head and a gaping mouth, violet eyes.
+
+### 7.5a The Spitter (Phase 7.1, D-046)
+
+A ranged zombie: it punishes standing still at range, and every shot can be seen and dodged. No enemy uses hitscan. BALANCING.md §2.16.
+
+- **Keeps its distance:** it closes in beyond 16 m (or without sight), holds between 10 and 16 m, and backs away when the player comes within 8 m. Too close, it backs off **before** it spits, so rushing it works; cornered against a wall, it spits where it stands.
+- **The spit (the telegraph):** within 18 m and in sight, it rears back and its throat glows acid green for 1.0 s. Then one glob of acid arcs at where the player is at that moment, with no lead: about a second of flight at 14 m, so strafing dodges it. A direct hit costs 14; a glob bursting nearby splashes 6 within 1.6 m, never through a wall. At most one spit every 3.5 s.
+- **Interrupt it:** a Pistol body shot (25 or more) during the wind-up staggers it and spoils the spit; the cooldown is still spent.
+- **Fragile:** 70 health (two headshots or three body shots).
+- **Waves:** from wave 10, exactly one on its first wave, then up to 1 + ⌊(n − 10)/5⌋; more in ambush waves, fewer in heavy ones; never in a wave's opening.
+- **Look:** sickly yellow-green, hunched, a swollen throat and acid-green eyes.
+
+### 7.5b The Climber (Phase 8, D-047)
+
+The answer to the catwalk. Holding it means watching two chokepoints, the stairs and the ramp; the Climber opens a third way up, and an exposed one. It never appears in normal waves. BALANCING.md §2.17.
+
+- **Only by adaptation:** HIGH_GROUND (§10.2) brings exactly 1 at level 1 and 2 at level 2, from wave 8, never in a wave's opening, never with a trait.
+- **The climbs:** three one-way climb links in the facility's navigation: through the gap in the catwalk's railing onto its middle, over the railing near the head of the stairs, and up the dock's face. Only a Climber's route ever uses them; every other zombie's routes are unchanged.
+- **On the wall (the telegraph):** it walks to the foot of the wall, then goes straight up at 1.5 m/s with its arms raised (about 1.7 s for the catwalk), and over the top. It cannot attack while climbing.
+- **Shoot it off:** a body shot of 25 or more (one Pistol body shot) staggers it off the wall: it drops to the ground, then tries again. Killed on the wall, it lies at the foot.
+- **Spawning:** it may enter at the catwalk's `elevated` spawn point, but only in an all-Climber group and never while the player is up there; every other spawn rule still applies (at least 12 m away, out of view, the concurrency cap).
+- **Fragile:** 70 health (two headshots or three body shots); 3 m/s; a 12-damage swipe after a 0.7 s wind-up.
+- **Look:** pale grey-blue, long-armed and crouched low, with cold blue eyes.
+
+### 7.6 Traits: Armored, Helmeted, Elite (Phase 5, D-043)
+
+Any archetype can carry any combination. Traits change the body's outline, so they read without relying on colour. BALANCING.md §2.10.
+
+| Trait | Effect | Tell | Counter-play |
+|---|---|---|---|
+| **Armored** | 10 flat armor on the torso and 6 on each limb (never below 1 damage); 10% slower | Steel plates on the chest, back and shoulders; a steel hit marker on mitigated hits | Headshots; heavy single hits |
+| **Helmeted** | A helmet absorbs up to 50 headshot damage. When it breaks, it falls off and the zombie staggers; after that, headshots land in full | A steel dome on the head, gone once broken | Knock the helmet off, then headshot |
+| **Elite** | 1.6× health, 1.1× speed, 1.3× damage, harder to stagger, always drops extra ammo | Bone spikes on the shoulders and spine, hot pale eyes | Focus it; worth the ammo |
+
+- Traits come from data: the wave generator (Phase 6) schedules them, BLOOD MOON adds Elites (Phase 7), and the adaptive system (Phase 8) may raise the Armored and Helmeted chances a little, once their schedule has started; it never adds Elites. The debug tools apply them too.
+
+---
+
+## 8. Waves and difficulty
+
+- **Each wave defines** (§13): `waveNumber, enemyBudget, spawnRate, enemyComposition, mutation, specialEvent, bossFlag`, plus `maxAlive`.
+- **The budget is in threat points,** and each archetype and modifier has a threat cost.
+  - Difficulty rises mainly through **composition complexity and modifiers**.
+  - Enemy health scaling is gentle and **capped**, as the plan asks for a controlled curve instead of multiplying HP forever.
+- **Variety guarantees:**
+  - Waves rotate through composition themes: swarm, heavy, mixed, ambush.
+  - The same mutation never appears twice in a row.
+  - Special events are spaced out.
+- **Mutation-free introduction [Proposed, O-7].**
+  - Waves 1–3 have no mutation, so the player learns the basics first (§33).
+  - Waves 4–19 each have exactly one mutation.
+  - Wave 20 (the boss) has its own rules.
+- **Unlimited waves (§13) vs the 20-wave target (§42) [Proposed, O-5].**
+  - The generator and difficulty curve support any wave number.
+  - A standard run ends in victory at wave 20.
+  - Endless play after victory is a later nice-to-have.
+- **Implemented (Phase 6, D-044; values in BALANCING §2.14).**
+  - Budget 6 → 77 threat over waves 1–20, with no health scaling. Up to `5 + n` enemies alive (24 max).
+  - Unlocks: Runners from wave 3, Screamers from 4, Tanks from 6. Each archetype's first wave has exactly one.
+  - Armored and Helmeted enemies from wave 8, Elites from wave 13 (a few per wave).
+  - Themes: intro (waves 1–3), then a rotation of mixed, swarm, heavy and ambush; wave 20 is a finale with guaranteed Tanks and Screamers until the Siren exists (Phase 13).
+  - Enemies enter at authored spawn points at least 12 m away and out of the player's sight, and head for the player.
+  - A Screamer's scream pulls the next group in early, from its side of the map.
+  - Between waves: a 3 s announcement, then a 10 s breather after a clear (no damage in either, D-029), with no healing. Upgrades come in Phase 9.
+  - Endless play is available with `?endless=1`. Mutations are not implemented yet (Phase 7), so no wave has one.
+
+---
+
+## 9. Signal Mutations
+
+Each mutation is pure data made from effect kinds (D-009). The plan lists 8 mutations (§14) and the initial build targets 6 (§42).
+
+| Mutation | Rule change | Tactical problem | Counter-play | Effect kind | v1 |
+|---|---|---|---|---|---|
+| **BLACKOUT** | Lights drop sharply; zombies become silhouettes with glowing eyes | Visibility | Hold lit zones; watch for eyes; muzzle flash lights the area | environment | Yes |
+| **HUNGER** | Enemy movement speed up | Less time per target | Positioning, retreat routes | stat | Yes |
+| **STATIC** (shown as **SIGNAL GLITCH**) | The image tears and zombies are drawn a moment behind | Information denial | Aim ahead; rely on audio cues | screen | Yes |
+| **SCREAM** (shown as **DEATH CRY**) | Enemy deaths send nearby enemies, frenzied, to where the player stood | Every kill pulls more attention | Kill, then move; isolate targets | trigger | Yes |
+| **HIVE** | Extra spawn events | Surprise flanks | Map awareness | spawnRule | Yes |
+| **BLOOD MOON** | Higher chance of Elite enemies | High-value targets | Prioritise; earn bonus rewards | spawnRule | Yes |
+| **LOW GRAVITY** | Player and enemy physics change | Movement and aim relearned | Vertical play | stat (`world.gravity`) | **Deferred (D-045)** |
+| **OVERLOAD** | Weapon fire causes environmental effects; recoil increases | Risk vs reward | Burst discipline | trigger + stat | **Deferred (D-045)** |
+
+**Why defer these two:**
+- LOW GRAVITY affects player physics, enemy navigation (airborne time vs the nav grid) and animation.
+- OVERLOAD's "additional environmental effects" is not yet defined.
+- Either can be added later without changing the architecture.
+
+**Presentation.**
+- At `WAVE_START`, show the mutation name, a one-line rule and an icon.
+- The icon stays on the HUD for the whole wave.
+- **[Proposed]** Mutated waves pay a small reward bonus, so they read as a challenge rather than just a nerf.
+
+**BLACKOUT visibility [O-10, updated by D-045 and D-046].** No flashlight for now: BLACKOUT is played with the red emergency lights, the muzzle flash (which lights the scene), zombies as dark silhouettes with glowing eyes, and a zombie close to the player lifted out of the dark. A flashlight is reconsidered after the next hands-on playtest.
+
+### 9.1 Implemented (Phase 7, D-045; Phase 7.1, D-046; values in BALANCING §2.15)
+
+**When.** None on waves 1–3 (the player learns the basics first) or on wave 20 (the finale / boss rules). Exactly one on every other wave, endless waves included. The draw is seeded per run and wave, so a seed always gives the same sequence.
+
+| Mutation | First wave | What the player reads (rule · hint) | What it does |
+|---|---|---|---|
+| **HUNGER** | 4 | "Zombies move 15 % faster." · "Keep your distance and a way out." | Enemy speed and acceleration ×1.15 while the wave is live. Never above max(the enemy's own speed, 90 % of the player's sprint): the player can always outrun a Walker, a Tank or a Screamer, and a Runner stays below the sprint. The Runner's leap is unchanged |
+| **BLACKOUT** | 4 | "The lights are failing; only the red emergency lights stay on." · "Hold the lit zones. Your muzzle flash lights the way." | The lights fade to near-dark (about a seventh) over the announcement; three red emergency lights come on; each shot lights the area. Zombies are dark silhouettes whose eyes glow on their own; one within a few metres is lifted back out of the dark, so close range stays fair (D-046). The fog distance and the HUD are untouched. The light comes back during the breather |
+| **DEATH CRY** (id `SCREAM`) | 5 | "Every kill cries out: zombies nearby rush where you stood, in a frenzy." · "Kill, then move: they charge your last position." | Each death tells enemies within 8 m where the player stood at the kill (not where they go next): they rush that spot, hurried (×1.25 for 3 s) and frenzied for 3 s (attacking sooner, winding up faster, turning faster), and must see the player again to find them (D-046). A red echo (two rings and a short flare) at the body shows its reach; frenzied eyes flare red. It never brings more zombies and cannot chain |
+| **SIGNAL GLITCH** (id `STATIC`) | 6 | "The signal tears: zombies flicker out of place." · "Aim where they're going, not where they flicker. Your crosshair stays clear." | Bursts every 6–10 s, each 0.4–0.7 s, the first ≥ 4 s into the wave (D-046). During a burst the 3D image tears into slipping bands, splits its colours slightly and keeps an afterimage, and zombies are drawn about 0.18 s behind where they are (their hit volumes are not), so the player aims ahead. The centre around the crosshair stays clear, the HUD is never glitched, the pattern changes at most 3 times a second, and with reduced motion only a slight colour split remains. A faint grain sits under the HUD; the badge flickers with each burst |
+| **HIVE** | 7 | "The horde is bigger and surges in at once midway." · "Watch for the surge warning and turn to face it." | 15 % more threat budget (the same concurrency cap, so a longer wave) and a surge halfway through: "HIVE SURGE · EAST" and an arrow warn 2 s before a bigger group (one more than the wave's largest, up to 6) arrives there |
+| **BLOOD MOON** | 9 | "Elite zombies are far more common." · "Fewer, tougher enemies: pick your targets." | A red sky; the Elite chance +15 %, one more Elite allowed (more on later waves), and at least one Elite. The budget stays the same: fewer, tougher enemies. Before wave 13 it is the only way to meet Elites. Every run meets it first on one of waves 9–12 (25 % each, D-046), then it can come back by the normal rules. The badge counts them ("ELITES ×2") |
+
+**Selection.** A mutation's first wave must have come. The previous wave's mutation is never repeated, and two sight mutations (BLACKOUT, Signal Glitch) never follow each other. A mutation seen in the last three waves is less likely. BLOOD MOON's first appearance is guaranteed within waves 9–12: until it has appeared, on each of those waves it comes only by its own roll (1/4, 1/3, 1/2, then certain), never through the normal draw.
+
+**The player always knows why.**
+- During the announcement: a card under "WAVE N" with the name in its colour, the rule and a counter-play hint. Only lighting changes during the announcement; nothing that changes play acts before the wave starts.
+- During the wave: a badge top centre (`◆ HUNGER`) and a cue tied to each occurrence (the lights failing, the red ring at a body, the badge flickering with interference, the surge warning with its direction, the Elite count).
+- After the wave: "HUNGER LIFTED" in the breather.
+- On death: "You died · Wave 7 · Hunger".
+
+**The Screamer, DEATH CRY and adaptation are different things.**
+- A Screamer's scream (§7.5) is an enemy doing something: a wind-up the player can interrupt, a large **violet** sonic wave (three rings and a column), a violet pulse at the screen edges, a frenzy with violet eyes, and the next group of the wave arrives early.
+- DEATH CRY is a rule of the wave: every death, a small **red** echo (two rings and a flare), red eyes on the frenzied, no screen pulse, and never extra zombies.
+- Adaptation (§10, Phase 8) is explained after a wave and changes which enemies come next; it never raises alarms and never chooses mutations.
+
+**Guardrails.** A mutation can never make a wave silently impossible or unfair:
+- it never changes the concurrency cap, the spawn distance or view rule, the damage window (none in the announcement or breather), unlocks or the roster;
+- speeds, budgets, surges, Elites, alarm reach and haste, darkness and interference strength are all capped, in the data and again when applied;
+- a scripted test player that clears waves 6, 9 and 12 unhurt without a mutation must also clear them under every mutation without dying (10 seeds each). It led to a gentler HUNGER (15 %) and HIVE (one surge, then ×1.15 once the Spitter joined wave 12), and kept DEATH CRY's reach at 8 m (D-046).
+
+---
+
+## 10. Adaptive horde (signature mechanic)
+
+Implemented in Phase 8 (D-047, amending D-026). The game watches how the player actually plays, wave after wave, and changes **which zombies later waves bring**:
+- never the threat budget, the number of enemies alive at once or the pacing;
+- never a mutation: it never selects, suppresses, replaces or modifies one (D-024, D-045);
+- never during a wave;
+- always explained afterwards (SIGNAL ANALYSIS, §10.5).
+
+It reacts to **persistent** behaviour, never to one moment. Values are in `src/config/adaptation.ts`, and the reasoning is in BALANCING.md §2.17.
+
+**Two layers, kept apart:**
+- **Observed behaviour** (the profile): each wave is measured, and each signal keeps a decayed memory with a confidence.
+- **The adaptation decision:** when a signal stays high with enough confidence, an adaptation enters; it may escalate, and it fades when the evidence goes.
+
+### 10.1 Signals (what is watched)
+
+Counted only while a wave is fought (WAVE_ACTIVE or a boss fight), never in the intro, the breather or a pause. Positions are sampled 4 times a second while wave enemies are alive. Each signal gets a **score** (0–1) and a **weight** (how much evidence the wave carried: a full wave is about 45 s of fighting, 40 hits or 3 spawns of an archetype).
+
+| # | Category | Signal | Score per wave |
+|---|---|---|---|
+| 1 | High ground / camping | `elevation` | Share of samples with the player's feet 1.2 m or more above the floor |
+| 2 | One area too long | `dwell` | Share of ground samples in the most-used 9 × 9 m area |
+| 3 | Sprinting / constant movement | `mobility` | Half sprinting share, half kiting (moving away from the nearest zombie within 10 m) |
+| 4 | Close-range combat | `closeRange` | Share of hits at 5 m or closer (melee counts) |
+| 5 | Long-range shooting | `longRange` | Share of hits at 18 m or more |
+| 6 | Target priority | `priority.<screamer, spitter>` | Share of that archetype killed before its ability (a scream, a spit) |
+| 7 | Weapon focus | `weaponFocus.<role>` | Damage share by weapon role; counts only while 2 or more firearms are owned (dormant in V1) |
+| 8 | Ignoring enemy types | `neglect.<screamer, spitter>` | The opposite of priority |
+| 9 | Accuracy / hit zones | `headshot`, gated by `accuracy` | Head share of firearm hits; accuracy is hits ÷ shots |
+| 10 | Damage taken | `strain` | Damage taken ÷ 100 (it drives the governor, §10.4, not an adaptation) |
+
+The plan's §15 metrics (`shotgunUsage`, `rifleUsage`, `headshotRate`, `averageDistance`, `timeSpentInOneArea`, `elevatedPositionUsage`, `sprintUsage`, `meleeUsage`, `accuracy`, `damageTaken`, `kiteFrequency`) all map onto these signals (`PLAN_METRIC_SIGNALS`).
+
+**Mutated waves count less** for what the mutation itself pushes the player into. For example:
+- BLACKOUT: long-range shots, headshots and accuracy count ×0.4;
+- HUNGER: mobility ×0.5 and close range ×0.7.
+
+The mutation is only read (which one the wave had); it is never changed.
+
+### 10.2 The adaptation vocabulary
+
+Eight adaptations in four families. **At most one per family and 2 in all** are active, so contradictory or compounding pairs never meet (for example, Climbers and extra Runners).
+
+**Every answer is visible in the next wave (D-048).** Each response is a quota, not odds:
+- **An archetype quota:** a share of the wave's threat budget spent on that archetype, within its unlock and cap.
+- **A trait quota:** a share of the wave carrying Armored or Helmeted on top of the scheduled rolls.
+
+Either one holds on every seed. The budget is the same, so the wave has a different mix and often fewer bodies, never more threat. The "Wave 8" columns are the mean of 300 seeds against the unadapted wave (BALANCING.md §2.17).
+
+| Adaptation | Family | Enters when (signal ≥, confidence ≥) | Level 1 | Level 2 | Wave 8 | Counter-play |
+|---|---|---|---|---|---|---|
+| **HIGH_GROUND** | stance | elevation 0.45, 0.6 | 1 Climber (before wave 8: Runners take 35 % of the budget); spawns biased toward where the player stands | 2 Climbers (before wave 8: 45 %) | Climbers 0 → 1 / 2 | Come down; shoot Climbers off the wall |
+| **ENTRENCHED** | stance | dwell 0.7, 0.6 (only when not on high ground) | Spawns biased toward the player's area; Runners 25 %; Spitters (once unlocked) | Runners 30 % | Runners 4.0 → 6.7 / 6.9 | Relocate between waves; use cover against acid |
+| **SKIRMISHER** | stance | mobility 0.45, 0.6 | Runners 40 % of the budget | 45 % + spawn bias | Runners 4.0 → 8.1 / 8.7 | Hold a chokepoint; Runners die to body shots |
+| **CLOSE_QUARTERS** | range | closeRange 0.5, 0.6, **from wave 8** | Tanks up to their cap; Armored on +15 % of the wave | Armored +25 % | Tanks 0.6 → 1, Armored 0.8 → 3.6 / 4.6 | Keep your distance; headshot Tanks |
+| **LONG_RANGE** | range | longRange 0.45, 0.6 | Runners 35 % | + Screamers up to their cap | Runners 4.0 → 7.6 / 7.3, Screamers → cap | Fight closer; kill Runners and Screamers first |
+| **HEADHUNTER** | precision | headshot 0.55, 0.65 (accuracy ≥ 0.4), **from wave 8** | Helmeted on +15 % of the wave | +25 % | Helmeted 0.8 → 3.7 / 5.5 | Knock the helmet off with one shot, then headshot |
+| **WEAPON_FOCUS** | precision | weapon role 0.75, 0.65 | **Dormant in V1** (only the Pistol exists): shotgun → Armored, automatic → Tanks, precision → Runners | | — | Switch weapons |
+| **NEGLECT** | priority | neglect of the Screamer (**from wave 9**) or the Spitter (**from 11**) 0.6, 0.6 | That archetype at its per-wave cap, every wave | — (the cap is the limit) | Screamers 1.3 → 2 (wave 9) | Kill support zombies first |
+
+**Each adaptation, every time:**
+- **Hysteresis:** it leaves only when its signal drops under a lower exit threshold (for example HIGH_GROUND: 0.25) or its confidence under 0.35 (HEADHUNTER: 0.4).
+- **Level 2** only after 2 waves at level 1 with confidence 0.85 or more, and never while the player is bleeding (§10.4). NEGLECT has one level.
+- **A forced rest** after 4 waves active, then 2 waves before it may enter again; the same 2-wave rest follows a fade.
+- Not before wave 5 (later where its answer cannot act yet, see the table), not before 2 fought waves, and **never on the final wave** (20), which is hand-tuned. Endless keeps adapting.
+- **Pressure (D-048):** level 1 weighs 1, level 2 weighs 2, NEGLECT 4; together at most 4. Two adaptations may both reach level 2, but NEGLECT stands alone: support zombies at their cap, paired with anything else, overwhelmed the survival tripwire's defender.
+
+### 10.3 Confidence and decay (the profile)
+
+Per signal, with w the wave's weight (after the mutation discount and attribution, §10.4):
+
+```text
+w < 0.15                → no evidence: memory only decays
+mass        = w + 0.7 × mass′
+mean        = (w × score + 0.7 × mass′ × mean′) / mass
+above       = w × [score ≥ enter threshold] + 0.7 × above′
+confidence  = min(1, mass / 2) × above / mass
+```
+
+- **One extreme wave gives a confidence of 0.5. Nothing enters below 0.6**, so at least two consistent waves are needed.
+- Two full waves give 0.85; old evidence halves in about two waves.
+- One high wave and one low one never reach 0.6.
+
+### 10.4 Guardrails (D-026, D-047)
+
+1. **Decided only when a wave ends.** The next wave's composition is frozen until the following wave ends. Nothing changes mid-fight.
+2. **Minimum evidence:** two consistent waves (§10.3), from wave 5.
+3. **Hysteresis, levels, rests:** §10.2.
+4. **Bounded influence**, clamped in the generator whatever is active:
+   - archetype quotas at most 45 % of the budget each and 50 % together (the 30 % Walker floor always survives); weights ×0.75–1.6 per archetype;
+   - trait quotas at most +25 % per trait and +30 % together; trait chances +0.15 in total; only once a trait's schedule has started; never Elite;
+   - at most 2 Climbers, from wave 8, trait-free, not in the opening;
+   - spawn bias toward at most 2 regions.
+5. **Composition only:** the budget, concurrency, spawn rate, groups, surges, Elite limits, unlocks, per-archetype caps, the mutation, tier and theme are untouched. With a fixed budget, adaptation can only change the mix, never add threat.
+6. **Never a silent answer (D-048):** an adaptation enters only from the wave its answer can act on (its `firstWave`), and every answer changes the next wave on every seed (a property test). What SIGNAL ANALYSIS says is in the wave.
+7. **No runaway:**
+   - **Attribution:** what an active adaptation brought counts ×0.25 toward its own signal, so a response cannot feed its cause (for example, Runners making the player run).
+   - **The strain governor:** with heavy damage on consecutive waves, nothing enters, nothing escalates, and level 2 drops to level 1. Pressure only rises while the player copes. It never secretly eases the waves.
+   - **The pressure limit (D-048):** at most two at level 2 together; NEGLECT, the heaviest answer, never pairs.
+8. **Fair spawns:** Climbers obey every spawn rule; only they may use an elevated spawn point, and never while the player is up there.
+9. **Run-scoped:** a new run forgets everything. The profile is versioned and keyed by signal, so a later meta-progression can store or seed it without a schema migration.
+
+### 10.5 SIGNAL ANALYSIS (communication)
+
+An invisible adaptive system looks exactly like randomness, and unexplained counters feel like punishment, so every change is told and nothing is hidden.
+- **When:** after a wave, in the breather and on the upgrade screen only. Never during a wave. Nothing marks an adapted zombie mid-fight.
+- **What:** one line per change.
+  - **Enter:** "The horde has noticed your perch. Climbers are coming."
+  - **Escalate:** "More of them are learning to climb."
+  - **Fade:** "The signal has lost your perch."
+  - **Rest:** "The horde pulls back to regroup. For now."
+  - **The governor:** "You are bleeding. The horde hesitates, for now."
+- **Silence:** with no change, no card.
+- **End screens:** the run summary adds "The horde adapted to: High ground, Neglect" (every adaptation that entered during the run).
+
+---
+
+## 11. Progression and builds
+
+**Currencies (§21):** XP and SCRAP only.
+- Sources: kills, headshots, wave completion, boss kills, optional objectives and rare events.
+- **Scrap is spent at the Supply Terminal between waves** on weapons, melee weapons and ammunition (§5.3, D-039).
+
+**Upgrade selection** happens after every completed wave:
+- Three random cards, with no duplicates within one offer.
+- Upgrades can stack, up to a cap per upgrade.
+
+**How builds emerge [Proposed].**
+- Each upgrade has tags: `PRECISION`, `CLOSE_QUARTERS`, `MOBILITY`, `SURVIVAL`, `UTILITY`.
+- Offers lean slightly toward tags the player already owns.
+- Every offer keeps at least one card outside the player's current build.
+- Builds therefore form on their own (§17), without hard-coded classes.
+
+### 11.1 Upgrade pool (target 12+)
+
+| Upgrade | Effect | Tags | Source |
+|---|---|---|---|
+| Gunner | + fire rate | MOBILITY | Plan |
+| Executioner | + headshot damage | PRECISION | Plan |
+| Adrenaline | + movement speed | MOBILITY | Plan |
+| Scavenger | + ammo drop chance | UTILITY | Plan |
+| Vampire | Heal a little on each kill | SURVIVAL | Plan |
+| Heavy Hands | + melee damage (melee is always available, D-039) | CLOSE_QUARTERS | Plan |
+| Technician | Faster trap/utility cooldown. **Blocked:** the plan defines no trap or utility system (O-6) | UTILITY | Plan |
+| Quick Hands | + reload speed | MOBILITY | [Proposed] |
+| Deep Pockets | + magazine size | UTILITY | [Proposed] |
+| Thick Skin | + max health | SURVIVAL | [Proposed] |
+| Steady Aim | − recoil and spread | PRECISION | [Proposed] |
+| Point Blank | + close-range damage | CLOSE_QUARTERS | [Proposed] |
+| Long Shot | − damage falloff | PRECISION | [Proposed] |
+| Second Wind | Heal a percentage when a wave completes | SURVIVAL | [Proposed] |
+| Scrapper | + Scrap gained | UTILITY | [Proposed] |
+
+That makes 14 usable upgrades and 1 blocked.
+
+### 11.2 Target builds from plan §17
+
+| Build | Key upgrades |
+|---|---|
+| Shotgun + Melee | Point Blank, Heavy Hands, Thick Skin |
+| Headshot + Precision | Executioner, Steady Aim, Long Shot |
+| Mobility + SMG/Rifle | Adrenaline, Gunner, Quick Hands (the AR fills the SMG role in v1) |
+| Survival + Healing | Vampire, Second Wind, Thick Skin |
+
+### 11.3 What XP and Scrap buy [Partly open, O-1]
+
+The plan says Scrap is for "persistent purchases" and XP "unlocks progression", but defines no screen or content for either.
+
+**Decided (D-039):** Scrap is the primary purchase currency at the **Supply Terminal between waves** (weapons, melee weapons, ammunition). The terminal is the Scrap sink during a run.
+
+**Still open (O-1), recommendation:**
+- **XP** raises a persistent profile level. Levels add new upgrade cards, variants and purchasable weapons to the pool, so first runs stay simple.
+- **Unspent Scrap** at the end of a run: whether any of it carries over to modest permanent purchases (the plan's "persistent purchases") is not decided. Default: it does not; the run's Scrap is spent at the terminal.
+
+---
+
+## 12. Signal progression and environment
+
+The long-term objective must happen **during** waves, never as a walking section between them (§19).
+
+| Waves | Phase | In-wave objective [Proposed] | Base environment |
+|---|---|---|---|
+| 1–5 | Collect components | Components drop from Elites and caches; picked up on touch | POWER_FAILURE → EMERGENCY_LIGHTING |
+| 6–10 | Restore power | Hold E at generator switches while under pressure; each restored switch relights a zone | EMERGENCY_LIGHTING → NORMAL |
+| 11–15 | Repair transmitter | Hold E at repair points; taking damage interrupts the repair | NORMAL, with STRUCTURAL_DAMAGE events |
+| 16–19 | Charge transmitter | Stand inside the charge ring; charge builds while the player survives there | SIGNAL_OVERLOAD (flicker, interference) |
+| 20 | Transmit final signal | Survive The Siren while the transmission uploads | SIGNAL_OVERLOAD + NIGHT_MODE |
+
+**Objective rule [Proposed, O-12].**
+- The signal phase always advances with wave number, so reaching wave 20 is always possible.
+- Completing objectives adds **signal strength** and rewards.
+- Signal strength later drives the "multiple endings" should-have.
+
+This rules out soft-locks and keeps objectives optional but valuable.
+
+**Environment states (§18):** `NORMAL, POWER_FAILURE, EMERGENCY_LIGHTING, STRUCTURAL_DAMAGE, HEAVY_SMOKE, NIGHT_MODE, SIGNAL_OVERLOAD`.
+- The plan writes "NIGHT MODE"; the identifier is `NIGHT_MODE`.
+- **Events** can disable lights, open doors, close routes, open new spawn paths, move safe areas, trigger alarms and change visibility.
+- **Layering (D-028):** signal progression sets the base state; events and mutations add temporary overlays.
+
+### 12.1 Map: one compact facility [Proposed layout]
+
+The facility is about 60 × 60 m and has these areas:
+- **Central yard and signal tower:** the objective hub, with open sightlines.
+- **Control room:** indoors; holds the transmitter terminal.
+- **Generator hall:** power switches, with machinery for cover.
+- **Loading bay:** the main spawn entrance; parked vehicles give cover.
+- **Catwalks and rooftops:** elevated positions. They are risk/reward and are what the Climber counters.
+- **Service corridors:** tight routes that events can open or close.
+
+**Layout rules:**
+- 3–4 connected loops and no dead ends, so kiting is possible (`kiteFrequency`).
+- Spawns come from perimeter fences, vents and bay doors.
+
+---
+
+## 13. Boss — The Siren (v1)
+
+| Phase | Health | Behaviour |
+|---|---|---|
+| 1 | 100–66% | Stalks at range. Sonic scream on a cooldown, telegraphed by a rising audio wind-up. The scream distorts the screen and muffles audio for a few seconds, and summons Runners |
+| 2 | 66–33% | Moves between elevated points. Screams also cut the lights briefly (a mini-BLACKOUT) and summon Screamers |
+| 3 | 33–0% | Enraged: shorter cooldown; charges the player. After each scream a glowing weak point is exposed, opening a critical-damage window |
+
+- **Counter-play:** headshots during the wind-up interrupt the scream (stagger), and killing the summons first matters.
+- **The Hunter** (stealth, ambush, repositioning) comes after v1; it needs a cloaking effect and flanking AI.
+- **Boss placement [Open O-5]:** the Siren is the wave 20 finale in v1. The Hunter could later become a wave 10 mid-boss.
+
+---
+
+## 14. HUD
+
+Minimal. The player must understand the situation within one second (§22).
+
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│ WAVE 7 · 12 LEFT           ◆ BLACKOUT          SIGNAL ▓▓▓▓▓░░ 62% │
+│                                                                  │
+│                                  +                               │
+│                                                                  │
+│ ♥ 84                                             AR   24 / 120   │
+│                                                         ⚙ 340    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+- **Largest elements:** health (bottom left) and ammo with the current weapon (bottom right).
+- **Loadout strip** (small, beside the ammo): Primary, Secondary (a lock icon while locked) and Melee, with the active one highlighted (D-039). Not built yet.
+- **Phase 2 placeholder:** a centre dot crosshair and the held weapon's name and ammunition (`12 / ∞`, `RELOADING`) until the UI phase.
+- **Phase 3 placeholder:** a hit marker around the crosshair (hit, headshot, kill) and floating damage numbers (§6).
+- **Phase 4 placeholder:** health bottom left (`HEALTH 85` and a bar) and a brief red flash at the screen edges when the player is hit; "You died / Click to start a new run" at game over.
+- **Phase 6 placeholder:** `WAVE 7 · 12 LEFT` top left (queued + alive), a centred "WAVE 7" banner during the announcement and "WAVE 7 CLEARED · NEXT WAVE IN 8" during the breather.
+- **Phase 7 placeholder (D-045):** the mutation card under the wave banner during the announcement (name, rule, hint); the badge top centre for the whole wave (`◆ BLOOD MOON · ELITES ×2`), flickering with STATIC bursts and reading `… LIFTED` in the breather; the HIVE surge warning under it with a direction arrow; the STATIC layer under every HUD element.
+- **Phase 7.1 (D-046):** the Signal Glitch tears the 3D image only (the HUD is DOM above it, never glitched), and the grain under the HUD is fainter; frenzied zombies show it in their eyes (red: death cry, violet: scream); the Spitter's acid is a glowing green glob with a splat where it lands.
+- **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
+- **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
+- **Low health:** vignette plus a heartbeat sound (§23).
+
+---
+
+## 15. Audio cues
+
+Audio should warn the player of danger before they see it (§23).
+
+| Cue | Intent |
+|---|---|
+| Wave start | Rising siren sting; mutation name voiced or stung |
+| Elite spawn | Distinct distorted roar, positioned in space |
+| Boss spawn | Music transition plus a unique sting |
+| Mutation | Short "signal corruption" sound per mutation |
+| Runner approaching | Fast footsteps, spatialised, audible before the Runner is in view |
+| Screamer charging | Rising shriek wind-up, so the player can interrupt it |
+| Spitter winding up (D-046) | A wet, rising gurgle from its direction, so the player knows to move before the acid flies; a splat on impact |
+| Frenzy (D-046) | A short snarl layer on frenzied zombies, red (death cry) or violet (scream) in tone, matching their eyes |
+| Signal Glitch burst | A crackle of corrupted signal with each burst |
+| Tank | Heavy thuds with a low-frequency rumble |
+| Reload / empty magazine | Crisp mechanical clicks; a dry-fire click when empty |
+| Low health | Heartbeat, with other sounds muffled |
+
+**Dynamic music** raises its intensity with pressure: enemies alive and nearby, low health, boss phase.
+
+---
+
+## 16. Win, lose and restart
+
+- **Lose:** health reaches 0, then `GAME_OVER`. The screen shows:
+  - the wave reached
+  - what killed the player (archetype + mutation)
+  - key stats
+  - which adaptations the player faced
+
+  This fulfils the plan's rule that the player always understands why they died. Restart is one click and should take about 2 s.
+- **Win:** clear wave 20 and transmit the signal, then `VICTORY`, showing run stats and signal strength.
+- **Implemented so far (Phase 6 placeholder):** the prompt names the wave reached ("You died · Wave 7 · Click to start a new run"; "Signal transmitted · Wave 20 cleared · Click to start a new run"). Run stats (kills per archetype, headshots, damage taken, wave times) are collected for the end screens of the UI phase.
+- **Phase 7:** the prompt also names the wave's mutation ("You died · Wave 7 · Blackout"), and run stats record each wave's mutation. A new run starts with normal lighting and no mutation.
+
+---
+
+## 17. Graphics quality and fairness (D-037)
+
+- **Scaled visuals.** The game runs on a wide range of hardware. The minimum is an Intel i5-4440 with a GTX 750 at ~30 FPS, 1080p, Low. Capable GPUs such as an RTX 4050 class card get much richer visuals at High and Ultra.
+- **The art direction targets High.** Low is a faithful, readable reduction of it, never the other way round.
+- **Every tier plays the same game.** Enemies, rules and hitboxes are identical, and so is **gameplay-relevant visibility**:
+  - fog distance;
+  - BLACKOUT darkness;
+  - sight-blocking smoke;
+  - muzzle-flash light;
+  - attack and boss telegraphs.
+- **No advantage from settings.** Lower settings may never make it easier to see; higher settings may never hide information.
+- **Tells are never scaled away.** Effects that carry a gameplay tell (Screamer charge-up, Siren scream wind-up, elite markers) render on every preset. Only cosmetic density scales.
+
+---
+
+## 18. Out of scope for v1
+
+Per plan §39 and §42:
+- multiplayer
+- a second map
+- weapon customisation
+- daily challenge
+- leaderboards (local or online)
+- the Hunter boss
+- LOW GRAVITY and OVERLOAD
+- multiple endings (the data hooks exist, but only one ending ships)

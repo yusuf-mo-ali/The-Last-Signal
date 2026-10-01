@@ -1,0 +1,6 @@
+dist/
+coverage/
+node_modules/
+package-lock.json
+# Documentation is hand-maintained; IMPLEMENTATION_PLAN.md must stay byte-identical (D-025).
+*.md

@@ -1,0 +1,225 @@
+/**
+ * The support caster (D-043): the behaviour of an enemy that does not fight in melee but disrupts
+ * from a distance. The Screamer uses it. It shares everything else with the melee chaser
+ * (`common.ts`: perception, navigation, idle and patrol, alerts, stagger) and the same state
+ * machine; only positioning and the attack differ:
+ *
+ * - CHASE is positioning: it closes in beyond `preferredRange.max` (or when it cannot see the
+ *   target), backs away inside `preferredRange.min`, and otherwise holds its ground facing it.
+ * - ATTACK is its ability: when it can see the target within its attack range and the cooldown
+ *   allows, a long, readable wind-up (the telegraph), then the ability goes off: a scream raises
+ *   an alarm (a generic `alarm` event, heard within `ability.radius`), then a recovery.
+ * - A stagger (any solid hit) interrupts the wind-up: nothing goes off, and the cooldown has
+ *   still been spent, so interrupting a scream buys time.
+ *
+ * It never deals damage itself; what the alarm does is up to whoever listens (`EnemyManager`'s
+ * response: nearby enemies are told where the target is, hastened and frenzied, D-046).
+ */
+
+import { countDown, TIMER_EPSILON } from '../../weapons/timing';
+import type { Enemy } from '../Enemy';
+import type { EnemyTarget } from '../types';
+import type { BrainContext, EnemyBrain } from './brain';
+import {
+  alertTo,
+  cooldownOf,
+  enterIdle,
+  horizontalDistance,
+  perceive,
+  resetPose,
+  stagger,
+  thinkIdle,
+  thinkStandoff,
+  transition,
+  updatePatrol,
+  updateStandoff,
+  windupOf,
+  yawToward,
+} from './common';
+
+function canUseAbility(enemy: Enemy, target: EnemyTarget): boolean {
+  const pos = enemy.motor.position;
+  return (
+    enemy.attackCooldown <= 0 &&
+    enemy.canSeeTarget &&
+    target.isAlive() &&
+    horizontalDistance(pos, target.position) <= enemy.config.attackRange &&
+    Math.abs(target.position.y - pos.y) <= enemy.config.attack.verticalReach
+  );
+}
+
+function startAbility(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
+  transition(enemy, 'ATTACK');
+  const { config } = enemy;
+  enemy.attackPhase = 'windup';
+  const windup = windupOf(enemy, ctx.now);
+  enemy.attackTimer = windup;
+  enemy.attackYaw = yawToward(enemy.motor.position, target.position);
+  // Spent at the start: an interrupted scream still has to wait for its cooldown.
+  enemy.attackCooldown = cooldownOf(enemy, ctx.now);
+  enemy.attacks++;
+  enemy.retreating = false;
+  if (config.attackPose) {
+    enemy.rig.setPose(config.attackPose);
+  }
+  ctx.events.emit('attackStarted', {
+    id: enemy.id,
+    targetId: target.id,
+    windup,
+    kind: 'scream',
+  });
+}
+
+/** The end of the wind-up: the ability goes off (an alarm) whether or not anyone hears it. */
+function release(enemy: Enemy, ctx: BrainContext): void {
+  const ability = enemy.config.ability;
+  const p = enemy.motor.position;
+  const target = enemy.target?.isAlive() ? enemy.target : null;
+  ctx.events.emit('alarm', {
+    sourceId: enemy.id,
+    kind: ability?.kind ?? 'scream',
+    position: [p.x, p.y, p.z],
+    radius: ability?.radius ?? 0,
+    targetId: target?.id ?? null,
+    targetPosition: target ? [target.position.x, target.position.y, target.position.z] : null,
+    alertDuration: ability?.alertDuration ?? 0,
+    alertMode: 'live',
+    haste: ability ? { ...ability.haste } : null,
+    frenzy: ability?.frenzy ? { ...ability.frenzy } : null,
+    // The Screamer calls the horde in: the wave runtime pulls its next group forward (D-045).
+    reinforcements: true,
+    time: ctx.now,
+  });
+}
+
+function recover(enemy: Enemy, ctx: BrainContext): void {
+  if (enemy.target) {
+    transition(enemy, 'CHASE');
+  } else {
+    enterIdle(enemy, ctx);
+  }
+}
+
+export const screamerBrain: EnemyBrain = {
+  think(enemy, ctx) {
+    if (!enemy.alive) {
+      return;
+    }
+    perceive(enemy, ctx);
+    if (enemy.state === 'IDLE' || enemy.state === 'PATROL') {
+      thinkIdle(enemy, ctx);
+      return;
+    }
+    const target = enemy.target;
+    if (enemy.state !== 'CHASE' || !target) {
+      return;
+    }
+    thinkStandoff(enemy, ctx, target);
+  },
+
+  update(enemy, ctx) {
+    if (!enemy.alive) {
+      return;
+    }
+    const { config } = enemy;
+    const pos = enemy.motor.position;
+    const target = enemy.target;
+    enemy.moveSpeed = 0;
+    enemy.faceYaw = null;
+    enemy.speedScale = 1;
+    enemy.accelerationScale = 1;
+
+    switch (enemy.state) {
+      case 'IDLE':
+        break;
+
+      case 'PATROL':
+        updatePatrol(enemy, ctx);
+        break;
+
+      case 'DETECT':
+        if (!target) {
+          enterIdle(enemy, ctx);
+          break;
+        }
+        enemy.faceYaw = yawToward(pos, target.position);
+        if (enemy.fsm.time >= config.perception.reactionTime - TIMER_EPSILON) {
+          if (canUseAbility(enemy, target)) {
+            startAbility(enemy, ctx, target);
+          } else {
+            transition(enemy, 'CHASE');
+          }
+        }
+        break;
+
+      case 'CHASE': {
+        if (!target) {
+          enterIdle(enemy, ctx);
+          break;
+        }
+        if (canUseAbility(enemy, target)) {
+          startAbility(enemy, ctx, target);
+          break;
+        }
+        updateStandoff(enemy, ctx, target);
+        break;
+      }
+
+      case 'ATTACK':
+        if (enemy.attackPhase === 'windup') {
+          if (target) {
+            enemy.faceYaw = yawToward(pos, target.position);
+          }
+          enemy.attackTimer = countDown(enemy.attackTimer, ctx.dt);
+          if (enemy.attackTimer <= 0) {
+            release(enemy, ctx);
+            enemy.attackPhase = 'recovery';
+            enemy.attackTimer = config.attack.recovery;
+          }
+        } else if (enemy.attackPhase === 'recovery') {
+          enemy.attackTimer = countDown(enemy.attackTimer, ctx.dt);
+          if (enemy.attackTimer <= 0) {
+            enemy.attackPhase = 'none';
+            resetPose(enemy);
+          }
+        } else {
+          recover(enemy, ctx);
+        }
+        break;
+
+      case 'STAGGER':
+        enemy.staggerTimer = countDown(enemy.staggerTimer, ctx.dt);
+        if (enemy.staggerTimer <= 0) {
+          recover(enemy, ctx);
+        }
+        break;
+
+      case 'DEAD':
+        break;
+    }
+  },
+
+  onDamaged(enemy, ctx, attacker) {
+    if (attacker) {
+      alertTo(enemy, ctx, attacker, enemy.config.perception.targetMemory);
+    }
+  },
+
+  onStaggered(enemy, ctx) {
+    stagger(enemy, ctx);
+  },
+
+  alert(enemy, ctx, target, duration = Number.POSITIVE_INFINITY, lastKnown = null) {
+    alertTo(enemy, ctx, target, duration, lastKnown);
+  },
+
+  forceAttack(enemy, ctx) {
+    const target = enemy.target;
+    const free = enemy.state === 'DETECT' || enemy.state === 'CHASE' || enemy.state === 'ATTACK';
+    if (!enemy.alive || !target || !free || enemy.attackPhase !== 'none') {
+      return false;
+    }
+    startAbility(enemy, ctx, target);
+    return true;
+  },
+};
