@@ -39,6 +39,18 @@ function checkEffect(id: MutationId, effect: Effect): void {
         expect(p.hasteMultiplier, where).toBeGreaterThanOrEqual(1);
         expect(p.hasteMultiplier, where).toBeLessThanOrEqual(a.hasteMultiplier);
         expect(p.hasteDuration, where).toBeLessThanOrEqual(a.hasteDuration);
+        const f = EFFECT_CLAMPS.frenzy;
+        if (p.frenzyDuration !== undefined) {
+          expect(p.frenzyDuration, where).toBeLessThanOrEqual(f.duration);
+          expect(p.frenzyCooldownScale, where).toBeGreaterThanOrEqual(f.cooldownScale);
+          expect(p.frenzyCooldownScale, where).toBeLessThanOrEqual(1);
+          expect(p.frenzyWindupScale, where).toBeGreaterThanOrEqual(f.windupScale);
+          expect(p.frenzyWindupScale, where).toBeLessThanOrEqual(1);
+          expect(p.frenzyTurnScale, where).toBeGreaterThanOrEqual(1);
+          expect(p.frenzyTurnScale, where).toBeLessThanOrEqual(f.turnScale);
+          expect(p.frenzyStaggerScale, where).toBeGreaterThanOrEqual(1);
+          expect(p.frenzyStaggerScale, where).toBeLessThanOrEqual(f.staggerScale);
+        }
       }
       break;
     case 'spawnRule': {
@@ -84,6 +96,17 @@ function checkEffect(id: MutationId, effect: Effect): void {
       expect(p.intervalMin, where).toBeGreaterThanOrEqual(s.intervalMin);
       expect(p.intervalMin, where).toBeLessThanOrEqual(p.intervalMax);
       expect(p.firstAfter, where).toBeGreaterThanOrEqual(s.firstAfter);
+      const g = p.glitch;
+      if (g) {
+        expect(g.tearBands, where).toBeGreaterThanOrEqual(1);
+        expect(g.tearBands, where).toBeLessThanOrEqual(s.tearBands);
+        expect(g.maxShift, where).toBeLessThanOrEqual(s.maxShift);
+        expect(g.chroma, where).toBeLessThanOrEqual(s.chroma);
+        expect(g.ghost, where).toBeLessThanOrEqual(s.ghost);
+        expect(g.desync, where).toBeLessThanOrEqual(s.desync);
+        expect(g.stepRate, where).toBeGreaterThan(0);
+        expect(g.stepRate, where).toBeLessThanOrEqual(s.stepRate);
+      }
       break;
     }
   }
@@ -107,6 +130,33 @@ describe('mutation catalogue (D-045)', () => {
     expect(MUTATIONS.SCREAM.effects).toEqual([
       expect.objectContaining({ kind: 'trigger', on: 'enemy:died', action: 'deathCry' }),
     ]);
+  });
+
+  it('STATIC is presented as Signal Glitch and distorts the 3D image, not only the screen', () => {
+    expect(MUTATIONS.STATIC.name).toBe('Signal Glitch');
+    const screen = MUTATIONS.STATIC.effects.find((e) => e.kind === 'screen');
+    expect(screen?.params.glitch).toBeDefined();
+    expect(screen?.params.glitch?.desync).toBeGreaterThan(0);
+  });
+
+  it('DEATH CRY frenzies those who hear it, without reinforcements (D-046)', () => {
+    const cry = MUTATIONS.SCREAM.effects[0];
+    expect(cry?.kind === 'trigger' && cry.params?.frenzyDuration).toBeGreaterThan(0);
+  });
+
+  it('BLOOD MOON is guaranteed once on waves 9–12; no other mutation has a guarantee', () => {
+    expect(MUTATIONS.BLOOD_MOON.minWave).toBe(9);
+    expect(MUTATIONS.BLOOD_MOON.guarantee).toEqual({ by: 12 });
+    for (const id of MUTATION_IDS) {
+      const g = MUTATIONS[id].guarantee;
+      if (g) {
+        expect(g.by, id).toBeGreaterThanOrEqual(MUTATIONS[id].minWave);
+        expect(g.by, id).toBeLessThan(FINAL_WAVE);
+      } else {
+        expect(id).not.toBe('BLOOD_MOON');
+      }
+    }
+    expect(MUTATION_IDS.filter((id) => MUTATIONS[id].guarantee)).toEqual(['BLOOD_MOON']);
   });
 
   it('deferred mutations stay representable as data (targets the runtime does not register)', () => {
@@ -173,11 +223,15 @@ describe('mutation catalogue (D-045)', () => {
 });
 
 describe('environment overlays (D-028, D-045)', () => {
-  it('a blackout stays above the visibility floor and keeps enemies glowing', () => {
+  it('a blackout is dark, above the floor, with glowing eyes on silhouettes (D-046)', () => {
     const b = { ...BASE_ENVIRONMENT, ...ENVIRONMENT_OVERLAYS.blackout };
     expect(b.ambient).toBeGreaterThanOrEqual(ENVIRONMENT_FLOORS.ambientFloor);
-    expect(b.ambient).toBeLessThan(ENVIRONMENT_FLOORS.darkBelow);
-    expect(b.eyeshine).toBeGreaterThanOrEqual(ENVIRONMENT_FLOORS.eyeshineInDark);
+    expect(b.ambient).toBeLessThanOrEqual(0.15);
+    expect(b.sun).toBeLessThanOrEqual(0.05);
+    expect(b.eyeGlow).toBeGreaterThanOrEqual(ENVIRONMENT_FLOORS.eyeGlowInDark);
+    expect(b.proximity).toBeGreaterThanOrEqual(ENVIRONMENT_FLOORS.proximityInDark);
+    expect(b.silhouette).toBeGreaterThan(0.5);
+    expect(b.silhouette).toBeLessThanOrEqual(1);
     expect(b.emergency).toBe(1);
     expect(b.muzzleLight).toBe(1);
   });
@@ -195,7 +249,9 @@ describe('environment overlays (D-028, D-045)', () => {
       sun: 1,
       tintAmount: 0,
       emergency: 0,
-      eyeshine: 0,
+      eyeGlow: 0,
+      silhouette: 0,
+      proximity: 0,
       muzzleLight: 0,
     });
   });

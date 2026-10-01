@@ -11,6 +11,7 @@
  *
  * SCREAM is shown to the player as "Death Cry" (D-045): it is not the Screamer's scream. Its
  * alarm is a different kind (`deathCry`): smaller, briefer, and it never calls reinforcements.
+ * STATIC is shown as "Signal Glitch" (D-046): the id stays, so saves, tests and tools keep working.
  */
 
 import type { Effect, EffectKind } from './effects';
@@ -44,6 +45,13 @@ export interface MutationConfig {
   readonly status: MutationStatus;
   /** First wave it can be selected on. */
   readonly minWave: number;
+  /**
+   * Guaranteed first appearance (D-046): until it has appeared, on waves `minWave`…`by` it is
+   * chosen only by its own roll (1 in the waves left in the window), never by the weighted draw, so
+   * its first appearance is spread evenly over the window and certain by wave `by`. Afterwards the
+   * normal rules apply.
+   */
+  readonly guarantee?: { readonly by: number };
   /** Selection weight per difficulty tier (0 = never in that tier). */
   readonly weights: Readonly<Record<DifficultyTierId, number>>;
   readonly group?: MutationGroup;
@@ -94,9 +102,9 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
   },
   STATIC: {
     id: 'STATIC',
-    name: 'Static',
-    rule: 'Signal interference breaks up your view now and then.',
-    hint: 'Your crosshair and HUD stay clear. Keep tracking through it.',
+    name: 'Signal Glitch',
+    rule: 'The signal tears: zombies flicker out of place.',
+    hint: "Aim where they're going, not where they flicker. Your crosshair stays clear.",
     status: 'enabled',
     minWave: 6,
     weights: tiers(0.8, 1, 1),
@@ -111,8 +119,16 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
           intervalMax: 10,
           durationMin: 0.4,
           durationMax: 0.7,
-          opacity: 0.26,
+          opacity: 0.12,
           firstAfter: 4,
+          glitch: {
+            tearBands: 4,
+            maxShift: 0.025,
+            chroma: 0.004,
+            ghost: 0.35,
+            desync: 0.18,
+            stepRate: 3,
+          },
         },
       },
     ],
@@ -120,8 +136,8 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
   SCREAM: {
     id: 'SCREAM',
     name: 'Death Cry',
-    rule: 'Every kill cries out: zombies nearby surge at you.',
-    hint: 'Kill them apart, or from range.',
+    rule: 'Every kill cries out: zombies nearby rush where you stood, in a frenzy.',
+    hint: 'Kill, then move: they charge your last position.',
     status: 'enabled',
     minWave: 5,
     weights: tiers(1, 1, 1),
@@ -131,7 +147,17 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
         kind: 'trigger',
         on: 'enemy:died',
         action: 'deathCry',
-        params: { radius: 8, alertDuration: 6, hasteMultiplier: 1.2, hasteDuration: 2.5 },
+        params: {
+          radius: 9,
+          alertDuration: 6,
+          hasteMultiplier: 1.25,
+          hasteDuration: 3,
+          frenzyDuration: 3,
+          frenzyCooldownScale: 0.7,
+          frenzyWindupScale: 0.85,
+          frenzyTurnScale: 1.4,
+          frenzyStaggerScale: 1,
+        },
       },
     ],
   },
@@ -159,6 +185,8 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
     hint: 'Fewer, tougher enemies: pick your targets.',
     status: 'enabled',
     minWave: 9,
+    // Its first appearance is on one of waves 9–12, evenly spread (D-046).
+    guarantee: { by: 12 },
     weights: tiers(0, 0.8, 1.2),
     accent: '#e0443a',
     effects: [

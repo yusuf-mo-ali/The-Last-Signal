@@ -56,15 +56,21 @@ function clampStat(effect: EffectOf<'stat'>): number {
   return effect.value;
 }
 
-/** An alarm action's params within the guardrails. */
-function clampAlarmParams(params: TriggerParams | undefined): TriggerParams {
+/** An alarm action's params within the guardrails (its frenzy too, D-046). */
+export function clampAlarmParams(params: TriggerParams | undefined): TriggerParams {
   const a = EFFECT_CLAMPS.alarm;
+  const f = EFFECT_CLAMPS.frenzy;
   const p = params ?? {};
   return {
     radius: clamp(p.radius ?? 0, 0, a.radius),
     alertDuration: clamp(p.alertDuration ?? 0, 0, a.alertDuration),
     hasteMultiplier: clamp(p.hasteMultiplier ?? 1, 1, a.hasteMultiplier),
     hasteDuration: clamp(p.hasteDuration ?? 0, 0, a.hasteDuration),
+    frenzyDuration: clamp(p.frenzyDuration ?? 0, 0, f.duration),
+    frenzyCooldownScale: clamp(p.frenzyCooldownScale ?? 1, f.cooldownScale, 1),
+    frenzyWindupScale: clamp(p.frenzyWindupScale ?? 1, f.windupScale, 1),
+    frenzyTurnScale: clamp(p.frenzyTurnScale ?? 1, 1, f.turnScale),
+    frenzyStaggerScale: clamp(p.frenzyStaggerScale ?? 1, 1, f.staggerScale),
   };
 }
 

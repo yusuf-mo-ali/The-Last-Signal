@@ -69,6 +69,25 @@ export interface SurgeRule {
   readonly warning: number;
 }
 
+/**
+ * Signal Glitch: how a burst distorts the rendered 3D image (presentation only, D-046). Every
+ * field is clamped by `EFFECT_CLAMPS.static`.
+ */
+export interface GlitchParams {
+  /** Horizontal tear bands per pattern. */
+  readonly tearBands: number;
+  /** Largest sideways shift of a band, as a fraction of the screen width. */
+  readonly maxShift: number;
+  /** Red/blue separation, as a fraction of the screen width. */
+  readonly chroma: number;
+  /** How much of the previous frame lingers (an afterimage), 0–1. */
+  readonly ghost: number;
+  /** Seconds enemies are drawn behind where they really are (their hitboxes never move). */
+  readonly desync: number;
+  /** Times per second the tear pattern may change (photosensitivity: at most 3). */
+  readonly stepRate: number;
+}
+
 /** STATIC's interference bursts (seconds; opacity 0–1). */
 export interface StaticParams {
   readonly intervalMin: number;
@@ -79,6 +98,25 @@ export interface StaticParams {
   readonly opacity: number;
   /** No burst in the first seconds of a wave. */
   readonly firstAfter: number;
+  /** How a burst distorts the 3D image (omitted: the grain layer only). */
+  readonly glitch?: GlitchParams;
+}
+
+/**
+ * A combat frenzy (D-046): those who hear an alarm attack sooner and turn faster for a while,
+ * and may shrug off staggers. Scales multiply the enemy's own values; a frenzy never stacks (the
+ * strongest scale wins, and it ends at most `duration` after the latest alarm).
+ */
+export interface FrenzyParams {
+  readonly duration: number;
+  /** × the attack cooldown (< 1 = attacks more often). */
+  readonly cooldownScale: number;
+  /** × the wind-up (< 1 = faster, never below the clamp, so telegraphs stay readable). */
+  readonly windupScale: number;
+  /** × the turn speed. */
+  readonly turnScale: number;
+  /** × the stagger threshold (> 1 = harder to stagger). */
+  readonly staggerScale: number;
 }
 
 export type Effect =
@@ -130,8 +168,27 @@ export const EFFECT_CLAMPS = {
   enemySpeedCapOfSprint: 0.9,
   /** Alarm actions (a death cry): reach, alert and haste limits. */
   alarm: { radius: 10, alertDuration: 8, hasteMultiplier: 1.25, hasteDuration: 3 },
+  /**
+   * Any frenzy (a death cry's or a scream's): at most this long and this strong. A wind-up never
+   * shrinks below 70 % of its base, so every telegraph stays readable.
+   */
+  frenzy: { duration: 6, cooldownScale: 0.5, windupScale: 0.7, turnScale: 2, staggerScale: 1.6 },
   /** Environment overlays: fades within these many seconds. */
   fade: [0, 5],
-  /** STATIC: at most this opaque, this long, this often; never flickering faster than 3 Hz. */
-  static: { opacity: 0.35, durationMax: 0.8, intervalMin: 5, firstAfter: 2 },
+  /**
+   * STATIC (Signal Glitch): at most this opaque, this long, this often; the tear pattern never
+   * changes faster than 3 Hz (photosensitivity); distortion and lag stay small.
+   */
+  static: {
+    opacity: 0.35,
+    durationMax: 0.8,
+    intervalMin: 5,
+    firstAfter: 2,
+    tearBands: 6,
+    maxShift: 0.04,
+    chroma: 0.006,
+    ghost: 0.5,
+    desync: 0.25,
+    stepRate: 3,
+  },
 } as const;

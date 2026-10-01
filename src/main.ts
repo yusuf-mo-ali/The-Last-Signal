@@ -447,7 +447,8 @@ function boot(app: HTMLElement): () => void {
       dummyView.update(simDt);
       const channels = environment.resolve();
       lighting.update(channels, weaponView.muzzleFlashVisible ? 1 : 0);
-      enemyView.eyeshine = channels.eyeshine;
+      // Interim (Phase 7.1 step 1): the whole-body glow until the eye-only shader lands.
+      enemyView.eyeshine = channels.eyeGlow * 0.1;
       enemyView.update(alpha, simDt);
       pickupView.update(simDt);
       const held = weapons.activeWeapon;

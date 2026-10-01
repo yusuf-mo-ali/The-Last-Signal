@@ -158,8 +158,40 @@ describe('ScreenEffects (STATIC schedule)', () => {
     expect(p.intervalMin).toBe(5);
     expect(p.intervalMax).toBeGreaterThanOrEqual(p.intervalMin);
     expect(p.firstAfter).toBe(2);
+    expect(p.glitch).toBeUndefined();
+  });
+
+  it('clamps the glitch: small shifts, slight lag, a tear pattern at most 3 times a second', () => {
+    const p = clampStaticParams({
+      ...MUTATIONS_STATIC_PARAMS(),
+      glitch: { tearBands: 40, maxShift: 0.5, chroma: 0.1, ghost: 1, desync: 2, stepRate: 30 },
+    });
+    expect(p.glitch).toEqual({
+      tearBands: 6,
+      maxShift: 0.04,
+      chroma: 0.006,
+      ghost: 0.5,
+      desync: 0.25,
+      stepRate: 3,
+    });
+  });
+
+  it('a burst carries its glitch params for the presentation', () => {
+    const screen = new ScreenEffects();
+    screen.startStatic('s', MUTATIONS_STATIC_PARAMS(), new Rng('glitch'));
+    const burst = screen.force('s');
+    expect(burst?.glitch?.stepRate).toBeLessThanOrEqual(3);
+    expect(burst?.glitch?.desync).toBeGreaterThan(0);
   });
 });
+
+function MUTATIONS_STATIC_PARAMS() {
+  const e = MUTATIONS.STATIC.effects.find((x) => x.kind === 'screen');
+  if (!e) {
+    throw new Error('STATIC has no screen effect');
+  }
+  return e.params;
+}
 
 function router() {
   const stats = new StatRegistry(PHASE7_STATS);
@@ -167,8 +199,10 @@ function router() {
   const environment = new Environment();
   const screen = new ScreenEffects();
   const cries: number[] = [];
-  triggers.registerAction('deathCry', (_e, _p, params) => {
-    cries.push(params.radius ?? 0);
+  const params: Record<string, number>[] = [];
+  triggers.registerAction('deathCry', (_e, _p, p) => {
+    cries.push(p.radius ?? 0);
+    params.push({ ...p });
   });
   return {
     stats,
@@ -176,6 +210,7 @@ function router() {
     environment,
     screen,
     cries,
+    params,
     router: new EffectRouter({ stats, triggers, environment, screen }),
   };
 }
@@ -194,11 +229,13 @@ describe('EffectRouter', () => {
   it('routes each kind: HUNGER to stats, SCREAM to triggers, BLACKOUT to the environment, STATIC to the screen', () => {
     const t = router();
     t.router.apply('mutation:HUNGER', MUTATIONS.HUNGER.effects);
-    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.15);
+    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(
+      MUTATIONS.HUNGER.effects[0]?.kind === 'stat' ? MUTATIONS.HUNGER.effects[0].value : 0,
+    );
     expect(t.stats.multiplier('enemy.acceleration')).toBeCloseTo(1.15);
     t.router.apply('mutation:SCREAM', MUTATIONS.SCREAM.effects);
     t.triggers.dispatch('enemy:died', { id: 'w', position: [0, 0, 0] });
-    expect(t.cries).toEqual([8]);
+    expect(t.cries).toEqual([9]);
     t.router.apply('mutation:BLACKOUT', MUTATIONS.BLACKOUT.effects);
     expect(t.environment.sources()).toEqual(['mutation:BLACKOUT']);
     t.router.apply('mutation:STATIC', MUTATIONS.STATIC.effects, { rng: new Rng('s') });
@@ -231,7 +268,9 @@ describe('EffectRouter', () => {
     expect(t.stats.sources()).toEqual([]); // HUNGER has no environment effect
     t.router.apply('mutation:HUNGER', MUTATIONS.HUNGER.effects, { kinds: ['stat'] });
     t.router.apply('mutation:HUNGER', MUTATIONS.HUNGER.effects, { kinds: ['stat'] }); // idempotent
-    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(1.15);
+    expect(t.stats.multiplier('enemy.moveSpeed')).toBeCloseTo(
+      MUTATIONS.HUNGER.effects[0]?.kind === 'stat' ? MUTATIONS.HUNGER.effects[0].value : 0,
+    );
     t.router.remove('mutation:HUNGER', { kinds: ['stat'] });
     expect(t.stats.sources()).toEqual([]);
   });
@@ -244,13 +283,34 @@ describe('EffectRouter', () => {
         kind: 'trigger',
         on: 'enemy:died',
         action: 'deathCry',
-        params: { radius: 50, alertDuration: 60, hasteMultiplier: 4, hasteDuration: 30 },
+        params: {
+          radius: 50,
+          alertDuration: 60,
+          hasteMultiplier: 4,
+          hasteDuration: 30,
+          frenzyDuration: 60,
+          frenzyCooldownScale: 0.01,
+          frenzyWindupScale: 0.01,
+          frenzyTurnScale: 10,
+          frenzyStaggerScale: 10,
+        },
       },
     ];
     t.router.apply('debug:wild', wild);
     expect(t.stats.multiplier('enemy.moveSpeed')).toBe(1.25);
     t.triggers.dispatch('enemy:died', { id: 'w', position: [0, 0, 0] });
     expect(t.cries).toEqual([10]);
+    expect(t.params[0]).toEqual({
+      radius: 10,
+      alertDuration: 8,
+      hasteMultiplier: 1.25,
+      hasteDuration: 3,
+      frenzyDuration: 6,
+      frenzyCooldownScale: 0.5,
+      frenzyWindupScale: 0.7,
+      frenzyTurnScale: 2,
+      frenzyStaggerScale: 1.6,
+    });
   });
 
   it('a screen effect needs its seeded stream', () => {

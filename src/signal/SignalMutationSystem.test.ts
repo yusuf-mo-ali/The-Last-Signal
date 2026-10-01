@@ -209,7 +209,7 @@ describe('SignalMutationSystem: the lifecycle', () => {
     h.waves.events.on('reinforcementsPulled', () => pulled++);
     h.t.manager.kill(victim.id);
     expect(alarms).toEqual(['deathCry:false']);
-    expect(other.haste(h.t.manager.now)).toBeCloseTo(1.2);
+    expect(other.haste(h.t.manager.now)).toBeCloseTo(1.25);
     h.step(2);
     expect(pulled).toBe(0);
     h.clearWave();

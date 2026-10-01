@@ -8,7 +8,7 @@
  * `durationMax` long, `intervalMin` apart, and never in the first `firstAfter` seconds.
  */
 
-import { EFFECT_CLAMPS, type StaticParams } from '../config/effects';
+import { EFFECT_CLAMPS, type GlitchParams, type StaticParams } from '../config/effects';
 import type { FixedUpdateSystem } from '../core/Game';
 import type { Rng } from '../utils/Rng';
 
@@ -18,6 +18,8 @@ export interface ScreenBurst {
   readonly until: number;
   /** Peak opacity (0–1). */
   readonly intensity: number;
+  /** How it distorts the 3D image (clamped), or null for the grain layer only. */
+  readonly glitch: GlitchParams | null;
 }
 
 interface ActiveStatic {
@@ -26,6 +28,21 @@ interface ActiveStatic {
   nextAt: number;
   burst: ScreenBurst | null;
   bursts: number;
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Glitch params with every guardrail applied (D-046). */
+export function clampGlitchParams(g: GlitchParams): GlitchParams {
+  const c = EFFECT_CLAMPS.static;
+  return {
+    tearBands: clamp(Math.round(g.tearBands), 1, c.tearBands),
+    maxShift: clamp(g.maxShift, 0, c.maxShift),
+    chroma: clamp(g.chroma, 0, c.chroma),
+    ghost: clamp(g.ghost, 0, c.ghost),
+    desync: clamp(g.desync, 0, c.desync),
+    stepRate: clamp(g.stepRate, 0.5, c.stepRate),
+  };
 }
 
 /** The params with every guardrail applied. */
@@ -40,6 +57,7 @@ export function clampStaticParams(p: StaticParams): StaticParams {
     intervalMin,
     intervalMax: Math.max(intervalMin, p.intervalMax),
     firstAfter: Math.max(c.firstAfter, p.firstAfter),
+    ...(p.glitch ? { glitch: clampGlitchParams(p.glitch) } : {}),
   };
 }
 
@@ -150,6 +168,7 @@ export class ScreenEffects implements FixedUpdateSystem {
       start: this.now,
       until: this.now + duration,
       intensity: p.opacity,
+      glitch: p.glitch ?? null,
     };
     s.burst = burst;
     s.bursts++;

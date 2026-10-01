@@ -23,8 +23,18 @@ export interface EnvironmentChannels {
   readonly fog: Rgb;
   /** Emergency fixtures: 0 = off (normal), 1 = full red emergency lighting. */
   readonly emergency: number;
-  /** Baseline glow of enemy bodies in their eye colour (readable silhouettes in the dark). */
-  readonly eyeshine: number;
+  /**
+   * How brightly enemy eyes glow on their own (D-046): only the eyes, never the body, so in the dark
+   * a zombie reads as a pair of eyes on a silhouette.
+   */
+  readonly eyeGlow: number;
+  /** How far enemy bodies are darkened toward a silhouette (0 = their normal colours). */
+  readonly silhouette: number;
+  /**
+   * How much an enemy close to the viewer is lifted out of the dark (0 = not at all): full within
+   * about 2.5 m, none beyond 7 m, so a zombie at arm's length is always readable.
+   */
+  readonly proximity: number;
   /** How strongly the muzzle flash lights its surroundings (0 = the unlit flash only). */
   readonly muzzleLight: number;
 }
@@ -37,7 +47,9 @@ export const BASE_ENVIRONMENT: EnvironmentChannels = {
   tintAmount: 0,
   fog: [11 / 255, 14 / 255, 18 / 255], // 0x0b0e12, the Phase 1 background
   emergency: 0,
-  eyeshine: 0,
+  eyeGlow: 0,
+  silhouette: 0,
+  proximity: 0,
   muzzleLight: 0,
 };
 
@@ -45,16 +57,19 @@ export const BASE_ENVIRONMENT: EnvironmentChannels = {
 export const ENVIRONMENT_OVERLAYS: Readonly<
   Record<EnvironmentOverlayId, Partial<EnvironmentChannels>>
 > = {
-  // Lights fail: a cold, dark facility lit by red emergency fixtures and gunfire. Fog distances
-  // are untouched; enemies keep a faint glow so a silhouette always reads.
+  // Lights fail: a near-dark facility lit by red emergency fixtures and gunfire (D-046). Fog
+  // distances are untouched. Zombies are dark silhouettes whose eyes glow; one close by is lifted
+  // out of the dark.
   blackout: {
-    ambient: 0.3,
-    sun: 0.12,
+    ambient: 0.14,
+    sun: 0.04,
     tint: [0.55, 0.62, 0.85],
     tintAmount: 0.5,
     fog: [0.015, 0.018, 0.028],
     emergency: 1,
-    eyeshine: 0.14,
+    eyeGlow: 1.4,
+    silhouette: 0.75,
+    proximity: 0.6,
     muzzleLight: 1,
   },
   // A red sky: tint only, no visibility loss.
@@ -68,13 +83,16 @@ export const ENVIRONMENT_OVERLAYS: Readonly<
 };
 
 /**
- * Visibility guardrails (D-045): whatever overlays are active, the fill light never drops below
- * `ambientFloor`, and whenever it is below `darkBelow` enemies glow at least `eyeshineInDark`.
+ * Visibility guardrails (D-045, amended by D-046): whatever overlays are active, the fill light
+ * never drops below `ambientFloor`; and whenever it is below `darkBelow`, enemy eyes glow at least
+ * `eyeGlowInDark` and nearby enemies are lifted at least `proximityInDark` (both scaled by how dark
+ * it is, in full at the floor). Visibility in the dark rests on eyes and proximity, not on light.
  */
 export const ENVIRONMENT_FLOORS = {
-  ambientFloor: 0.25,
+  ambientFloor: 0.12,
   darkBelow: 0.6,
-  eyeshineInDark: 0.1,
+  eyeGlowInDark: 0.9,
+  proximityInDark: 0.4,
 } as const;
 
 /** How the lighting controller renders the channels (presentation values). */

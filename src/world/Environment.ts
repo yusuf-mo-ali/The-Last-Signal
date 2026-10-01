@@ -7,7 +7,7 @@
  * `resolve()` blends everything into the channels the lighting reads: channel by channel, overlays
  * are applied in priority order (the highest last, so it wins once fully faded in). The
  * visibility floors are applied after blending, whatever the overlays say: the fill light never
- * drops below its floor, and in the dark enemies always keep a faint glow.
+ * drops below its floor, and in the dark enemy eyes always glow and close enemies are lifted.
  *
  * Simulation only: no three.js lights here; `render/LightingController` applies the channels.
  */
@@ -50,7 +50,9 @@ const NUMERIC_CHANNELS = [
   'sun',
   'tintAmount',
   'emergency',
-  'eyeshine',
+  'eyeGlow',
+  'silhouette',
+  'proximity',
   'muzzleLight',
 ] as const satisfies readonly (keyof EnvironmentChannels)[];
 
@@ -200,7 +202,9 @@ export class Environment implements FixedUpdateSystem {
     if (r.ambient < f.darkBelow) {
       // The darker it is, the more the floor applies (full floor at the ambient floor).
       const dark = (f.darkBelow - r.ambient) / (f.darkBelow - f.ambientFloor);
-      r.eyeshine = Math.max(r.eyeshine, f.eyeshineInDark * Math.min(1, dark));
+      const scale = Math.min(1, dark);
+      r.eyeGlow = Math.max(r.eyeGlow, f.eyeGlowInDark * scale);
+      r.proximity = Math.max(r.proximity, f.proximityInDark * scale);
     }
     return r;
   }

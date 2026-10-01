@@ -34,7 +34,7 @@ describe('Environment', () => {
     expect(env.resolve().ambient).toBe(1);
     step(env, 1);
     const half = env.resolve().ambient;
-    expect(half).toBeCloseTo(1 + (0.3 - 1) * 0.5, 2);
+    expect(half).toBeCloseTo(1 + ((ENVIRONMENT_OVERLAYS.blackout.ambient ?? 0) - 1) * 0.5, 2);
     step(env, 1.5);
     const full = snapshot(env);
     expect(full.ambient).toBeCloseTo(ENVIRONMENT_OVERLAYS.blackout.ambient ?? 0);
@@ -73,10 +73,39 @@ describe('Environment', () => {
 
   it('the visibility floors hold whatever an overlay asks for', () => {
     const env = new Environment();
-    env.setBase({ ...BASE_ENVIRONMENT, ambient: 0.01, eyeshine: 0 });
+    env.setBase({ ...BASE_ENVIRONMENT, ambient: 0.01, eyeGlow: 0, proximity: 0 });
     const r = env.resolve();
     expect(r.ambient).toBe(ENVIRONMENT_FLOORS.ambientFloor);
-    expect(r.eyeshine).toBeCloseTo(ENVIRONMENT_FLOORS.eyeshineInDark);
+    expect(r.eyeGlow).toBeCloseTo(ENVIRONMENT_FLOORS.eyeGlowInDark);
+    expect(r.proximity).toBeCloseTo(ENVIRONMENT_FLOORS.proximityInDark);
+  });
+
+  it('the eye and proximity floors apply only in the dark, in proportion to it', () => {
+    const env = new Environment();
+    const f = ENVIRONMENT_FLOORS;
+    env.setBase({ ...BASE_ENVIRONMENT, ambient: f.darkBelow, eyeGlow: 0, proximity: 0 });
+    expect(env.resolve().eyeGlow).toBe(0);
+    expect(env.resolve().proximity).toBe(0);
+    const half = (f.darkBelow + f.ambientFloor) / 2;
+    env.setBase({ ...BASE_ENVIRONMENT, ambient: half, eyeGlow: 0, proximity: 0 });
+    expect(env.resolve().eyeGlow).toBeCloseTo(f.eyeGlowInDark / 2);
+    expect(env.resolve().proximity).toBeCloseTo(f.proximityInDark / 2);
+    // The silhouette is never forced: only an overlay darkens bodies.
+    expect(env.resolve().silhouette).toBe(0);
+  });
+
+  it('a full blackout gives silhouettes with glowing eyes, and fades back to normal', () => {
+    const env = new Environment();
+    env.addOverlay('m', 'blackout', { priority: 20, fadeIn: 1, fadeOut: 1 });
+    step(env, 1.5);
+    const r = env.resolve();
+    expect(r.silhouette).toBeCloseTo(ENVIRONMENT_OVERLAYS.blackout.silhouette ?? 0);
+    expect(r.eyeGlow).toBeGreaterThanOrEqual(ENVIRONMENT_FLOORS.eyeGlowInDark);
+    expect(r.proximity).toBeGreaterThanOrEqual(ENVIRONMENT_FLOORS.proximityInDark);
+    env.removeSource('m');
+    step(env, 1.5);
+    const after = env.resolve();
+    expect([after.eyeGlow, after.silhouette, after.proximity, after.ambient]).toEqual([0, 0, 0, 1]);
   });
 
   it('restarting an overlay continues from its weight; immediate removal and clear are instant', () => {
