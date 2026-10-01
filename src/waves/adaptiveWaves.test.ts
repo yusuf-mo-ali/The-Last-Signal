@@ -344,6 +344,24 @@ describe('D-048: every adaptation leaves its signature on every wave it may act 
       expect(traitTotal).toBeLessThanOrEqual(
         traitChance('armored', 15) + traitChance('helmeted', 15) + clamp.traitShareTotal + 0.35,
       );
+      // The generator clamps on its own: an over-ask is exactly the clamp.
+      const atClamp = generateWave(15, {
+        seed,
+        modifiers: [{ source: 'adaptive', archetypeShares: { runner: clamp.share } }],
+      });
+      expect(
+        generateWave(15, {
+          seed,
+          modifiers: [{ source: 'adaptive', archetypeShares: { runner: 0.9 } }],
+        }).spawns,
+      ).toEqual(atClamp.spawns);
+      // A trait quota before the trait's schedule changes nothing (Helmeted from wave 8).
+      expect(
+        generateWave(7, {
+          seed,
+          modifiers: [{ source: 'adaptive', traitShares: { helmeted: 0.25, armored: 0.25 } }],
+        }).spawns,
+      ).toEqual(generateWave(7, { seed }).spawns);
       // From any other source a quota is ignored.
       for (const source of ['mutation', 'debug'] as const) {
         expect(generateWave(15, { seed, modifiers: [{ ...greedy, source }] }).spawns).toEqual(

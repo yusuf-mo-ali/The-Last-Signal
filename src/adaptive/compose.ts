@@ -70,30 +70,33 @@ export function totalPressure(active: readonly Pick<ActiveAdaptation, 'id' | 'le
 }
 
 /**
- * The active adaptations as they act (D-048): while their combined pressure is over
- * `maxPressure`, level-2 ones drop to level 1, then whole adaptations are set aside, the last by
- * priority first. The director never goes past it; this holds it for any state (a forced one).
+ * The active adaptations as they act (D-048), within `maxPressure`: first, while even all at
+ * level 1 they would be over it, whole adaptations are set aside, the last by priority first;
+ * then level-2 ones drop to level 1, the last by priority first. The director never goes past the
+ * limit; this holds it for any state (a forced one included).
  */
 export function withinPressure(active: readonly ActiveAdaptation[]): ActiveAdaptation[] {
-  let out = active.map((a) => ({ ...a }));
   const max = ADAPTATION_GUARDRAILS.maxPressure;
-  const lastFirst = () =>
-    [...out].sort(
+  const lastFirst = <T extends ActiveAdaptation>(list: readonly T[]): T[] =>
+    [...list].sort(
       (a, b) => ADAPTATIONS[b.id].priority - ADAPTATIONS[a.id].priority || b.id.localeCompare(a.id),
     );
-  for (const a of lastFirst()) {
+  const atOne = (list: readonly ActiveAdaptation[]) =>
+    totalPressure(list.map((a) => ({ id: a.id, level: 1 as const })));
+  let out = active.map((a) => ({ ...a }));
+  for (const a of lastFirst(out)) {
+    if (atOne(out) <= max || out.length <= 1) {
+      break;
+    }
+    out = out.filter((o) => o !== a);
+  }
+  for (const a of lastFirst(out)) {
     if (totalPressure(out) <= max) {
       break;
     }
     if (a.level === 2) {
       a.level = 1;
     }
-  }
-  for (const a of lastFirst()) {
-    if (totalPressure(out) <= max || out.length <= 1) {
-      break;
-    }
-    out = out.filter((o) => o !== a);
   }
   return out;
 }

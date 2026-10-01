@@ -471,6 +471,20 @@ describe('composition (caps, unlocks, mutation ownership)', () => {
     const shares = both[0]?.archetypeShares ?? {};
     expect(Object.values(shares).reduce((a, b) => a + b, 0)).toBeCloseTo(caps.shareTotal, 10);
     expect(shares.runner).toBeCloseTo((0.45 * caps.shareTotal) / 0.6, 10);
+    // The larger ask, not the sum: Runners 0.25 (ENTRENCHED) and 0.35 (LONG_RANGE) give 0.35
+    // (summed, 0.6 would be clamped to 0.45), then the total 0.55 with Spitters is scaled to 0.5.
+    const mixed = composeModifiers([active('ENTRENCHED', 1), active('LONG_RANGE', 1)], {
+      wave: 12,
+    })[0]?.archetypeShares;
+    expect(mixed?.runner).toBeCloseTo((0.35 * caps.shareTotal) / 0.55, 10);
+    expect(mixed?.spitter).toBeCloseTo((0.2 * caps.shareTotal) / 0.55, 10);
+    // The pressure limit holds in composition too: NEGLECT beside HIGH_GROUND is set aside.
+    expect(
+      composeModifiers([active('HIGH_GROUND', 2), active('NEGLECT', 1, 'screamer')], {
+        wave: 12,
+        dwellRegions: ['west'],
+      }),
+    ).toEqual(composeModifiers([active('HIGH_GROUND', 2)], { wave: 12, dwellRegions: ['west'] }));
     expect(composeModifiers([active('HEADHUNTER', 2)], { wave: 7 })).toEqual([]); // Helmeted from 8
     const traits = composeModifiers([active('HEADHUNTER', 2), active('CLOSE_QUARTERS', 2)], {
       wave: 12,

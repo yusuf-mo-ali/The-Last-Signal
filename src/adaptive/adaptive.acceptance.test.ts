@@ -246,6 +246,20 @@ describe('Phase 8.1 acceptance: the announced adaptation is in the next wave', (
     expect(off.spawns).toEqual(plain.spawns);
   }, 60_000);
 
+  it('debug force: never above maxLevel; what no longer fits the pressure limit is set aside', () => {
+    const g = headlessGame(SEED);
+    g.startRun();
+    g.adaptive.force('HIGH_GROUND', 2, 'default', 9);
+    g.adaptive.force('NEGLECT', 2, 'screamer', 9);
+    expect(g.adaptive.snapshot.state.active).toEqual([
+      { id: 'NEGLECT', key: 'screamer', level: 1, since: 9, levelSince: 9 },
+    ]);
+    g.adaptive.force('LONG_RANGE', 2, 'default', 9);
+    expect(g.adaptive.snapshot.state.active.map((a) => [a.id, a.level])).toEqual([
+      ['LONG_RANGE', 2],
+    ]);
+  });
+
   it('deterministic: the same seed and the same adaptation spawn the same wave, in order', () => {
     const forced: Forced[] = [
       { id: 'HIGH_GROUND', key: 'default', level: 2 },
@@ -265,6 +279,10 @@ describe('Phase 8.1 acceptance: the announced adaptation is in the next wave', (
       const plain = playWave(SEED, wave, [], { adaptive: false, drawMutation: true });
       expect(adapted.mutation).not.toBeNull();
       expect(adapted.mutation).toBe(plain.mutation);
+      // The preview rebuilds the mutated wave too (its mutation shapes it).
+      expect(adapted.explanation.mutation).toBe(adapted.mutation);
+      expect(adapted.explanation.adapted).toEqual(adapted.definition);
+      expect(adapted.explanation.reference).toEqual(plain.definition);
       expect(adapted.mutationLog).toBe(plain.mutationLog);
       expect(adapted.budget).toBe(plain.budget);
     }
