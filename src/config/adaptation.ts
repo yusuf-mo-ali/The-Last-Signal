@@ -482,6 +482,8 @@ export const ADAPTATION_GUARDRAILS = {
    * The strain governor: while strain is high with this confidence, nothing enters, nothing
    * escalates and level 2 drops to level 1. Pressure only rises while the player copes.
    */
+  /** Said when an adaptation is made to rest after `maxActiveWaves` (the evidence may remain). */
+  restText: 'The horde pulls back to regroup. For now.',
   strain: {
     threshold: 0.5,
     confidence: 0.6,

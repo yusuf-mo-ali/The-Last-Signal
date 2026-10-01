@@ -290,7 +290,7 @@ describe('the director: entering, staying, escalating, fading (D-026)', () => {
     const kinds = r.outcomes.map((o) => `${o.forWave}:${o.changes.map((c) => c.kind).join(',')}`);
     expect(kinds).toContain('7:enter');
     expect(kinds).toContain('9:escalate');
-    expect(kinds).toContain('11:fade'); // shaped waves 7–10: maxActiveWaves 4
+    expect(kinds).toContain('11:rest'); // shaped waves 7–10: maxActiveWaves 4, then a rest
     expect(kinds).toContain('13:enter'); // rested for waves 11 and 12, the evidence still there
   });
 
@@ -539,7 +539,7 @@ describe('guardrails over many behaviour sequences (properties)', () => {
       'neglect.screamer': [1, 1],
     });
     const { outcomes } = run(extreme);
-    const fades = outcomes.flatMap((o) => o.changes).filter((c) => c.kind === 'fade');
+    const fades = outcomes.flatMap((o) => o.changes).filter((c) => c.kind === 'rest');
     expect(fades.length).toBeGreaterThan(4);
     for (const o of outcomes) {
       expect(o.state.active.length).toBeLessThanOrEqual(2);

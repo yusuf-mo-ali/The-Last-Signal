@@ -44,6 +44,8 @@ import { WeaponHud } from './ui/WeaponHud';
 import { Rng } from './utils/Rng';
 import { SpawnDirector, type SpawnViewer } from './waves/SpawnDirector';
 import { WaveManager } from './waves/WaveManager';
+import { AdaptiveSystem } from './adaptive/AdaptiveSystem';
+import { firearmsOwned } from './adaptive/BehaviorTelemetry';
 import { EffectRouter } from './modifiers/EffectRouter';
 import { ScreenEffects } from './modifiers/ScreenEffects';
 import { StatRegistry } from './modifiers/StatRegistry';
@@ -52,6 +54,8 @@ import { SignalMutationSystem } from './signal/SignalMutationSystem';
 import { MutationHud } from './ui/MutationHud';
 import { StaticOverlay } from './ui/StaticOverlay';
 import { MUTATIONS } from './config/mutations';
+import { PLAYER_MOVEMENT } from './config/player';
+import type { CompositionModifier } from './config/waves';
 import { Environment } from './world/Environment';
 import { LightingController } from './world/LightingController';
 import { Hitscan } from './weapons/hitscan';
@@ -236,6 +240,8 @@ function boot(app: HTMLElement): () => void {
     combat: combat.events,
     player: playerHealth.events,
     endless,
+    // The Adaptive system's frozen modifiers for this wave (D-047): composition only.
+    modifiers: (): readonly CompositionModifier[] => adaptive.modifiers(),
     onPrepare: (definition) => {
       enemyView.prewarm(definition.spawns);
     },
@@ -249,10 +255,26 @@ function boot(app: HTMLElement): () => void {
     triggers,
     screen: screenEffects,
   });
+  // The Adaptive system (D-047): watches each wave, adapts the next one's mix between waves. It
+  // never touches a mutation (it only reads which one a wave had, to discount its evidence).
+  const adaptive: AdaptiveSystem = new AdaptiveSystem({
+    state: game.state,
+    waves,
+    enemies,
+    combat: combat.events,
+    player: playerHealth.events,
+    weapons: weapons.events,
+    body: () => (playing() ? player.motor : null),
+    walkSpeed: PLAYER_MOVEMENT.walkSpeed,
+    firearmsOwned: () => firearmsOwned(weapons.loadout),
+    spawnPoints: FACILITY.spawnPoints ?? [],
+    fixedDt: game.time.fixedDt,
+  });
   if (!sandbox) {
-    cleanups.push(waves.attach(), mutations.attach());
+    cleanups.push(waves.attach(), mutations.attach(), adaptive.attach());
   }
   game.addSystem(waves);
+  game.addSystem(adaptive);
   game.addSystem(environment); // overlay fades, in simulated time
   game.addSystem(screenEffects); // STATIC's burst schedule
   game.addSystem(enemies);

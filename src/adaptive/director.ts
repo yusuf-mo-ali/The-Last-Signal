@@ -50,6 +50,9 @@ export function analysisText(
   if (kind === 'hold') {
     return ADAPTATION_GUARDRAILS.strain.text;
   }
+  if (kind === 'rest') {
+    return ADAPTATION_GUARDRAILS.restText;
+  }
   const variant = config.variants.find((v) => v.key === key);
   const name = variant?.subject ? ENEMY_STATS[variant.subject].name : config.name;
   return config.analysis[kind].replaceAll('{name}', name);
@@ -131,17 +134,16 @@ export function decide(
     const memory = variant ? memoryOf(profile, variant.signal) : null;
     const c = memory ? confidence(memory) : 0;
     const worn = nextWave - a.since >= config.maxActiveWaves;
-    if (
+    const gone =
       !variant ||
       !memory ||
       config.status === 'dormant' ||
       memory.mean < config.threshold.exit ||
       c < config.confidence.exit ||
-      !gatePasses(config, profile) ||
-      worn
-    ) {
+      !gatePasses(config, profile);
+    if (gone || worn) {
       restUntil[a.id] = nextWave + config.cooldownWaves;
-      change(a, 'fade');
+      change(a, gone ? 'fade' : 'rest');
       continue;
     }
     if (a.level === 2 && governor) {

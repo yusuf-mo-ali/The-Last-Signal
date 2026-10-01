@@ -119,7 +119,11 @@ export interface AdaptationState {
   readonly restUntil: Readonly<Partial<Record<AdaptationId, number>>>;
 }
 
-export type AdaptationChangeKind = 'enter' | 'escalate' | 'fade' | 'hold';
+/**
+ * `fade`: the evidence went; `rest`: it was made to fade after `maxActiveWaves` (the evidence may
+ * still be there: it may enter again after its rest); `hold`: the strain governor held it back.
+ */
+export type AdaptationChangeKind = 'enter' | 'escalate' | 'fade' | 'rest' | 'hold';
 
 export interface AdaptationChange {
   /** `governor`: the strain governor held the horde back (no adaptation of its own). */
