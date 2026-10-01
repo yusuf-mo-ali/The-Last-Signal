@@ -33,6 +33,8 @@ import {
   Vector3,
 } from 'three';
 import { LIGHTING } from '../config/environment';
+import { IDLE_GLITCH, type GlitchFrame } from '../render/glitch';
+import { GlitchPass } from '../render/GlitchPass';
 import type { Renderer } from '../render/Renderer';
 import { levelTriangles } from './levels/geometry';
 import type { SurfaceKind, Vec3 } from './levels/types';
@@ -78,9 +80,12 @@ export class WorldView {
   private readonly beaconBase: Vec3;
   private readonly disposables: { dispose(): void }[] = [];
   readonly lights: LightRig;
+  /** Signal Glitch (D-046): runs only on frames with an active burst. */
+  readonly glitch: GlitchPass;
 
   constructor(renderer: Renderer, world: World, options: WorldViewOptions) {
     this.renderer = renderer;
+    this.glitch = this.track(new GlitchPass(renderer));
     this.world = world;
     this.beaconBase = options.beaconPosition;
 
@@ -215,15 +220,19 @@ export class WorldView {
       }
     });
     this.renderer.webgl.compile(this.scene, camera);
+    this.glitch.prewarm();
     this.renderer.render(this.scene, camera);
     for (const object of hidden) {
       object.visible = false;
     }
   }
 
-  render(alpha: number, camera: PerspectiveCamera): void {
+  /** Draws the frame, glitched when `glitch` is active (a STATIC burst, D-046). */
+  render(alpha: number, camera: PerspectiveCamera, glitch: GlitchFrame = IDLE_GLITCH): void {
     this.syncBeacon(alpha);
-    this.renderer.render(this.scene, camera);
+    if (this.renderer.render(this.scene, camera)) {
+      this.glitch.apply(glitch);
+    }
   }
 
   dispose(): void {

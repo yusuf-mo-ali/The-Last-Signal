@@ -1,6 +1,8 @@
 /**
- * STATIC's interference (D-045): a layer of signal noise over the 3D view during a burst. The
- * simulation decides when bursts happen (`ScreenEffects`); this only draws the current one.
+ * STATIC's interference (D-045): a faint layer of signal grain over the 3D view during a burst.
+ * The simulation decides when bursts happen (`ScreenEffects`); this only draws the current one.
+ * Since D-046 (Signal Glitch) the image itself tears and lags (`render/GlitchPass`); this grain is
+ * the light top coat (0.12).
  *
  * It never hides what the player needs:
  * - it sits directly above the canvas and below every HUD element (DOM order), so the crosshair,
@@ -15,12 +17,8 @@
  * The noise texture is drawn once (seeded), so a burst costs a CSS opacity change, nothing more.
  */
 
-import type { ScreenBurst } from '../modifiers/ScreenEffects';
+import { burstEnvelope, type ScreenBurst } from '../modifiers/ScreenEffects';
 import { Rng } from '../utils/Rng';
-
-/** Seconds a burst takes to reach full strength, and to fade. */
-const ATTACK = 0.06;
-const RELEASE = 0.12;
 
 export class StaticOverlay {
   readonly element: HTMLElement;
@@ -51,8 +49,7 @@ export class StaticOverlay {
   update(burst: ScreenBurst | null, now: number, visible: boolean): void {
     let opacity = 0;
     if (visible && burst && now < burst.until) {
-      const envelope = Math.min(1, (now - burst.start) / ATTACK, (burst.until - now) / RELEASE);
-      opacity = Math.max(0, burst.intensity * envelope);
+      opacity = Math.max(0, burst.intensity * burstEnvelope(burst, now));
     }
     const rounded = Math.round(opacity * 100) / 100;
     if (rounded !== this.lastOpacity) {

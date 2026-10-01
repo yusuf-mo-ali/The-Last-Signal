@@ -25,6 +25,10 @@
  * - Hit reaction: a white flash and a push away from the hit; a stagger rocks it back further.
  * - Death: it falls, lies there, and sinks into the floor before its body is removed.
  *
+ * - Signal Glitch (D-046): during a burst every enemy is drawn `desync` seconds behind where it
+ *   really is (a short history of its drawn positions), so zombies flicker out of place. Only the
+ *   drawing lags: hit volumes, damage and every rule use the simulation's positions.
+ *
  * Presentation only: it reads the `EnemyManager` and listens to combat and enemy events.
  * Positions are interpolated between fixed steps. Visuals and materials are pooled per archetype.
  */
@@ -105,6 +109,9 @@ const COLUMN_POOL = 4;
 const COLUMN_TIME = 0.5;
 /** How brightly a frenzied enemy's eyes flare (D-046), pulsing. */
 const FRENZY_EYE_GLOW = 1.6;
+/** Drawn positions remembered per enemy for the glitch's lag: time, x, y, z, yaw. */
+const TRAIL = 72;
+const TRAIL_STRIDE = 5;
 /**
  * Culling sphere around the feet that holds the body in any pose, standing or lying down. The
  * skinned mesh's own sphere is taken from the pose of its first frame, which a fall leaves.
@@ -143,6 +150,14 @@ interface Visual {
   readonly material: MeshStandardMaterial;
   /** The eye and dark uniforms of its material (one shared program, values per enemy). */
   readonly shading: EnemyShading;
+  /** Its recent drawn positions (a ring of `TRAIL` samples) and the newest one's index. */
+  readonly trail: Float32Array;
+  trailHead: number;
+  trailCount: number;
+  /** Where it is drawn, lag included (tests, debug). */
+  readonly drawn: Vector3;
+  /** Where it really is this frame (interpolated simulation position). */
+  readonly real: Vector3;
   /** Which attachments its geometry has (look key bits). */
   lookBits: number;
   flash: number;
@@ -236,6 +251,11 @@ export class EnemyView {
   eyeGlow = 0;
   silhouette = 0;
   proximity = 0;
+  /**
+   * Signal Glitch (D-046): seconds every enemy is drawn behind where it is (0 outside a burst).
+   * Set every frame by the composition root. Drawing only: hit volumes never move.
+   */
+  desync = 0;
   private readonly scene: Scene;
   private readonly manager: EnemyManager;
   private readonly visuals = new Map<string, Visual>();
@@ -332,6 +352,12 @@ export class EnemyView {
     return this.columns
       .filter((c) => c.age < COLUMN_TIME)
       .map((c) => ({ color: c.material.color.getHex(), height: c.height }));
+  }
+
+  /** Where an enemy is drawn and where it really is this frame (tests, debug). */
+  drawnPosition(id: string): { drawn: number[]; real: number[] } | null {
+    const v = this.visuals.get(id);
+    return v ? { drawn: v.drawn.toArray(), real: v.real.toArray() } : null;
   }
 
   /** An enemy's eye shading this frame (tests, debug). */
@@ -544,6 +570,8 @@ export class EnemyView {
     v.lean = 0;
     v.fall = enemy.health.isDead ? 1 : 0;
     v.material.emissiveIntensity = 0;
+    v.trailCount = 0;
+    v.trailHead = 0;
     this.applyLook(v, enemy);
     return v;
   }
@@ -588,6 +616,11 @@ export class EnemyView {
       arms,
       material,
       shading,
+      trail: new Float32Array(TRAIL * TRAIL_STRIDE),
+      trailHead: 0,
+      trailCount: 0,
+      drawn: new Vector3(),
+      real: new Vector3(),
       lookBits: 0,
       flash: 0,
       glow: 0,
@@ -636,6 +669,9 @@ export class EnemyView {
       turn += Math.PI * 2;
     }
     v.root.rotation.y = enemy.previousHeading + turn * alpha;
+    v.real.copy(v.root.position);
+    this.lag(v);
+    v.drawn.copy(v.root.position);
 
     v.flash = Math.max(0, v.flash - dt);
     const decay = Math.exp(-dt * 8);
@@ -723,6 +759,59 @@ export class EnemyView {
     }
     s.uSilhouette.value = this.silhouette;
     s.uProximity.value = this.proximity;
+  }
+
+  /**
+   * Remembers where it is drawn now and, during a Signal Glitch burst, draws it where it was
+   * `desync` seconds ago (interpolated between remembered frames).
+   */
+  private lag(v: Visual): void {
+    const t = v.trail;
+    const root = v.root;
+    if (v.trailCount === 0 || (t[v.trailHead * TRAIL_STRIDE] ?? 0) !== this.clock) {
+      v.trailHead = (v.trailHead + 1) % TRAIL;
+      v.trailCount = Math.min(TRAIL, v.trailCount + 1);
+    }
+    const o = v.trailHead * TRAIL_STRIDE;
+    t[o] = this.clock;
+    t[o + 1] = root.position.x;
+    t[o + 2] = root.position.y;
+    t[o + 3] = root.position.z;
+    t[o + 4] = root.rotation.y;
+    if (this.desync <= 0) {
+      return;
+    }
+    const when = this.clock - this.desync;
+    // Walk back to the newest sample at or before `when`; blend toward the one after it.
+    let newer = v.trailHead;
+    for (let k = 1; k < v.trailCount; k++) {
+      const i = (v.trailHead - k + TRAIL) % TRAIL;
+      const at = t[i * TRAIL_STRIDE] ?? 0;
+      if (at <= when) {
+        const a = i * TRAIL_STRIDE;
+        const b = newer * TRAIL_STRIDE;
+        const span = (t[b] ?? 0) - at;
+        const f = span > 1e-9 ? (when - at) / span : 0;
+        root.position.set(
+          (t[a + 1] ?? 0) + ((t[b + 1] ?? 0) - (t[a + 1] ?? 0)) * f,
+          (t[a + 2] ?? 0) + ((t[b + 2] ?? 0) - (t[a + 2] ?? 0)) * f,
+          (t[a + 3] ?? 0) + ((t[b + 3] ?? 0) - (t[a + 3] ?? 0)) * f,
+        );
+        let turn = (t[b + 4] ?? 0) - (t[a + 4] ?? 0);
+        if (turn > Math.PI) {
+          turn -= Math.PI * 2;
+        } else if (turn < -Math.PI) {
+          turn += Math.PI * 2;
+        }
+        root.rotation.y = (t[a + 4] ?? 0) + turn * f;
+        return;
+      }
+      newer = i;
+    }
+    // Not remembered that far back (just spawned): the oldest it has.
+    const oldest = newer * TRAIL_STRIDE;
+    root.position.set(t[oldest + 1] ?? 0, t[oldest + 2] ?? 0, t[oldest + 3] ?? 0);
+    root.rotation.y = t[oldest + 4] ?? 0;
   }
 
   /** Tips the top of the body along a world direction by `amount` radians. */

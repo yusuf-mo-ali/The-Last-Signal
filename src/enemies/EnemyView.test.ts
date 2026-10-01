@@ -126,6 +126,44 @@ describe('EnemyView: eyes and the dark (D-046)', () => {
   });
 });
 
+describe('EnemyView: Signal Glitch lag (D-046)', () => {
+  it('during a burst an enemy is drawn behind where it is; its hit volumes are not', () => {
+    const { t, view } = scene();
+    const target = t.targets[0];
+    const walker = t.manager.spawn('walker', [0, 0, 0], {
+      patrol: false,
+      ...(target ? { alertTo: target } : {}),
+    });
+    const id = walker?.id ?? '';
+    // Walk for a second, drawing every step.
+    for (let i = 0; i < 60; i++) {
+      t.step();
+      view.update(1, 1 / 60);
+    }
+    const plain = view.drawnPosition(id);
+    expect(plain?.drawn).toEqual(plain?.real);
+    view.desync = 0.18;
+    t.step();
+    view.update(1, 1 / 60);
+    const lagged = view.drawnPosition(id);
+    const lag = Math.hypot(
+      (lagged?.drawn[0] ?? 0) - (lagged?.real[0] ?? 0),
+      (lagged?.drawn[2] ?? 0) - (lagged?.real[2] ?? 0),
+    );
+    const speed = Math.hypot(walker?.motor.velocity.x ?? 0, walker?.motor.velocity.z ?? 0);
+    expect(speed).toBeGreaterThan(1);
+    expect(lag).toBeCloseTo(speed * 0.18, 1);
+    // The hit volumes follow the simulation, not the drawing.
+    expect(walker?.rig.position.x).toBeCloseTo(lagged?.real[0] ?? 0, 6);
+    expect(walker?.rig.position.z).toBeCloseTo(lagged?.real[2] ?? 0, 6);
+    view.desync = 0;
+    t.step();
+    view.update(1, 1 / 60);
+    const after = view.drawnPosition(id);
+    expect(after?.drawn).toEqual(after?.real);
+  });
+});
+
 describe('EnemyView: alarms look different (D-046)', () => {
   const alarm = (kind: 'scream' | 'deathCry') => ({
     sourceId: 'x',

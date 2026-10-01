@@ -32,6 +32,21 @@ interface ActiveStatic {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** Seconds a burst takes to reach full strength, and to fade (presentation envelope). */
+export const BURST_ATTACK = 0.06;
+export const BURST_RELEASE = 0.12;
+
+/** How strong a burst is at sim time `now`: 0–1, rising and fading at its ends; 0 outside it. */
+export function burstEnvelope(burst: ScreenBurst | null, now: number): number {
+  if (!burst || now < burst.start || now >= burst.until) {
+    return 0;
+  }
+  return Math.max(
+    0,
+    Math.min(1, (now - burst.start) / BURST_ATTACK, (burst.until - now) / BURST_RELEASE),
+  );
+}
+
 /** Glitch params with every guardrail applied (D-046). */
 export function clampGlitchParams(g: GlitchParams): GlitchParams {
   const c = EFFECT_CLAMPS.static;

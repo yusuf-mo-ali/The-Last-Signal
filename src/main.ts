@@ -31,6 +31,7 @@ import { PlayerController } from './player/PlayerController';
 import { PlayerHealth } from './player/PlayerHealth';
 import { createPlayerTarget } from './player/PlayerTarget';
 import { createCamera } from './render/camera';
+import { glitchFrame } from './render/glitch';
 import { Renderer } from './render/Renderer';
 import { detectWebGL2 } from './render/webglSupport';
 import { CombatFeedback } from './ui/CombatFeedback';
@@ -296,6 +297,7 @@ function boot(app: HTMLElement): () => void {
   // right above the canvas, under every HUD element; the badge, card and surge cue explain it all.
   const lighting = new LightingController(view.lights);
   const staticOverlay = new StaticOverlay(renderer.canvas);
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const mutationHud = new MutationHud(app, mutations, waves);
   // Where the player looks from, for fair spawns: the eye, the look yaw and the camera's horizontal
   // field of view.
@@ -478,6 +480,10 @@ function boot(app: HTMLElement): () => void {
       enemyView.eyeGlow = channels.eyeGlow;
       enemyView.silhouette = channels.silhouette;
       enemyView.proximity = channels.proximity;
+      // Signal Glitch (D-046): the image tears and enemies are drawn a moment behind, during a
+      // STATIC burst only (measured in simulated time: it holds still while paused).
+      const glitch = glitchFrame(screenEffects.burst, screenEffects.time, reducedMotion);
+      enemyView.desync = glitch.active ? glitch.params.desync * glitch.envelope : 0;
       enemyView.update(alpha, simDt);
       pickupView.update(simDt);
       projectileView.update(alpha, simDt);
@@ -498,7 +504,11 @@ function boot(app: HTMLElement): () => void {
         yaw: player.look.yaw,
       });
       alarmPulse.update(simDt);
-      view.render(alpha, camera);
+      view.render(alpha, camera, glitch);
+      const glitchState = glitch.active ? 'active' : 'idle';
+      if (renderer.canvas.dataset.glitch !== glitchState) {
+        renderer.canvas.dataset.glitch = glitchState;
+      }
     },
   });
   game.start(browserFrames);
