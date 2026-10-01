@@ -67,6 +67,10 @@ export function sees(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): bool
 
 export function inAttackRange(enemy: Enemy, target: EnemyTarget): boolean {
   const pos = enemy.motor.position;
+  // Hands full on a wall (D-047): no attack until it is over the top.
+  if (enemy.climbing) {
+    return false;
+  }
   return (
     horizontalDistance(pos, target.position) <= enemy.config.attackRange &&
     Math.abs(target.position.y - pos.y) <= enemy.config.attack.verticalReach
@@ -215,6 +219,11 @@ export function chaseSpot(enemy: Enemy, target: EnemyTarget): Vector3 {
     : target.position;
 }
 
+/** Whether its body climbs walls (the Climber, D-047): climb links exist for it. */
+export function canClimb(enemy: Enemy): boolean {
+  return enemy.config.climb !== undefined;
+}
+
 /** Straight at the target if a body can walk that line, otherwise along the route graph. */
 export function planChase(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
   const pos = enemy.motor.position;
@@ -246,12 +255,12 @@ export function planChase(enemy: Enemy, ctx: BrainContext, target: EnemyTarget):
     if (start < 0) {
       start = _near[0] ?? 0;
     }
-    setRoute(enemy, ctx, routes.findPath(start, goal), goal);
+    setRoute(enemy, ctx, routes.findPath(start, goal, canClimb(enemy)), goal);
   } else if (goal !== enemy.routeGoal || enemy.replanTimer <= 0) {
     // The target moved on: re-plan from the node it is already walking to, so a re-plan halfway
     // up a staircase never sends it back to the bottom.
     const next = enemy.route[enemy.routeCursor] ?? goal;
-    setRoute(enemy, ctx, routes.findPath(next, goal), goal);
+    setRoute(enemy, ctx, routes.findPath(next, goal, canClimb(enemy)), goal);
   }
   // Cut corners: skip ahead to the farthest of the next few nodes it can walk straight to. Not
   // after a straight walk failed: the same test said that one was clear too.

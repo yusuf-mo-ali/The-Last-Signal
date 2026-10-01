@@ -171,6 +171,16 @@ export class Enemy {
   frenzyKind: AlarmKind | null = null;
   /** The stagger scale its combat profile was last configured with (the manager keeps it in step). */
   appliedStaggerScale = 1;
+  /**
+   * Climbing a wall (D-047, climbing bodies only): up from `foot` to the height `over`, then
+   * across onto `top`. Null on the ground. Moved by the manager, not the capsule motor.
+   */
+  climbing: {
+    readonly foot: Vector3;
+    readonly top: Vector3;
+    readonly over: number;
+    phase: 'up' | 'over';
+  } | null = null;
 
   // ---- lifecycle ----------------------------------------------------------------------------
   /** Seconds a dead body has left before it is removed. */
@@ -378,6 +388,7 @@ export class Enemy {
     this.hasteMultiplier = 1;
     this.hasteUntil = Number.NEGATIVE_INFINITY;
     this.speedMultiplier = 1;
+    this.climbing = null;
     this.accelerationMultiplier = 1;
     this.speedCap = Number.POSITIVE_INFINITY;
     this.retreating = false;

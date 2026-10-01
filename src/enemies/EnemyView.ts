@@ -704,6 +704,11 @@ export class EnemyView {
       lean += rears ? -0.22 : raised ? 0.05 : -0.18;
     } else if (enemy.state === 'STAGGER') {
       armTarget = 0.9;
+    } else if (enemy.climbing) {
+      // Hand over hand up the wall (D-047): arms overhead, chest to the wall, a cold glow.
+      armTarget = 2.5 + Math.sin(this.manager.now * 9) * 0.35;
+      telegraph = 0.25;
+      lean -= 0.2;
     }
     v.arm += (armTarget - v.arm) * (1 - Math.exp(-dt * 14));
 

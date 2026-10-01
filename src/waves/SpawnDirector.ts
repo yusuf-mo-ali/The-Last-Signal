@@ -7,7 +7,8 @@
  *   2. the player cannot see it: it is outside the view cone (half the horizontal FOV plus a
  *      margin) or a wall blocks the line from the eye to head height at the point;
  *   3. every member of the group has room to stand around it (a small ring of offsets).
- * `elevated` points are never used by normal waves (reserved for adaptive content, D-043).
+ * `elevated` points are reserved (D-043): only a group that can all climb uses one (the Climber,
+ * D-047), and never while the player stands up there (nothing spawns on the player's perch).
  *
  * Among eligible points the draw is weighted: a preferred distance band, points used by the last
  * few groups less likely, favoured regions (spawn bias) more likely. Seeded (D-014). When nothing
@@ -15,7 +16,7 @@
  */
 
 import { Vector3 } from 'three';
-import type { ImplementedEnemyId } from '../config/enemies';
+import { ENEMY_STATS, type ImplementedEnemyId } from '../config/enemies';
 import { WAVE_RULES, type SpawnRegionId, type WaveRules } from '../config/waves';
 import type { Rng } from '../utils/Rng';
 import type { SpawnPointDefinition } from '../world/levels/types';
@@ -49,6 +50,14 @@ export interface SpawnPick {
   readonly positions: readonly Vector3[];
   /** Picked with the view rule relaxed. */
   readonly relaxed: boolean;
+}
+
+/** The player counts as up on an elevated point's level when the eye is above its floor + this. */
+const ON_LEVEL = 0.5;
+
+/** Whether every member of a group climbs (elevated points are theirs, D-047). */
+export function groupClimbs(group: readonly ImplementedEnemyId[]): boolean {
+  return group.length > 0 && group.every((a) => ENEMY_STATS[a].climb !== undefined);
 }
 
 /** Height above the point the player would have to see (a head). */
@@ -106,8 +115,13 @@ export class SpawnDirector {
     viewer: SpawnViewer,
     archetype: ImplementedEnemyId = 'tank',
     relaxView = false,
+    /** The whole group climbs (only then may it use an elevated point). */
+    climbers = false,
   ): SpawnPointStatus {
-    if (point.tags?.includes('elevated')) {
+    if (
+      point.tags?.includes('elevated') &&
+      (!climbers || viewer.eye.y > point.position[1] + ON_LEVEL)
+    ) {
       return 'reserved';
     }
     const [x, y, z] = point.position;
@@ -137,8 +151,9 @@ export class SpawnDirector {
   ): SpawnPick | null {
     const s = this.rules.spawn;
     const lead = group[0] ?? 'walker';
+    const climbers = groupClimbs(group);
     const eligible = this.points.filter(
-      (point) => this.status(point, viewer, lead, relaxView) === 'eligible',
+      (point) => this.status(point, viewer, lead, relaxView, climbers) === 'eligible',
     );
     const preferred = prefer ? eligible.filter((p) => p.region === prefer) : [];
     const options: { point: SpawnPointDefinition; weight: number }[] = [];

@@ -127,6 +127,12 @@ export interface EnemyStats {
 
 const _goalNear: number[] = [];
 const _probe = new Vector3();
+const _climb = new Vector3();
+/** A climbing body starts up a wall this close to the climb's foot (horizontally, metres). */
+const CLIMB_START = 0.8;
+/** It is over the top this close to the climb's top node; and clears the edge by this much. */
+const CLIMB_ARRIVE = 0.3;
+const CLIMB_CLEARANCE = 0.05;
 
 export class EnemyManager implements FixedUpdateSystem {
   readonly events = new EventBus<EnemyEvents>();
@@ -473,6 +479,11 @@ export class EnemyManager implements FixedUpdateSystem {
         continue;
       }
       if (!enemy.health.isAlive) {
+        if (enemy.climbing) {
+          // Shot off the wall: the body lies at its foot.
+          enemy.motor.teleport(enemy.climbing.foot);
+          enemy.climbing = null;
+        }
         enemy.motor.hold();
         enemy.previousHeading = enemy.heading;
         enemy.corpseTimer = countDown(enemy.corpseTimer, dt);
@@ -778,8 +789,84 @@ export class EnemyManager implements FixedUpdateSystem {
     }
   }
 
+  /**
+   * A climbing body on a climb link (D-047): when its route reaches a node it can only climb to and
+   * it stands at that climb's foot, it goes straight up the wall to the climb's height, then across
+   * onto the top, at its climb speed. A stagger knocks it off (it falls); it cannot attack on the
+   * wall; hit volumes follow it all the way. Returns whether it climbed this step.
+   */
+  private climb(enemy: Enemy, dt: number): boolean {
+    const speed = enemy.config.climb?.speed;
+    const routes = this.routes;
+    if (speed === undefined || !routes) {
+      return false;
+    }
+    const pos = enemy.motor.position;
+    if (!enemy.climbing) {
+      const to = enemy.route[enemy.routeCursor];
+      if (enemy.state !== 'CHASE' || enemy.navMode !== 'route' || to === undefined) {
+        return false;
+      }
+      for (const link of routes.climbsInto(to)) {
+        const foot = routes.position(link.from);
+        if (horizontalDistance(pos, foot) <= CLIMB_START && Math.abs(pos.y - foot.y) < 0.5) {
+          enemy.climbing = {
+            foot: foot.clone(),
+            top: routes.position(link.to).clone(),
+            over: link.over + CLIMB_CLEARANCE,
+            phase: 'up',
+          };
+          break;
+        }
+      }
+      if (!enemy.climbing) {
+        return false;
+      }
+    }
+    const c = enemy.climbing;
+    if (enemy.state === 'STAGGER') {
+      // Knocked off the wall: the capsule motor takes it from here (it falls).
+      enemy.climbing = null;
+      return false;
+    }
+    _climb.copy(pos);
+    const step = speed * dt;
+    const toward = c.phase === 'up' ? c.foot : c.top;
+    const dx = toward.x - _climb.x;
+    const dz = toward.z - _climb.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 1e-9) {
+      const k = Math.min(1, step / d);
+      _climb.x += dx * k;
+      _climb.z += dz * k;
+    }
+    if (c.phase === 'up') {
+      _climb.y = Math.min(c.over, _climb.y + step);
+      if (_climb.y >= c.over - 1e-9) {
+        c.phase = 'over';
+      }
+    } else {
+      _climb.y = c.over;
+      if (horizontalDistance(_climb, c.top) <= CLIMB_ARRIVE) {
+        enemy.climbing = null; // over the top: walking again (it drops onto the ledge)
+      }
+    }
+    enemy.previousHeading = enemy.heading;
+    if (horizontalDistance(_climb, c.top) > 1e-6) {
+      enemy.heading = Math.atan2(-(c.top.x - _climb.x), -(c.top.z - _climb.z));
+    }
+    enemy.motor.carry(_climb);
+    enemy.syncRig();
+    enemy.progressAnchor.copy(enemy.motor.position);
+    enemy.progressTimer = 0;
+    return true;
+  }
+
   /** Turns toward the brain's wish and walks through the capsule motor. */
   private move(enemy: Enemy, dt: number): void {
+    if (this.climb(enemy, dt)) {
+      return;
+    }
     const { config, motor } = enemy;
     const pos = motor.position;
     let desired = enemy.heading;

@@ -104,6 +104,19 @@ export class RouteGraph {
     return this.climbs[index] ?? [];
   }
 
+  /** Climb links arriving at node `index` (D-047). */
+  climbsInto(index: number): readonly ClimbLink[] {
+    const out: ClimbLink[] = [];
+    for (const links of this.climbs) {
+      for (const link of links) {
+        if (link.to === index) {
+          out.push(link);
+        }
+      }
+    }
+    return out;
+  }
+
   /** The climb link from `from` to `to`, or null when they are not joined by one. */
   climbBetween(from: number, to: number): ClimbLink | null {
     for (const link of this.climbsFrom(from)) {

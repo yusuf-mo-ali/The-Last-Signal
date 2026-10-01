@@ -139,6 +139,18 @@ export class PlayerMotor {
     this.previousEyeHeight = this.eyeHeight;
   }
 
+  /**
+   * Moves the body kinematically to `position` for one step (an enemy climbing a wall, D-047): no
+   * collision and no gravity; the previous position is kept, so the step still interpolates.
+   */
+  carry(position: Vector3): void {
+    this.previousPosition.copy(this.position);
+    this.previousEyeHeight = this.eyeHeight;
+    this.position.copy(position);
+    this.velocity.set(0, 0, 0);
+    this.grounded = false;
+  }
+
   /** Keeps interpolation still for a step in which the player does not simulate. */
   hold(): void {
     this.previousPosition.copy(this.position);
