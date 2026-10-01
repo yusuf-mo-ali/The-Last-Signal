@@ -761,6 +761,7 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
       hasted: e.haste(enemies.now) > 1,
       frenzied: e.frenzied(enemies.now) ? e.frenzyKind : null,
       investigating: e.investigating,
+      climbing: e.climbing?.phase ?? null,
     }));
   commands.register('enemies', 'Every enemy: state, health, position, target, attack', summary);
   commands.register('enemy', 'One enemy in detail: tls.enemy(id)', (id: string) => {
@@ -1305,6 +1306,14 @@ function registerAdaptiveCommands(commands: DebugCommands, context: DebugContext
         samples: s.telemetry.samples,
         elevated: s.telemetry.elevated,
       },
+      lastEvidence: s.lastEvidence
+        ? Object.fromEntries(
+            Object.entries(s.lastEvidence.signals).map(([k, r]) => [
+              k,
+              { score: round(r.score), weight: round(r.weight) },
+            ]),
+          )
+        : null,
     };
   };
   commands.register(

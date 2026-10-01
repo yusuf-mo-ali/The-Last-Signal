@@ -229,6 +229,8 @@ export interface EnemySnapshot {
   readonly frenzied: 'scream' | 'deathCry' | null;
   /** Rushing where a death cry said the player was (D-046). */
   readonly investigating: boolean;
+  /** On a wall (D-047): going up, or over the top. */
+  readonly climbing: 'up' | 'over' | null;
 }
 
 /** What `tls.playerHealth()` (and the other player-health commands) return. */
@@ -274,6 +276,8 @@ export interface AdaptationSnapshot {
   >;
   readonly history: readonly string[];
   readonly telemetry: { wave: number; samples: number; elevated: number };
+  /** The last wave's reading per signal (score, weight). */
+  readonly lastEvidence: Readonly<Record<string, { score: number; weight: number }>> | null;
 }
 
 /** The `window.tls` commands used by the specs (see src/debug/installDebug.ts). */
