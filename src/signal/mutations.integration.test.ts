@@ -13,6 +13,7 @@ import { Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import { CombatSystem, type HitInput } from '../combat/CombatSystem';
 import { DEFAULT_BINDINGS } from '../config/input';
+import { ENEMY_STATS } from '../config/enemies';
 import { ENABLED_MUTATION_IDS, MUTATIONS, type MutationId } from '../config/mutations';
 import { Game } from '../core/Game';
 import { EnemyManager } from '../enemies/EnemyManager';
@@ -127,17 +128,12 @@ function headlessGame(seed = 'mutation-run') {
   game.addSystem(enemies);
   game.addSystem(projectiles);
   game.addSystem(combat);
-  for (const state of ['WAVE_COMPLETE', 'GAME_OVER', 'VICTORY'] as const) {
-    game.state.onEnter(state, () => {
-      projectiles.clear();
-    });
-  }
+  projectiles.bindToRun(game.state);
   game.state.onEnter('PLAYING', () => {
     player.respawn();
     weapons.reset();
     playerHealth.reset();
     enemies.clear();
-    projectiles.clear();
   });
   playerHealth.events.on('died', () => {
     game.state.transition('GAME_OVER');
@@ -350,6 +346,41 @@ describe('mutations integration: a run through mutated waves', () => {
     g.startRun();
     expect(g.router.sources()).toEqual(NONE);
     expect(g.waves.status.mutation).toBeNull();
+  });
+});
+
+describe('the Spitter’s acid in the run (D-046)', () => {
+  it('acid in flight never outlives its wave, the run, or survives into a new run', () => {
+    const g = headlessGame('acid-lifecycle');
+    g.playerHealth.godMode = true;
+    g.startRun();
+    g.waves.startWave(12, 'none');
+    g.until(() => g.game.state.current === 'WAVE_ACTIVE', 10);
+    const acid = ENEMY_STATS.spitter.projectile;
+    if (!acid) {
+      throw new Error('no projectile');
+    }
+    const lob = () => g.projectiles.fire('spitter-x', 'spitter', [0, 20, 0], [0, 1, 0], acid);
+    lob();
+    g.frames(2);
+    expect(g.projectiles.count).toBe(1);
+    // The wave ends: gone at once, no impact.
+    g.killWave();
+    g.until(() => g.game.state.current === 'WAVE_COMPLETE', 10);
+    expect(g.projectiles.count).toBe(0);
+    // Death ends the run: gone.
+    g.waves.startWave(13, 'none');
+    g.until(() => g.game.state.current === 'WAVE_ACTIVE', 10);
+    lob();
+    g.playerHealth.godMode = false;
+    g.playerHealth.damage({ amount: g.playerHealth.max, source: { kind: 'debug' } });
+    g.frames(1);
+    expect(g.game.state.current).toBe('GAME_OVER');
+    expect(g.projectiles.count).toBe(0);
+    // And a new run starts with none.
+    lob();
+    g.startRun();
+    expect(g.projectiles.count).toBe(0);
   });
 });
 

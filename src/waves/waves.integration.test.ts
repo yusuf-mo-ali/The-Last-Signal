@@ -104,17 +104,12 @@ function headlessRun(seed = 'integration') {
   game.addSystem(enemies);
   game.addSystem(projectiles);
   game.addSystem(combat);
-  for (const state of ['WAVE_COMPLETE', 'GAME_OVER', 'VICTORY'] as const) {
-    game.state.onEnter(state, () => {
-      projectiles.clear();
-    });
-  }
+  projectiles.bindToRun(game.state);
   game.state.onEnter('PLAYING', () => {
     player.respawn();
     weapons.reset();
     playerHealth.reset();
     enemies.clear();
-    projectiles.clear();
   });
   playerHealth.events.on('died', () => {
     game.state.transition('GAME_OVER');

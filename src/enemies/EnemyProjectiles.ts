@@ -21,6 +21,7 @@ import { Vector3 } from 'three';
 import { enemyConfig, type EnemyArchetypeConfig } from '../config/enemies';
 import { EventBus } from '../core/EventBus';
 import type { FixedUpdateSystem } from '../core/Game';
+import type { GameStateMachine } from '../core/GameState';
 import type { CollisionWorld } from '../physics/CollisionWorld';
 import type { Vec3Tuple } from '../weapons/types';
 import type { EnemyEvents } from './events';
@@ -179,6 +180,23 @@ export class EnemyProjectiles implements FixedUpdateSystem {
     this.stats.fired++;
     this.events.emit('projectileFired', { id: slot.id, ownerId, position, velocity });
     return slot.id;
+  }
+
+  /**
+   * Ties the acid to the run (D-046): none outlives its wave (WAVE_COMPLETE), the run (GAME_OVER,
+   * VICTORY) or survives into a new one (PLAYING). Returns the unsubscribe function.
+   */
+  bindToRun(state: GameStateMachine): () => void {
+    const offs = (['PLAYING', 'WAVE_COMPLETE', 'GAME_OVER', 'VICTORY'] as const).map((id) =>
+      state.onEnter(id, () => {
+        this.clear();
+      }),
+    );
+    return () => {
+      for (const off of offs) {
+        off();
+      }
+    };
   }
 
   /** Removes every projectile at once (no impacts). */

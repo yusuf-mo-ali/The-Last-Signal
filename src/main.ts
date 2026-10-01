@@ -214,7 +214,7 @@ function boot(app: HTMLElement): () => void {
     killPlaneY: FACILITY.killPlaneY,
     enemyEvents: enemies.events,
   });
-  cleanups.push(() => {
+  cleanups.push(projectiles.bindToRun(game.state), () => {
     projectiles.dispose();
   });
   // Waves (D-044): the run's waves, entering at fair spawn points. The wave runtime steps before
@@ -336,7 +336,6 @@ function boot(app: HTMLElement): () => void {
       playerHealth.reset();
       weapons.reset();
       enemies.clear();
-      projectiles.clear();
       if (sandbox) {
         encounter.reset();
         training.reset();
@@ -368,16 +367,6 @@ function boot(app: HTMLElement): () => void {
     }),
     game.state.onEnter('VICTORY', () => {
       pointerLock.exit(); // the cursor back, and the "Signal transmitted" prompt
-    }),
-    // No acid outlives its wave, or the run.
-    game.state.onEnter('WAVE_COMPLETE', () => {
-      projectiles.clear();
-    }),
-    game.state.onEnter('GAME_OVER', () => {
-      projectiles.clear();
-    }),
-    game.state.onEnter('VICTORY', () => {
-      projectiles.clear();
     }),
   );
   cleanups.push(
