@@ -178,6 +178,11 @@ export interface EnemyArchetypeConfig {
    * deals `damage`; hitting the level, it splashes `splashDamage` within `splashRadius` (not
    * through walls). It never hits other enemies. Metres, seconds, m/s, m/s².
    */
+  /**
+   * Climbs walls along the route graph's climb links (Climber, D-047): up the face at `speed` m/s,
+   * then over onto the ledge. Without it, climb links do not exist for this body.
+   */
+  readonly climb?: { readonly speed: number };
   readonly projectile?: {
     readonly speed: number;
     readonly gravity: number;
@@ -222,10 +227,18 @@ export interface EnemyArchetypeConfig {
 }
 
 /**
- * Archetypes with a full definition (D-043; the Spitter since Phase 7.1, D-046). The Climber is deferred: it will arrive as adaptive
- * content (a counter to camping on high ground), not in the default roster.
+ * Archetypes with a full definition (D-043; the Spitter since Phase 7.1, D-046; the Climber since
+ * Phase 8, D-047). The Climber is not in the default roster: only the adaptive system brings it,
+ * as a counter to camping on high ground.
  */
-export const IMPLEMENTED_ENEMY_IDS = ['walker', 'runner', 'tank', 'screamer', 'spitter'] as const;
+export const IMPLEMENTED_ENEMY_IDS = [
+  'walker',
+  'runner',
+  'tank',
+  'screamer',
+  'spitter',
+  'climber',
+] as const;
 export type ImplementedEnemyId = (typeof IMPLEMENTED_ENEMY_IDS)[number];
 
 /** O-3, resolved by D-043 (the Spitter added by D-046): the archetypes normal waves are made of. */
@@ -278,6 +291,18 @@ const SPITTER_SCALE: RigScale = {
   leg: 0.85,
   shoulders: 1,
 };
+const CLIMBER_SCALE: RigScale = {
+  width: 0.85,
+  height: 0.92,
+  depth: 0.85,
+  head: 0.9,
+  torso: 0.85,
+  arm: 1.15,
+  leg: 0.9,
+  shoulders: 1.05,
+};
+/** A low crouch, ready to spring at a wall. */
+const CLIMBER_CROUCH = 0.32;
 /** A forward hunch over its swollen throat. */
 const SPITTER_HUNCH = 0.18;
 /** Radians the Runner leans forward from the hips (a sprinter's crouch), and the Tank hunches. */
@@ -475,6 +500,40 @@ export const ENEMY_STATS: Readonly<Record<ImplementedEnemyId, EnemyArchetypeConf
     threatCost: 2.5,
     drops: 'spitter',
   },
+  // Pass-1 values; reasoning in BALANCING.md §2.17 (D-047). Adaptive only: never in normal waves.
+  climber: {
+    id: 'climber',
+    name: 'Climber',
+    behavior: 'melee',
+    // Two Pistol headshots, three body shots: easy to drop off a wall.
+    health: 70,
+    moveSpeed: 3,
+    attackDamage: 12,
+    attackRange: 1.4,
+    detectionRange: 16,
+    attackCooldown: 1.4,
+    body: { radius: 0.3, height: 1.7, eyeHeight: 1.5 },
+    rig: leanRig(scaleRig(HUMANOID_RIG, 'climber', CLIMBER_SCALE), 'climber', CLIMBER_CROUCH),
+    attackPose: leanRig(
+      scaleRig(HUMANOID_REACH_POSE, 'climber-reach', CLIMBER_SCALE),
+      'climber-reach',
+      CLIMBER_CROUCH,
+    ),
+    turnSpeed: 5,
+    acceleration: 10,
+    armor: 0,
+    resistance: 0,
+    // A body shot on the wall knocks it back down (it drops to the foot of the wall).
+    staggerThreshold: 25,
+    staggerDuration: 0.6,
+    perception: { loseTargetRange: 28, targetMemory: 8, reactionTime: 0.4 },
+    attack: { windup: 0.7, recovery: 0.6, reach: 1.8, arcDeg: 120, verticalReach: 1.2 },
+    climb: { speed: 1.5 },
+    patrol: { radius: 4, pauseMin: 1.5, pauseMax: 3, speedFactor: 0.4 },
+    corpseTime: 5,
+    threatCost: 2,
+    drops: 'climber',
+  },
 };
 
 /** The full definition of an implemented archetype (throws for one that has none yet). */
@@ -572,7 +631,7 @@ export const ENEMY_ARCHETYPES: Readonly<
   },
   climber: {
     name: 'Climber',
-    purpose: 'Counters camping on high ground (deferred: adaptive content)',
+    purpose: 'Counters camping on high ground (adaptive only, D-047)',
     inV1: false,
   },
 };

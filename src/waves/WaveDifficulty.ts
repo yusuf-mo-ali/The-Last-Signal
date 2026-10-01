@@ -57,13 +57,24 @@ export function waveTier(n: number): DifficultyTierId {
   return DIFFICULTY_TIERS.find((t) => w >= t.firstWave && w <= t.lastWave)?.id ?? 'complex';
 }
 
-/** Whether `archetype` may appear on wave `n`. */
+/** Whether `archetype` may appear on wave `n` (never, for one outside the roster's unlocks). */
 export function isUnlocked(
   archetype: ImplementedEnemyId,
   n: number,
   rules: WaveRules = WAVE_RULES,
 ): boolean {
-  return waveIndex(n) >= rules.unlocks[archetype];
+  const from = rules.unlocks[archetype];
+  return from !== undefined && waveIndex(n) >= from;
+}
+
+/** Whether the adaptive system may bring `archetype` (outside the roster) on wave `n` (D-047). */
+export function isAdaptiveUnlocked(
+  archetype: ImplementedEnemyId,
+  n: number,
+  rules: WaveRules = WAVE_RULES,
+): boolean {
+  const from = rules.adaptiveUnlocks[archetype];
+  return from !== undefined && waveIndex(n) >= from;
 }
 
 /** Most of `archetype` on wave `n` (Infinity when uncapped; 0 before its unlock). */

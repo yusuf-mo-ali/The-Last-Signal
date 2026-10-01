@@ -69,7 +69,8 @@ describe('facility route graph', () => {
 
   it.each(IMPLEMENTED_ENEMY_IDS)('every link can be walked both ways by a %s body', (id) => {
     const config = ENEMY_STATS[id];
-    for (const link of FACILITY_NAVIGATION.links) {
+    // Climb links are not walks (D-047); `climb.test.ts` checks them with the climbing body.
+    for (const link of FACILITY_NAVIGATION.links.filter((l) => !l.climb)) {
       for (const [a, b] of [
         [link.from, link.to],
         [link.to, link.from],

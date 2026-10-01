@@ -178,11 +178,15 @@ export const FACILITY_NAVIGATION: NavGraphDefinition = {
     { id: 'catwalk-mid', position: [-22.25, CATWALK_HEIGHT, 1] },
     { id: 'catwalk-s', position: [-22.25, CATWALK_HEIGHT, 8.5] },
     { id: 'ramp-bottom', position: [-22.25, 0, 18.5] },
+    // Climb points (D-047): at the foot of the catwalk's open edge, for climbing bodies only.
+    { id: 'catwalk-foot', position: [-19.4, 0, 1] },
+    { id: 'catwalk-foot-n', position: [-19.4, 0, -5] },
     // Loading bay and dock.
     { id: 'sw-corner', position: [-19, 0, 21.5] },
     { id: 'bay-w', position: [-10, 0, 21.5] },
     { id: 'bay-n', position: [-10, 0, 16.5] },
     { id: 'dock-w', position: [-5.5, DOCK_HEIGHT, 21.5] },
+    { id: 'dock-foot', position: [-4, 0, 18.2] },
     { id: 'dock-e', position: [6.5, DOCK_HEIGHT, 21.5] },
     { id: 'dock-ramp-bottom', position: [12.5, 0, 21.5] },
     { id: 'bay-e', position: [17, 0, 20.5] },
@@ -246,6 +250,19 @@ export const FACILITY_NAVIGATION: NavGraphDefinition = {
     { from: 'hall-ne', to: 'hall-e' },
     { from: 'hall-e', to: 'hall-se' },
     { from: 'hall-sw', to: 'hall-se' },
+    // To the climb points, and the climbs themselves (D-047; the Climber only).
+    { from: 'catwalk-foot', to: 'yard-w' },
+    { from: 'catwalk-foot', to: 'yard-sw' },
+    { from: 'catwalk-foot', to: 'catwalk-foot-n' },
+    { from: 'catwalk-foot-n', to: 'yard-nw' },
+    { from: 'dock-foot', to: 'bay-n' },
+    { from: 'dock-foot', to: 'yard-s' },
+    // Through the railing's gap onto the middle of the catwalk.
+    { from: 'catwalk-foot', to: 'catwalk-mid', climb: true },
+    // Over the railing (its top is 1.2 m above the deck) near the head of the stairs.
+    { from: 'catwalk-foot-n', to: 'stairs-top', climb: true, over: CATWALK_HEIGHT + 1.25 },
+    // Up the dock's face, which the player jumps.
+    { from: 'dock-foot', to: 'dock-w', climb: true },
   ],
 };
 

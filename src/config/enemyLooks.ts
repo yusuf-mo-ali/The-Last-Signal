@@ -89,6 +89,14 @@ export const ENEMY_LOOKS: Readonly<Partial<Record<EnemyArchetypeId, EnemyLook>>>
     windupArms: -0.35,
     windupLean: 0.32,
   },
+  // Pale grey-blue, long-armed, cold eyes: the one that comes up the wall.
+  climber: {
+    zoneColors: { ...zones(0x8e9ba8, 0x4d5866, 0x2e353d), HEAD: 0x9aa7b3 },
+    eyes: 0x7fe0ff,
+    telegraph: 0x9fd8ff,
+    mouth: { color: 0x2a3036, size: 0.3 },
+    windupArms: 0.2,
+  },
 };
 
 /** What each trait adds to the outline (built into the enemy's single mesh). */

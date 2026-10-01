@@ -10,12 +10,23 @@
 import { Vector3 } from 'three';
 import type { NavGraphDefinition } from '../world/levels/types';
 
+/** A climb link's shape (D-047): up from its foot to `over`, then across onto its top node. */
+export interface ClimbLink {
+  readonly from: number;
+  readonly to: number;
+  /** Feet height reached before crossing over. */
+  readonly over: number;
+}
+
 export interface RouteNode {
   readonly index: number;
   readonly id: string;
   /** Feet position. */
   readonly position: Vector3;
 }
+
+/** A climb's height costs this much more than walking the same distance (it is slow). */
+const CLIMB_COST = 2;
 
 /** Height differences cost this much more than horizontal distance when ranking nearby nodes. */
 const VERTICAL_WEIGHT = 3;
@@ -24,6 +35,8 @@ export class RouteGraph {
   readonly nodes: readonly RouteNode[];
   /** Outgoing links per node, as node indices. */
   private readonly neighbours: readonly (readonly number[])[];
+  /** Outgoing climb links per node (climbing bodies only, D-047). */
+  private readonly climbs: readonly (readonly ClimbLink[])[];
   private readonly byId = new Map<string, number>();
   private readonly g: Float64Array;
   private readonly f: Float64Array;
@@ -41,6 +54,7 @@ export class RouteGraph {
       return { index, id: node.id, position: new Vector3(...node.position) };
     });
     const neighbours: number[][] = this.nodes.map(() => []);
+    const climbs: ClimbLink[][] = this.nodes.map(() => []);
     for (const link of definition.links) {
       const from = this.byId.get(link.from);
       const to = this.byId.get(link.to);
@@ -50,12 +64,18 @@ export class RouteGraph {
       if (from === to) {
         throw new Error(`Route graph: link ${link.from} → ${link.to} is a loop`);
       }
+      if (link.climb) {
+        const top = this.nodes[to]?.position.y ?? 0;
+        climbs[from]?.push({ from, to, over: Math.max(top, link.over ?? top) });
+        continue;
+      }
       neighbours[from]?.push(to);
       if (!link.oneWay) {
         neighbours[to]?.push(from);
       }
     }
     this.neighbours = neighbours;
+    this.climbs = climbs;
     const n = this.nodes.length;
     this.g = new Float64Array(n);
     this.f = new Float64Array(n);
@@ -79,12 +99,28 @@ export class RouteGraph {
     return this.neighbours[index] ?? [];
   }
 
+  /** Climb links leaving node `index` (D-047). */
+  climbsFrom(index: number): readonly ClimbLink[] {
+    return this.climbs[index] ?? [];
+  }
+
+  /** The climb link from `from` to `to`, or null when they are not joined by one. */
+  climbBetween(from: number, to: number): ClimbLink | null {
+    for (const link of this.climbsFrom(from)) {
+      if (link.to === to) {
+        return link;
+      }
+    }
+    return null;
+  }
+
   /**
    * The shortest route from node `start` to node `goal`, as node indices including both ends, or
    * null when the goal cannot be reached. Ties resolve to the lower node index, so the same query
-   * always returns the same route.
+   * always returns the same route. `climb`: the body can climb, so climb links count too (D-047);
+   * a climb costs its height × `CLIMB_COST` on top of its length.
    */
-  findPath(start: number, goal: number): number[] | null {
+  findPath(start: number, goal: number, climb = false): number[] | null {
     const n = this.nodes.length;
     if (start < 0 || start >= n || goal < 0 || goal >= n) {
       return null;
@@ -121,14 +157,27 @@ export class RouteGraph {
         if (status[next] === 2) {
           continue;
         }
-        const tentative = gCurrent + from.distanceTo(this.position(next));
-        if (tentative < (g[next] ?? Number.POSITIVE_INFINITY)) {
-          g[next] = tentative;
-          f[next] = tentative + this.position(next).distanceTo(goalPosition);
-          cameFrom[next] = current;
-          status[next] = 1;
+        this.relax(current, next, gCurrent + from.distanceTo(this.position(next)), goalPosition);
+      }
+      if (climb) {
+        for (const link of this.climbsFrom(current)) {
+          if (status[link.to] === 2) {
+            continue;
+          }
+          const to = this.position(link.to);
+          const cost = from.distanceTo(to) + Math.max(0, link.over - from.y) * CLIMB_COST;
+          this.relax(current, link.to, gCurrent + cost, goalPosition);
         }
       }
+    }
+  }
+
+  private relax(current: number, next: number, tentative: number, goalPosition: Vector3): void {
+    if (tentative < (this.g[next] ?? Number.POSITIVE_INFINITY)) {
+      this.g[next] = tentative;
+      this.f[next] = tentative + this.position(next).distanceTo(goalPosition);
+      this.cameFrom[next] = current;
+      this.status[next] = 1;
     }
   }
 

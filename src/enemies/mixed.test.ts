@@ -54,7 +54,7 @@ function mixedYard(count: number) {
   const t = enemyTestWorld({ targets: [target], world: facility.collision, level: FACILITY });
   const enemies: Enemy[] = [];
   for (let i = 0; i < count; i++) {
-    const archetype = DEFAULT_ROSTER[i % DEFAULT_ROSTER.length] as EnemyArchetypeId;
+    const archetype = DEFAULT_ROSTER[i % DEFAULT_ROSTER.length] ?? 'walker';
     const at: [number, number, number] = [-9 + (i % 6) * 1.6, 0, 8 + Math.floor(i / 6) * 1.6];
     expect(t.manager.canStand(archetype, at), `${archetype} at ${at.join(',')}`).toBe(true);
     const enemy = t.manager.spawn(archetype, at, { patrol: false, alertTo: target });

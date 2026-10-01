@@ -44,9 +44,10 @@ describe('EnemyManager: spawning and combat registration', () => {
     expect(t.manager.aliveCount).toBe(2);
   });
 
-  it('only implemented archetypes can be spawned', () => {
+  it('only implemented archetypes can be spawned (every v1 archetype is, the Climber since D-047)', () => {
     const t = enemyTestWorld();
-    expect(() => t.manager.spawn('climber', [0, 0, 0])).toThrow(/no definition yet/);
+    expect(t.manager.spawn('climber', [0, 0, 0])).not.toBeNull();
+    expect(() => t.manager.spawn('ghoul' as 'walker', [3, 0, 0])).toThrow(/no definition yet/);
   });
 
   it('canStand: room for the body and ground under the feet (spawn validation)', () => {

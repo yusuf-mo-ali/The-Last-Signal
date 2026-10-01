@@ -54,6 +54,14 @@ export interface NavLink {
   readonly from: string;
   readonly to: string;
   readonly oneWay?: boolean;
+  /**
+   * A climb up a wall (D-047), only for bodies that can climb (the Climber): from `from` (at the
+   * foot of the wall) straight up, then over onto `to`. Always one way, up. Other bodies never
+   * see it.
+   */
+  readonly climb?: true;
+  /** Feet height the climb must reach before it crosses over (a railing); default `to`'s height. */
+  readonly over?: number;
 }
 
 /**

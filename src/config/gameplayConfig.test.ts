@@ -29,7 +29,7 @@ import {
   TRAINING_ENEMIES,
   TRAINING_RANGE,
 } from './training';
-import { DIFFICULTY_TIERS, FINAL_WAVE, MUTATION_FREE_WAVES } from './waves';
+import { DIFFICULTY_TIERS, FINAL_WAVE, MUTATION_FREE_WAVES, WAVE_RULES } from './waves';
 import {
   LOADOUT_CATEGORIES,
   PLANNED_WEAPON_IDS,
@@ -375,13 +375,17 @@ describe('enemy archetypes (Phase 5, D-043)', () => {
   const headshot = pistol.damage * pistol.headshotMultiplier;
   const { walker, runner, tank, screamer } = ENEMY_STATS;
 
-  it('O-3 + D-046: the roster is Walker, Runner, Tank, Screamer, Spitter; the Climber is deferred', () => {
+  it('O-3 + D-046 + D-047: the roster is Walker, Runner, Tank, Screamer, Spitter; the Climber is adaptive-only', () => {
     expect(DEFAULT_ROSTER).toEqual(['walker', 'runner', 'tank', 'screamer', 'spitter']);
-    expect(IMPLEMENTED_ENEMY_IDS).toEqual(DEFAULT_ROSTER);
-    expect(IMPLEMENTED_ENEMY_IDS).not.toContain('climber');
+    // D-047: the Climber is implemented, but only the adaptive system brings it in.
+    expect(IMPLEMENTED_ENEMY_IDS).toEqual([...DEFAULT_ROSTER, 'climber']);
+    expect(DEFAULT_ROSTER).not.toContain('climber');
     expect(ENEMY_ARCHETYPES.climber.inV1).toBe(false);
+    expect(WAVE_RULES.unlocks.climber).toBeUndefined();
+    expect(WAVE_RULES.adaptiveUnlocks.climber).toBe(8);
+    expect(ENEMY_STATS.climber.climb?.speed).toBeGreaterThan(0);
     for (const id of DEFAULT_ROSTER) {
-      expect(ENEMY_ARCHETYPES[id].inV1, id).toBe(true);
+      expect(ENEMY_STATS[id].climb, id).toBeUndefined();
     }
   });
 

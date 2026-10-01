@@ -178,8 +178,13 @@ export interface WaveRules {
     readonly max: number;
     readonly ambushBonus: number;
   };
-  /** First wave each roster archetype can appear in. */
-  readonly unlocks: Readonly<Record<ImplementedEnemyId, number>>;
+  /** First wave each roster archetype can appear in (none for adaptive-only archetypes). */
+  readonly unlocks: Readonly<Partial<Record<ImplementedEnemyId, number>>>;
+  /**
+   * First wave the adaptive system may bring each archetype outside the roster (D-047: the
+   * Climber). Enforced by the generator whatever the adaptive system asks.
+   */
+  readonly adaptiveUnlocks: Readonly<Partial<Record<ImplementedEnemyId, number>>>;
   /** Base draw weights per tier. */
   readonly tierWeights: Readonly<
     Record<DifficultyTierId, Readonly<Partial<Record<ImplementedEnemyId, number>>>>
@@ -266,6 +271,7 @@ export const WAVE_RULES: WaveRules = {
   groupSize: { every: 6, max: 4, ambushBonus: 1 },
   // The Spitter arrives on wave 10 (D-046): one on its first wave, a few more later.
   unlocks: { walker: 1, runner: 3, screamer: 4, tank: 6, spitter: 10 },
+  adaptiveUnlocks: { climber: 8 },
   tierWeights: {
     introduction: { walker: 1, runner: 0.35 },
     variety: { walker: 1, runner: 0.5, screamer: 0.2, tank: 0.15 },
@@ -289,7 +295,7 @@ export const WAVE_RULES: WaveRules = {
   minWalkerShare: 0.3,
   finaleMinimum: { tank: 2, screamer: 2 },
   openingShare: 0.15,
-  openingExcluded: ['tank', 'screamer', 'spitter'],
+  openingExcluded: ['tank', 'screamer', 'spitter', 'climber'],
   traits: {
     armored: { from: 8, perWave: 0.04, max: 0.25 },
     helmeted: { from: 8, perWave: 0.04, max: 0.25 },

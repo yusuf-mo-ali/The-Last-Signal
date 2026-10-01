@@ -761,7 +761,7 @@ export class WaveManager implements FixedUpdateSystem {
       if (_dir.copy(p).sub(target.position).setY(0).length() <= s.farDistance) {
         continue;
       }
-      const archetype = enemy.archetype.id as ImplementedEnemyId;
+      const archetype = enemy.archetype.id;
       const traits = [...enemy.config.traits];
       const pick = this.options.spawns.pick([archetype], this.options.viewer());
       const at = pick?.positions[0];
