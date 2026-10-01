@@ -348,10 +348,19 @@ test.describe('mutations (development build)', () => {
       return window.tls!.spawnEnemy('walker', 12);
     });
     await frames(page, 6);
+    // The dark reaches every enemy's shading (eyes, silhouette, close-range lift).
+    expect(await page.evaluate((id) => window.tls!.inspect().enemyView.eyes(id), far)).toEqual({
+      glow: 1.4,
+      color: 0xffe36b,
+      silhouette: 0.75,
+      proximity: 0.6,
+    });
     const silhouette = await enemyRegions(page, far);
     expect(silhouette.eyeMax).toBeGreaterThan(100);
     expect(silhouette.eyeMax).toBeGreaterThan(3 * Math.max(silhouette.torso, 1));
-    expect(silhouette.torso).toBeLessThanOrEqual(silhouette.around);
+    // A silhouette: far darker than what is behind it (bodies in their own colours, even this dark,
+    // would be about two thirds as bright as the wall).
+    expect(silhouette.torso).toBeLessThanOrEqual(silhouette.around * 0.3);
     const withEnemy = await luminance(page);
     await page.evaluate(() => window.tls!.clearEnemies());
     await frames(page, 6);
@@ -550,8 +559,12 @@ test.describe('mutations (development build)', () => {
     expect((await mutation(page)).glitch).toMatchObject({ active: false });
 
     // A still scene, held mid-burst: the image tears away from the centre, not at the crosshair.
+    // A frozen Walker stands at the centre, so a tear or colour split there would show on its
+    // edges.
     await page.evaluate(() => {
       window.tls!.clearEnemies();
+      window.tls!.freezeEnemies(true);
+      window.tls!.spawnEnemy('walker', 8);
     });
     await frames(page, 4);
     const before = await page.screenshot();
@@ -579,6 +592,7 @@ test.describe('mutations (development build)', () => {
     await page.evaluate(() => {
       window.tls!.inspect().game.time.scale = 1;
     });
+    await page.evaluate(() => window.tls!.freezeEnemies(false));
     const diff = await frameDifference(page, before, during);
     expect(diff.outer).toBeGreaterThan(3);
     expect(diff.centre).toBeLessThan(diff.outer / 2);

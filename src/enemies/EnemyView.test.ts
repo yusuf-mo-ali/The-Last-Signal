@@ -64,8 +64,13 @@ describe('EnemyView: eyes and the dark (D-046)', () => {
     expect(shader.fragmentShader).toContain(
       'totalEmissiveRadiance += uEyeColor * vEye * uEyeGlow;',
     );
-    expect(shader.fragmentShader).toContain('uSilhouette');
-    expect(shader.fragmentShader).toContain('smoothstep(7.0, 2.5, length(vViewPosition))');
+    // The body (not the eyes) darkens by the silhouette, less so close to the camera.
+    expect(shader.fragmentShader).toContain(
+      'diffuseColor.rgb *= 1.0 - uSilhouette * 0.8 * (1.0 - vEye) * (1.0 - enemyNear);',
+    );
+    expect(shader.fragmentShader).toContain(
+      'float enemyNear = uProximity * smoothstep(7.0, 2.5, length(vViewPosition));',
+    );
     for (const name of ['uEyeGlow', 'uEyeColor', 'uSilhouette', 'uProximity']) {
       expect(shader.uniforms).toHaveProperty(name);
     }
