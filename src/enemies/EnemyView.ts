@@ -14,9 +14,14 @@
  *   mesh: geometry is cached per archetype and set of visible attachments.
  * - Movement: a shamble scaled by speed; it turns to face its heading.
  * - Attack tell: during the wind-up the arms rise (reaching forward for a strike, overhead for a
- *   scream, matching the rig's attack pose) and the body glows in its archetype's telegraph
- *   colour, strongest just before the strike; a leap throws the body forward. A scream sends out
- *   an expanding ring as far as it carries.
+ *   scream, matching the rig's attack pose; the Spitter rears back) and the body glows in its
+ *   archetype's telegraph colour, strongest just before the strike; a leap throws the body forward.
+ * - Alarms (D-046): a Screamer's scream sends a violet sonic wave (three rings in a row, out to
+ *   its reach, and a column of light); a DEATH CRY a red echo (two rings, the second fainter, and a
+ *   short flare at the body). Those frenzied by one show it in their eyes (violet or red).
+ * - The dark (BLACKOUT, D-046): one material patch, compiled once at load for every enemy, makes
+ *   the eyes glow on their own (`eyeGlow`), darkens the body toward a silhouette (`silhouette`) and
+ *   lifts an enemy close to the camera out of the dark (`proximity`). Uniform writes only.
  * - Hit reaction: a white flash and a push away from the hit; a stagger rocks it back further.
  * - Death: it falls, lies there, and sinks into the floor before its body is removed.
  *
@@ -32,6 +37,7 @@ import {
   CircleGeometry,
   Color,
   ConeGeometry,
+  CylinderGeometry,
   DoubleSide,
   Float32BufferAttribute,
   Group,
@@ -56,6 +62,7 @@ import type { HitboxShape, Point3 } from '../config/combat';
 import {
   ELITE_EYES,
   ENEMY_LOOKS,
+  FRENZY_EYES,
   REACH_ARMS,
   TRAIT_LOOKS,
   type EnemyLook,
@@ -69,6 +76,7 @@ import {
 } from '../config/enemies';
 import type { Enemy } from './Enemy';
 import type { EnemyManager } from './EnemyManager';
+import type { AlarmEvent } from './events';
 
 const FLASH_TIME = 0.1;
 const FALL_TIME = 0.5;
@@ -79,7 +87,24 @@ const RING_TIME = 0.7;
 /** A Screamer's scream (violet) and a DEATH CRY (red, D-045) look different at a glance. */
 const SCREAM_RING_COLOR = 0xb46cff;
 const DEATH_CRY_RING_COLOR = 0xff3b30;
-const RING_POOL = 4;
+/** Rings at once: two overlapping screams (3 each) and an echo (2). */
+const RING_POOL = 8;
+/** A scream's sonic wave: rings this far apart in time, each this strong (D-046). */
+const SCREAM_WAVE = [
+  { delay: 0, strength: 1 },
+  { delay: 0.16, strength: 0.75 },
+  { delay: 0.32, strength: 0.5 },
+];
+/** A death cry's echo: a ring and a fainter one after it (D-046). */
+const DEATH_CRY_ECHO = [
+  { delay: 0, strength: 1 },
+  { delay: 0.25, strength: 0.45 },
+];
+/** Columns of light at a scream (tall) or a death cry (a short flare). */
+const COLUMN_POOL = 4;
+const COLUMN_TIME = 0.5;
+/** How brightly a frenzied enemy's eyes flare (D-046), pulsing. */
+const FRENZY_EYE_GLOW = 1.6;
 /**
  * Culling sphere around the feet that holds the body in any pose, standing or lying down. The
  * skinned mesh's own sphere is taken from the pose of its first frame, which a fall leaves.
@@ -116,6 +141,8 @@ interface Visual {
   /** Pivots at the shoulders. */
   readonly arms: Bone;
   readonly material: MeshStandardMaterial;
+  /** The eye and dark uniforms of its material (one shared program, values per enemy). */
+  readonly shading: EnemyShading;
   /** Which attachments its geometry has (look key bits). */
   lookBits: number;
   flash: number;
@@ -130,8 +157,66 @@ interface Visual {
 interface Ring {
   readonly mesh: Mesh;
   readonly material: MeshBasicMaterial;
+  /** Seconds since it started; negative while it waits for its turn in a wave. */
   age: number;
   radius: number;
+  strength: number;
+}
+
+interface Column {
+  readonly mesh: Mesh;
+  readonly material: MeshBasicMaterial;
+  age: number;
+  height: number;
+}
+
+/** Uniforms of the enemy material patch (D-046). */
+export interface EnemyShading {
+  readonly uEyeGlow: { value: number };
+  readonly uEyeColor: { value: Color };
+  readonly uSilhouette: { value: number };
+  readonly uProximity: { value: number };
+}
+
+/** One program for every enemy material: the patch is the same, only uniform values differ. */
+const ENEMY_PROGRAM_KEY = 'enemy-body:eyes-silhouette-proximity:v1';
+
+/**
+ * Patches a body material (D-046): eyes (`aEye` = 1) glow on their own; the rest of the body is
+ * darkened toward a silhouette, unless it is close to the camera (lifted back toward its own
+ * colours). Telegraph and hit glows (the material's emissive) are untouched.
+ */
+function patchEnemyMaterial(material: MeshStandardMaterial, shading: EnemyShading): void {
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, shading);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aEye;\nvarying float vEye;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEye = aEye;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        [
+          '#include <common>',
+          'varying float vEye;',
+          'uniform float uEyeGlow;',
+          'uniform vec3 uEyeColor;',
+          'uniform float uSilhouette;',
+          'uniform float uProximity;',
+        ].join('\n'),
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        [
+          '#include <emissivemap_fragment>',
+          'float enemyNear = uProximity * smoothstep(7.0, 2.5, length(vViewPosition));',
+          'vec3 enemyAlbedo = diffuseColor.rgb;',
+          'diffuseColor.rgb *= 1.0 - uSilhouette * 0.8 * (1.0 - vEye) * (1.0 - enemyNear);',
+          'totalEmissiveRadiance += enemyAlbedo * enemyNear * 0.45 * (1.0 - vEye);',
+          'totalEmissiveRadiance += uEyeColor * vEye * uEyeGlow;',
+        ].join('\n'),
+      );
+  };
+  material.customProgramCacheKey = () => ENEMY_PROGRAM_KEY;
 }
 
 function lookOf(config: EnemyArchetypeConfig): EnemyLook {
@@ -144,10 +229,13 @@ function lookOf(config: EnemyArchetypeConfig): EnemyLook {
 
 export class EnemyView {
   /**
-   * Baseline glow of living enemies in their eye colour when not telegraphing (0 normally; the
-   * environment's `eyeshine` in the dark, D-045). Set every frame by the composition root.
+   * The dark (D-046), set every frame by the composition root from the environment: how brightly
+   * eyes glow on their own, how far bodies are darkened toward silhouettes, and how much a close
+   * enemy is lifted out of the dark. All 0 normally.
    */
-  eyeshine = 0;
+  eyeGlow = 0;
+  silhouette = 0;
+  proximity = 0;
   private readonly scene: Scene;
   private readonly manager: EnemyManager;
   private readonly visuals = new Map<string, Visual>();
@@ -155,12 +243,17 @@ export class EnemyView {
   private readonly looks = new Map<string, Look>();
   private readonly rings: Ring[] = [];
   private readonly ringGeometry = new RingGeometry(0.9, 1, 48);
+  private readonly columns: Column[] = [];
+  private readonly columnGeometry = new CylinderGeometry(0.35, 0.6, 1, 16, 1, true);
+  /** Presentation clock (simulated seconds): eye pulses. */
+  private clock = 0;
   private readonly unsubscribe: (() => void)[] = [];
 
   constructor(scene: Scene, manager: EnemyManager, combat: CombatSystem) {
     this.scene = scene;
     this.manager = manager;
     this.ringGeometry.rotateX(-Math.PI / 2);
+    this.columnGeometry.translate(0, 0.5, 0);
     this.unsubscribe.push(
       combat.events.on('damaged', (e) => {
         const v = this.visuals.get(e.targetId);
@@ -176,11 +269,7 @@ export class EnemyView {
         }
       }),
       manager.events.on('alarm', (alarm) => {
-        this.startRing(
-          alarm.position,
-          alarm.radius,
-          alarm.kind === 'deathCry' ? DEATH_CRY_RING_COLOR : SCREAM_RING_COLOR,
-        );
+        this.startAlarm(alarm);
       }),
     );
     // One pooled, hidden visual per archetype from the start: the start-up shader prewarm, which
@@ -202,7 +291,23 @@ export class EnemyView {
       mesh.frustumCulled = false;
       mesh.renderOrder = 10;
       this.scene.add(mesh);
-      this.rings.push({ mesh, material, age: RING_TIME, radius: 0 });
+      this.rings.push({ mesh, material, age: RING_TIME, radius: 0, strength: 1 });
+    }
+    for (let i = 0; i < COLUMN_POOL; i++) {
+      const material = new MeshBasicMaterial({
+        color: SCREAM_RING_COLOR,
+        transparent: true,
+        opacity: 0,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        side: DoubleSide,
+      });
+      const mesh = new Mesh(this.columnGeometry, material);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 10;
+      this.scene.add(mesh);
+      this.columns.push({ mesh, material, age: COLUMN_TIME, height: 0 });
     }
     this.sync();
   }
@@ -212,14 +317,36 @@ export class EnemyView {
     return this.visuals.size;
   }
 
-  /** Scream rings currently expanding (tests, debug). */
+  /** Alarm rings expanding or about to (tests, debug). */
   get activeRings(): number {
     return this.rings.filter((r) => r.age < RING_TIME).length;
   }
 
-  /** Colours of the alarm rings currently expanding (tests, debug): violet scream, red death cry. */
+  /** Colours of the alarm rings expanding or about to (tests, debug): violet scream, red cry. */
   get activeRingColors(): number[] {
     return this.rings.filter((r) => r.age < RING_TIME).map((r) => r.material.color.getHex());
+  }
+
+  /** Columns of light showing (tests, debug): a scream's tall one, a death cry's short flare. */
+  get activeColumns(): { color: number; height: number }[] {
+    return this.columns
+      .filter((c) => c.age < COLUMN_TIME)
+      .map((c) => ({ color: c.material.color.getHex(), height: c.height }));
+  }
+
+  /** An enemy's eye shading this frame (tests, debug). */
+  eyes(id: string): { glow: number; color: number; silhouette: number; proximity: number } | null {
+    const v = this.visuals.get(id);
+    if (!v) {
+      return null;
+    }
+    const s = v.shading;
+    return {
+      glow: s.uEyeGlow.value,
+      color: s.uEyeColor.value.getHex(),
+      silhouette: s.uSilhouette.value,
+      proximity: s.uProximity.value,
+    };
   }
 
   /** Whether an enemy is drawn lying down (tests, debug). */
@@ -273,6 +400,7 @@ export class EnemyView {
    * seconds this frame (0 while paused, so everything holds still).
    */
   update(alpha: number, dt: number): void {
+    this.clock += dt;
     this.sync();
     for (const v of this.visuals.values()) {
       this.animate(v, alpha, dt);
@@ -282,11 +410,25 @@ export class EnemyView {
         continue;
       }
       ring.age += dt;
+      if (ring.age < 0) {
+        ring.mesh.visible = false;
+        continue;
+      }
       const t = Math.min(1, ring.age / RING_TIME);
       const r = Math.max(0.5, ring.radius * (1 - (1 - t) * (1 - t)));
       ring.mesh.scale.set(r, 1, r);
-      ring.material.opacity = 0.8 * (1 - t);
+      ring.material.opacity = 0.8 * ring.strength * (1 - t);
       ring.mesh.visible = t < 1;
+    }
+    for (const c of this.columns) {
+      if (c.age >= COLUMN_TIME) {
+        continue;
+      }
+      c.age += dt;
+      const t = Math.min(1, c.age / COLUMN_TIME);
+      c.mesh.scale.set(1 + t * 0.6, c.height * (0.4 + 0.6 * Math.sqrt(t)), 1 + t * 0.6);
+      c.material.opacity = 0.55 * (1 - t);
+      c.mesh.visible = t < 1;
     }
   }
 
@@ -313,18 +455,56 @@ export class EnemyView {
       ring.material.dispose();
     }
     this.ringGeometry.dispose();
+    for (const c of this.columns) {
+      c.mesh.removeFromParent();
+      c.material.dispose();
+    }
+    this.columnGeometry.dispose();
   }
 
-  private startRing(position: readonly number[], radius: number, color: number): void {
+  /**
+   * An alarm's look (D-046): a scream is a violet sonic wave (three rings and a tall column), a
+   * death cry a red echo (two rings, the second fainter, and a short flare).
+   */
+  private startAlarm(alarm: AlarmEvent): void {
+    const scream = alarm.kind !== 'deathCry';
+    const color = scream ? SCREAM_RING_COLOR : DEATH_CRY_RING_COLOR;
+    for (const { delay, strength } of scream ? SCREAM_WAVE : DEATH_CRY_ECHO) {
+      this.startRing(alarm.position, alarm.radius, color, delay, strength);
+    }
+    this.startColumn(alarm.position, color, scream ? 6 : 2.2);
+  }
+
+  private startRing(
+    position: readonly number[],
+    radius: number,
+    color: number,
+    delay = 0,
+    strength = 1,
+  ): void {
     const ring =
       this.rings.find((r) => r.age >= RING_TIME) ??
       this.rings.reduce((oldest, r) => (r.age > oldest.age ? r : oldest));
-    ring.age = 0;
+    ring.age = -delay;
     ring.radius = radius;
+    ring.strength = strength;
     ring.material.color.setHex(color);
+    ring.material.opacity = 0;
     ring.mesh.position.set(position[0] ?? 0, (position[1] ?? 0) + 0.08, position[2] ?? 0);
     ring.mesh.scale.set(0.5, 1, 0.5);
-    ring.mesh.visible = true;
+    ring.mesh.visible = delay <= 0;
+  }
+
+  private startColumn(position: readonly number[], color: number, height: number): void {
+    const c =
+      this.columns.find((x) => x.age >= COLUMN_TIME) ??
+      this.columns.reduce((oldest, x) => (x.age > oldest.age ? x : oldest));
+    c.age = 0;
+    c.height = height;
+    c.material.color.setHex(color);
+    c.mesh.position.set(position[0] ?? 0, position[1] ?? 0, position[2] ?? 0);
+    c.mesh.scale.set(1, height * 0.4, 1);
+    c.mesh.visible = true;
   }
 
   private sync(): void {
@@ -376,6 +556,13 @@ export class EnemyView {
       emissive: 0xffffff,
       emissiveIntensity: 0,
     });
+    const shading: EnemyShading = {
+      uEyeGlow: { value: 0 },
+      uEyeColor: { value: new Color(lookOf(config).eyes) },
+      uSilhouette: { value: 0 },
+      uProximity: { value: 0 },
+    };
+    patchEnemyMaterial(material, shading);
     const root = new Group();
     const body = new Bone();
     const arms = new Bone();
@@ -400,6 +587,7 @@ export class EnemyView {
       body,
       arms,
       material,
+      shading,
       lookBits: 0,
       flash: 0,
       glow: 0,
@@ -463,18 +651,21 @@ export class EnemyView {
     let lean = 0;
     const attack = enemy.config.attack;
     const raised = look.windupArms > REACH_ARMS + 0.01;
+    const rears = look.windupLean !== undefined;
     if (enemy.state === 'ATTACK' && enemy.attackPhase === 'windup') {
-      const progress = 1 - enemy.attackTimer / attack.windup;
-      armTarget = look.windupArms + (raised ? 0 : 0.45 * progress);
+      // A frenzy shortens the wind-up: progress follows the wind-up it really has.
+      const windup = attack.windup * enemy.windupScale(this.manager.now);
+      const progress = Math.min(1, Math.max(0, 1 - enemy.attackTimer / Math.max(1e-6, windup)));
+      armTarget = look.windupArms + (raised || rears ? 0 : 0.45 * progress);
       telegraph = 0.15 + 0.55 * progress * progress;
-      lean += (raised ? 0.18 : 0.12) * progress;
+      lean += rears ? (look.windupLean ?? 0) * progress : (raised ? 0.18 : 0.12) * progress;
     } else if (enemy.state === 'ATTACK' && enemy.attackPhase === 'lunge') {
       armTarget = REACH_ARMS;
       telegraph = 0.7;
       lean -= 0.35;
     } else if (enemy.state === 'ATTACK' && enemy.attackPhase === 'recovery') {
-      armTarget = raised ? look.windupArms * 0.6 : REACH_ARMS - 0.5;
-      lean += raised ? 0.05 : -0.18;
+      armTarget = rears ? 0 : raised ? look.windupArms * 0.6 : REACH_ARMS - 0.5;
+      lean += rears ? -0.22 : raised ? 0.05 : -0.18;
     } else if (enemy.state === 'STAGGER') {
       armTarget = 0.9;
     }
@@ -507,13 +698,31 @@ export class EnemyView {
     if (glow > 0) {
       material.emissive.setHex(v.flash > 0 ? 0xffffff : look.telegraph);
       material.emissiveIntensity = glow;
-    } else if (this.eyeshine > 0 && !enemy.health.isDead) {
-      // In the dark (BLACKOUT, D-045) a faint glow in its eye colour keeps the silhouette readable.
-      material.emissive.setHex(look.eyes);
-      material.emissiveIntensity = this.eyeshine;
     } else {
       material.emissiveIntensity = 0;
     }
+    this.shade(v, enemy);
+  }
+
+  /**
+   * Eyes and the dark (D-046): the eyes glow by the environment (BLACKOUT) or, frenzied, flare in
+   * the colour of what frenzied them; the body follows the silhouette and proximity channels. A
+   * body on the ground has no glow.
+   */
+  private shade(v: Visual, enemy: Enemy): void {
+    const s = v.shading;
+    const dead = enemy.health.isDead;
+    const frenzied = !dead && enemy.frenzyKind !== null && enemy.frenzied(this.manager.now);
+    if (frenzied) {
+      const pulse = 0.8 + 0.2 * Math.sin(this.clock * 12 + enemy.spawnNumber);
+      s.uEyeGlow.value = Math.max(this.eyeGlow, FRENZY_EYE_GLOW * pulse);
+      s.uEyeColor.value.setHex(FRENZY_EYES[enemy.frenzyKind ?? 'scream']);
+    } else {
+      s.uEyeGlow.value = dead ? 0 : this.eyeGlow;
+      s.uEyeColor.value.setHex(enemy.config.traits.includes('elite') ? ELITE_EYES : v.look.eyes);
+    }
+    s.uSilhouette.value = this.silhouette;
+    s.uProximity.value = this.proximity;
   }
 
   /** Tips the top of the body along a world direction by `amount` radians. */
@@ -566,6 +775,7 @@ export class EnemyView {
           head.center[2] - r * 0.93,
         );
         colorize(eye, bits & ELITE_BIT ? ELITE_EYES : look.eyes);
+        markEyes(eye, 1);
         parts.push(skin(eye, BODY_BONE));
       }
       if (look.mouth) {
@@ -629,6 +839,11 @@ export class EnemyView {
         }
       }
     }
+    for (const part of parts) {
+      if (!part.hasAttribute('aEye')) {
+        markEyes(part, 0);
+      }
+    }
     const geometry = mergeGeometries(parts);
     for (const part of parts) {
       part.dispose();
@@ -673,6 +888,12 @@ function skin(geometry: BufferGeometry, bone: number): BufferGeometry {
   geometry.setAttribute('skinIndex', new Uint16BufferAttribute(indices, 4));
   geometry.setAttribute('skinWeight', new Float32BufferAttribute(weights, 4));
   return geometry;
+}
+
+/** Marks every vertex of `geometry` as eye (1) or body (0) for the material patch (D-046). */
+function markEyes(geometry: BufferGeometry, value: number): void {
+  const count = geometry.getAttribute('position').count;
+  geometry.setAttribute('aEye', new Float32BufferAttribute(new Float32Array(count).fill(value), 1));
 }
 
 function colorize(geometry: BufferGeometry, color: number): void {

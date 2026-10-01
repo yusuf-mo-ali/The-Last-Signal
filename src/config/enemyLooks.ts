@@ -22,7 +22,15 @@ export interface EnemyLook {
    * attack pose.
    */
   readonly windupArms: number;
+  /**
+   * Rears the body back through the wind-up by this much (radians) and holds the arms at
+   * `windupArms` (the Spitter drawing back to spit). Omitted: the arms rise with the wind-up.
+   */
+  readonly windupLean?: number;
 }
+
+/** Eye colours of a frenzied enemy (D-046): who frenzied it, at a glance. */
+export const FRENZY_EYES = { deathCry: 0xff2a1a, scream: 0xc070ff } as const;
 
 const zones = (
   skin: number,
@@ -79,6 +87,7 @@ export const ENEMY_LOOKS: Readonly<Partial<Record<EnemyArchetypeId, EnemyLook>>>
     telegraph: 0x8cff2e,
     mouth: { color: 0x334a05, size: 0.42 },
     windupArms: -0.35,
+    windupLean: 0.32,
   },
 };
 

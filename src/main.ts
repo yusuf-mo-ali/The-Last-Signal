@@ -12,6 +12,7 @@ import { TrainingDummyView } from './combat/training/TrainingDummyView';
 import { TrainingRange } from './combat/training/TrainingRange';
 import { EnemyManager } from './enemies/EnemyManager';
 import { EnemyProjectiles } from './enemies/EnemyProjectiles';
+import { ProjectileView } from './enemies/ProjectileView';
 import { EnemyView } from './enemies/EnemyView';
 import { TrainingEncounter } from './enemies/TrainingEncounter';
 import { boundKeyCodes, DEFAULT_BINDINGS } from './config/input';
@@ -287,6 +288,7 @@ function boot(app: HTMLElement): () => void {
   const dummyView = new TrainingDummyView(view.scene, training, combat);
   const enemyView = new EnemyView(view.scene, enemies, combat);
   const pickupView = new PickupView(view.scene, pickups);
+  const projectileView = new ProjectileView(view.scene, projectiles);
   const hud = new WeaponHud(app);
   const healthHud = new HealthHud(app, playerHealth);
   const waveHud = new WaveHud(app, waves);
@@ -472,10 +474,13 @@ function boot(app: HTMLElement): () => void {
       dummyView.update(simDt);
       const channels = environment.resolve();
       lighting.update(channels, weaponView.muzzleFlashVisible ? 1 : 0);
-      // Interim (Phase 7.1 step 1): the whole-body glow until the eye-only shader lands.
-      enemyView.eyeshine = channels.eyeGlow * 0.1;
+      // The dark (D-046): glowing eyes on silhouettes, close enemies lifted out of it.
+      enemyView.eyeGlow = channels.eyeGlow;
+      enemyView.silhouette = channels.silhouette;
+      enemyView.proximity = channels.proximity;
       enemyView.update(alpha, simDt);
       pickupView.update(simDt);
+      projectileView.update(alpha, simDt);
       const held = weapons.activeWeapon;
       const hudVisible = pointerLock.isLocked && game.state.isIn('PLAYING');
       hud.update({
@@ -585,6 +590,7 @@ function boot(app: HTMLElement): () => void {
     waves.detach();
     alarmPulse.dispose();
     pickupView.dispose();
+    projectileView.dispose();
     hud.dispose();
     feedback.dispose();
     view.dispose();
