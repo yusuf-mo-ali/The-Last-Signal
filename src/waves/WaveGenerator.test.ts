@@ -1,5 +1,5 @@
 /**
- * The wave generator (D-044): deterministic, budget-exact, roster-only (never the Climber),
+ * The wave generator (D-044): deterministic, budget-exact, roster-only (the Climber only adaptive),
  * unlocks, caps, guarantees, traits, themes, and the modifier channel future systems plug into.
  * Property tests sweep waves 1–200 over many seeds.
  */
@@ -307,15 +307,30 @@ describe('wave generator: the modifier channel (future adaptive and mutation sys
     expect(armored).toBeLessThan(traited.spawns.length);
   });
 
-  it('the Climber cannot be brought in while it is not implemented, from any source', () => {
-    for (const source of ['adaptive', 'mutation', 'debug'] as const) {
+  it('the Climber comes only from the adaptive source, from its adaptive unlock (D-047)', () => {
+    for (const source of ['mutation', 'debug'] as const) {
       for (const seed of SEEDS) {
         const def = generateWave(15, {
           seed,
-          modifiers: [{ source, extraArchetypes: ['climber'], archetypeWeights: { climber: 2 } }],
+          modifiers: [
+            { source, extraArchetypes: ['climber'], extraCounts: { climber: 2 } },
+            { source, archetypeWeights: { climber: 2 } },
+          ],
         });
-        expect(def.spawns.some((s) => (s.archetype as string) === 'climber')).toBe(false);
+        expect(count(def, 'climber'), `${source} ${seed}`).toBe(0);
       }
+    }
+    for (const seed of SEEDS) {
+      const early = generateWave(7, {
+        seed,
+        modifiers: [{ source: 'adaptive', extraCounts: { climber: 2 } }],
+      });
+      expect(count(early, 'climber')).toBe(0);
+      const due = generateWave(WAVE_RULES.adaptiveUnlocks.climber ?? 8, {
+        seed,
+        modifiers: [{ source: 'adaptive', extraCounts: { climber: 2 } }],
+      });
+      expect(count(due, 'climber')).toBe(2);
     }
   });
 

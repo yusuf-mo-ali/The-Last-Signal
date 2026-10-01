@@ -15,8 +15,12 @@
  *      one point of the budget.
  *   5. Order: a seeded shuffle, with heavy archetypes kept out of the opening.
  *
- * Only roster archetypes appear (O-3, D-043: never the Climber). An archetype outside the roster
- * can only come from an adaptive modifier, only if implemented, and only a few per wave.
+ * Only roster archetypes appear on their own (O-3, D-043). An archetype outside the roster (the
+ * Climber, D-047) can only come from an adaptive modifier, only once its adaptive unlock is
+ * reached, trait-free and at most `extraArchetypeMax` per wave. The adaptive source is clamped on
+ * its own (`modifierClamp.adaptive`) before everything is clamped together, adds no Elite chance
+ * and no trait before its schedule, never reaches the finale, and never touches the budget, the
+ * Elite limits or the surges (those are a mutation's, D-045).
  */
 
 import {
@@ -45,6 +49,7 @@ import {
 import { Rng } from '../utils/Rng';
 import {
   eliteMax,
+  isAdaptiveUnlocked,
   isUnlocked,
   traitChance,
   waveBudget,
@@ -106,16 +111,19 @@ export function generateWave(
 ): WaveDefinition {
   const wave = waveIndex(n);
   const rng = new Rng(`${context.seed}:wave:${wave}`);
+  const finale = wave === FINAL_WAVE;
   // The wave's mutation shapes it through the same channel as every other influence (D-045).
+  // The finale is hand-tuned: no adaptation reaches it (D-047).
   const modifiers = [
-    ...(context.modifiers ?? []),
+    ...(context.modifiers ?? []).filter((m) => !(finale && m.source === 'adaptive')),
     ...mutationModifiers(context.mutation ?? null, wave),
   ];
   const fromMutations = modifiers.filter((m) => m.source === 'mutation');
+  const fromAdaptive = modifiers.filter((m) => m.source === 'adaptive');
+  const adaptiveClamp = rules.modifierClamp.adaptive;
   const roster = context.roster ?? DEFAULT_ROSTER;
   const tier = waveTier(wave);
   const theme = waveTheme(wave, context.seed);
-  const finale = wave === FINAL_WAVE;
 
   // 1. Budget: only mutations may change it (D-026: adaptation changes the mix, not the total).
   let budgetScale = 1;
@@ -128,26 +136,45 @@ export function generateWave(
     waveBudget(wave, rules) * clamp(budgetScale, rules.modifierClamp.budget),
   );
 
-  // 2. Who may appear, with what weight and cap.
+  // 2. Who may appear, with what weight and cap. An archetype outside the roster comes only from
+  // the adaptive source, once it is unlocked for adaptation (the Climber, D-047) or, for a roster
+  // archetype a custom roster left out, once it is unlocked at all; always trait-free.
+  const allowedExtra = (id: EnemyArchetypeId): id is ImplementedEnemyId =>
+    isImplemented(id) &&
+    !roster.includes(id) &&
+    (isAdaptiveUnlocked(id, wave, rules) || isUnlocked(id, wave, rules));
   const extras = new Set<ImplementedEnemyId>();
-  for (const m of modifiers) {
-    if (m.source !== 'adaptive') {
-      continue;
-    }
+  const counted = new Map<ImplementedEnemyId, number>();
+  for (const m of fromAdaptive) {
     for (const id of m.extraArchetypes ?? []) {
-      if (isImplemented(id) && !roster.includes(id)) {
+      if (allowedExtra(id)) {
         extras.add(id);
+      }
+    }
+    for (const [id, n] of Object.entries(m.extraCounts ?? {}) as [EnemyArchetypeId, number][]) {
+      if (allowedExtra(id) && n >= 1) {
+        extras.add(id);
+        counted.set(id, Math.max(counted.get(id) ?? 0, Math.floor(n)));
       }
     }
   }
   const candidates = [...roster.filter((a) => isUnlocked(a, wave, rules)), ...extras];
   const weights = new Map<ImplementedEnemyId, number>();
   for (const a of candidates) {
-    let scale = 1;
+    // The adaptive source is clamped on its own first (D-047), then everything together.
+    let adaptiveScale = 1;
+    let otherScale = 1;
     for (const m of modifiers) {
-      scale *= m.archetypeWeights?.[a] ?? 1;
+      const w = m.archetypeWeights?.[a] ?? 1;
+      if (m.source === 'adaptive') {
+        adaptiveScale *= w;
+      } else {
+        otherScale *= w;
+      }
     }
-    const base = extras.has(a) ? 0.5 : (rules.tierWeights[tier][a] ?? 0);
+    const scale = clamp(adaptiveScale, adaptiveClamp.weight) * otherScale;
+    // Counted extras are placed exactly, never drawn.
+    const base = counted.has(a) ? 0 : extras.has(a) ? 0.5 : (rules.tierWeights[tier][a] ?? 0);
     const w =
       base * (rules.themeMultipliers[theme][a] ?? 1) * clamp(scale, rules.modifierClamp.weight);
     if (w > 0) {
@@ -158,18 +185,34 @@ export function generateWave(
   for (const a of candidates) {
     // An archetype's first wave introduces exactly one of it.
     const introduced = a !== 'walker' && !extras.has(a) && wave === rules.unlocks[a];
-    caps.set(a, introduced ? 1 : waveCap(a, wave, rules));
+    caps.set(a, extras.has(a) ? rules.extraArchetypeMax : introduced ? 1 : waveCap(a, wave, rules));
   }
   let extrasLeft = rules.extraArchetypeMax;
   // Base (trait-free) cost of each candidate, looked up on every draw.
   const baseCost = new Map(candidates.map((a) => [a, spawnCost(a, [])] as const));
 
-  // Trait chances: the schedule plus clamped modifiers.
+  // Trait chances: the schedule plus clamped modifiers. The adaptive source adds only Armored and
+  // Helmeted, only once their schedule has started, within its own total (D-047).
+  const adaptiveTraits = new Map<EnemyModifierId, number>();
+  for (const t of ENEMY_MODIFIER_IDS) {
+    if (t === 'elite' || wave < rules.traits[t].from) {
+      continue;
+    }
+    const sum = fromAdaptive.reduce((total, m) => total + (m.traitChance?.[t] ?? 0), 0);
+    if (sum > 0) {
+      adaptiveTraits.set(t, sum);
+    }
+  }
+  const adaptiveTotal = [...adaptiveTraits.values()].reduce((a, b) => a + b, 0);
+  const adaptiveTraitScale =
+    adaptiveTotal > adaptiveClamp.traitTotal ? adaptiveClamp.traitTotal / adaptiveTotal : 1;
   const chances = new Map<EnemyModifierId, number>();
   for (const t of ENEMY_MODIFIER_IDS) {
-    let extra = 0;
+    let extra = (adaptiveTraits.get(t) ?? 0) * adaptiveTraitScale;
     for (const m of modifiers) {
-      extra += m.traitChance?.[t] ?? 0;
+      if (m.source !== 'adaptive') {
+        extra += m.traitChance?.[t] ?? 0;
+      }
     }
     const limit = rules.modifierClamp.traitChance;
     const p = traitChance(t, wave, rules) + clamp(extra, [-limit, limit]);
@@ -205,7 +248,7 @@ export function generateWave(
     return traits;
   };
   const add = (archetype: ImplementedEnemyId, withTraits: boolean): boolean => {
-    let traits = withTraits ? rollTraits() : [];
+    let traits = withTraits && !extras.has(archetype) ? rollTraits() : [];
     let cost = spawnCost(archetype, traits);
     if (cost > remaining + EPSILON && traits.length > 0) {
       traits = [];
@@ -239,6 +282,12 @@ export function generateWave(
       while ((counts.get(a) ?? 0) < min && isUnlocked(a, wave, rules) && add(a, true)) {
         // placed
       }
+    }
+  }
+  // Counted extras (the Climber, D-047): exactly that many, within the extras cap and the budget.
+  for (const [a, n] of [...counted.entries()].sort((x, y) => x[0].localeCompare(y[0]))) {
+    for (let i = 0; i < n && underCap(a) && add(a, false); i++) {
+      // placed
     }
   }
   const walkerFloor = rules.minWalkerShare * budget;
@@ -348,7 +397,10 @@ export function generateWave(
   }
   const spawnBias = new Set<SpawnRegionId>();
   for (const m of modifiers) {
-    for (const r of m.spawnBias ?? []) {
+    const regions = m.spawnBias ?? [];
+    for (const r of m.source === 'adaptive'
+      ? regions.slice(0, adaptiveClamp.biasRegions)
+      : regions) {
       spawnBias.add(r);
     }
   }

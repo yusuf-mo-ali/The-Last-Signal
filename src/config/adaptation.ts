@@ -17,6 +17,7 @@
 
 import type { ImplementedEnemyId } from './enemies';
 import type { MutationId } from './mutations';
+import { WAVE_RULES } from './waves';
 import type { PlannedWeaponId, WeaponId } from './weapons';
 
 /** Plan §15 player behaviour metrics: kept as the plan names them (see `PLAN_METRIC_SIGNALS`). */
@@ -487,12 +488,9 @@ export const ADAPTATION_GUARDRAILS = {
     text: 'You are bleeding. The horde hesitates, for now.',
   },
   /** Hard caps on what adaptation may do to a wave, whatever is active. */
-  caps: {
-    /** Product of the active adaptive weight multipliers, per archetype. */
-    weight: [0.75, 1.6] as const,
-    /** Adaptive Armored + Helmeted chance together. */
-    traitTotal: 0.15,
-    /** Spawn regions favoured. */
-    biasRegions: 2,
-  },
+  /**
+   * Hard caps on what adaptation may do to a wave, whatever is active: the generator's own
+   * adaptive clamps (`WAVE_RULES.modifierClamp.adaptive`), enforced there too.
+   */
+  caps: WAVE_RULES.modifierClamp.adaptive,
 } as const;

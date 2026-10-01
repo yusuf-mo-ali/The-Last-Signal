@@ -232,6 +232,15 @@ export interface WaveRules {
       readonly groupSize: number;
       readonly warning: readonly [number, number];
     };
+    /**
+     * The adaptive source alone (D-047), before it combines with the others: its weight product
+     * per archetype, its Armored + Helmeted chance in total (never Elite), its spawn regions.
+     */
+    readonly adaptive: {
+      readonly weight: readonly [number, number];
+      readonly traitTotal: number;
+      readonly biasRegions: number;
+    };
   };
   /** Seconds of `WAVE_START` before spawning (the announcement). */
   readonly introTime: number;
@@ -323,6 +332,7 @@ export const WAVE_RULES: WaveRules = {
     eliteMaxBonus: 3,
     eliteMinimum: 2,
     surges: { count: 3, extraGroupSize: 2, groupSize: 6, warning: [1, 4] },
+    adaptive: { weight: [0.75, 1.6], traitTotal: 0.15, biasRegions: 2 },
   },
   introTime: 3,
   breather: 10,
