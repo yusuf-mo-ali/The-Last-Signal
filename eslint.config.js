@@ -29,6 +29,8 @@ const SIMULATION = [
 /** Presentation files that live inside simulation folders, identified by name. */
 const PRESENTATION_IN_SIMULATION = [
   'src/**/*View.ts',
+  // A view's own unit tests (three.js objects, no GPU) are presentation code too.
+  'src/**/*View.test.ts',
   'src/player/CameraController.ts',
   'src/world/LightingController.ts',
 ];

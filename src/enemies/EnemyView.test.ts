@@ -23,7 +23,7 @@ function scene() {
 function enemyMeshes(s: Scene): Mesh[] {
   const out: Mesh[] = [];
   s.traverse((o) => {
-    if ((o as Mesh).isMesh && (o as { isSkinnedMesh?: boolean }).isSkinnedMesh) {
+    if ((o as { isSkinnedMesh?: boolean }).isSkinnedMesh) {
       out.push(o as Mesh);
     }
   });
