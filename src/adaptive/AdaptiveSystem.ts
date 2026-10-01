@@ -15,8 +15,13 @@
  */
 
 import type { CombatEvents } from '../combat/CombatSystem';
-import { SIGNAL_MEASURE, type AdaptationId } from '../config/adaptation';
-import type { CompositionModifier } from '../config/waves';
+import {
+  ADAPTATION_GUARDRAILS,
+  ADAPTATIONS,
+  SIGNAL_MEASURE,
+  type AdaptationId,
+} from '../config/adaptation';
+import type { CompositionModifier, SpawnRegionId } from '../config/waves';
 import { EventBus, type Unsubscribe } from '../core/EventBus';
 import type { FixedUpdateSystem } from '../core/Game';
 import type { GameStateMachine } from '../core/GameState';
@@ -26,7 +31,7 @@ import type { WaveEvents } from '../waves/events';
 import type { WeaponEvents } from '../weapons/types';
 import type { SpawnPointDefinition } from '../world/levels/types';
 import { BehaviorTelemetry, type TelemetryEnemy, type TelemetryPlayer } from './BehaviorTelemetry';
-import { boostedArchetypes, composeModifiers, regionsNear } from './compose';
+import { boostedArchetypes, composeModifiers, regionsNear, totalPressure } from './compose';
 import { decide } from './director';
 import { measureWave } from './measure';
 import { emptyProfile, foldEvidence } from './profile';
@@ -121,10 +126,12 @@ export class AdaptiveSystem implements FixedUpdateSystem {
     if (!this.enabled) {
       return [];
     }
-    return composeModifiers(this.adaptation.active, {
-      wave,
-      dwellRegions: regionsNear(this.profile.dwellCentroid, this.options.spawnPoints),
-    });
+    return composeModifiers(this.adaptation.active, { wave, dwellRegions: this.dwellRegions });
+  }
+
+  /** The spawn regions nearest where the player dwells (spawn bias). */
+  get dwellRegions(): SpawnRegionId[] {
+    return regionsNear(this.profile.dwellCentroid, this.options.spawnPoints);
   }
 
   /** The wave the last decision was for (the next wave to be generated). */
@@ -236,14 +243,24 @@ export class AdaptiveSystem implements FixedUpdateSystem {
   }
 
   /**
-   * Debug: put `id` active at `level` for the next wave (as if the director had decided it).
-   * Bypasses the evidence, never the composition caps or the generator's rules.
+   * Debug: put `id` active at `level` (never above its `maxLevel`; others that no longer fit
+   * within the pressure limit are set aside) for the next wave (as if the director had decided it). Bypasses the evidence, never the composition caps or the generator's
+   * rules.
    */
   force(id: AdaptationId, level: 1 | 2, key: string, nextWave: number): void {
-    const others = this.adaptation.active.filter((a) => a.id !== id);
+    const capped: 1 | 2 = (ADAPTATIONS[id].maxLevel ?? 2) < level ? 1 : level;
+    // The others that still fit beside it (D-048: within the pressure limit at level 1).
+    let others = this.adaptation.active.filter((a) => a.id !== id);
+    while (
+      others.length > 0 &&
+      totalPressure([...others.map((a) => ({ ...a, level: 1 as const })), { id, level: 1 }]) >
+        ADAPTATION_GUARDRAILS.maxPressure
+    ) {
+      others = others.slice(0, -1);
+    }
     this.adaptation = {
       ...this.adaptation,
-      active: [...others, { id, key, level, since: nextWave, levelSince: nextWave }],
+      active: [...others, { id, key, level: capped, since: nextWave, levelSince: nextWave }],
     };
     this.decidedFor = nextWave;
   }

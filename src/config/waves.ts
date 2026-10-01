@@ -95,6 +95,19 @@ export interface CompositionModifier {
    * the budget (paid for out of it, never added to it).
    */
   readonly extraCounts?: Readonly<Partial<Record<EnemyArchetypeId, number>>>;
+  /**
+   * Adaptive source only (D-048): the least share of the budget spent on an archetype, placed
+   * before the random fill so it holds on every seed; always within the archetype's unlock, its
+   * per-wave cap and the budget. Clamped by `modifierClamp.adaptive.share` / `shareTotal`.
+   */
+  readonly archetypeShares?: Readonly<Partial<Record<EnemyArchetypeId, number>>>;
+  /**
+   * Adaptive source only (D-048): this share of the wave's trait-eligible enemies carries the
+   * trait beyond the scheduled rolls (a running quota, on every seed); only once the trait's
+   * schedule has started, never Elite. Clamped by `modifierClamp.adaptive.traitShare` /
+   * `traitShareTotal`.
+   */
+  readonly traitShares?: Readonly<Partial<Record<'armored' | 'helmeted', number>>>;
   /** Mutations only (clamped to `modifierClamp.budget`). */
   readonly budgetMultiplier?: number;
   /** Spawn regions to favour (flank spawns). */
@@ -240,6 +253,13 @@ export interface WaveRules {
       readonly weight: readonly [number, number];
       readonly traitTotal: number;
       readonly biasRegions: number;
+      /** Most budget share an adaptive quota may claim for one archetype (D-048). */
+      readonly share: number;
+      /** Most budget share all adaptive quotas together may claim (leaves the Walker floor). */
+      readonly shareTotal: number;
+      /** Most a trait's share may rise above its schedule, per trait and in total (D-048). */
+      readonly traitShare: number;
+      readonly traitShareTotal: number;
     };
   };
   /** Seconds of `WAVE_START` before spawning (the announcement). */
@@ -332,7 +352,15 @@ export const WAVE_RULES: WaveRules = {
     eliteMaxBonus: 3,
     eliteMinimum: 2,
     surges: { count: 3, extraGroupSize: 2, groupSize: 6, warning: [1, 4] },
-    adaptive: { weight: [0.75, 1.6], traitTotal: 0.15, biasRegions: 2 },
+    adaptive: {
+      weight: [0.75, 1.6],
+      traitTotal: 0.15,
+      biasRegions: 2,
+      share: 0.45,
+      shareTotal: 0.5,
+      traitShare: 0.25,
+      traitShareTotal: 0.3,
+    },
   },
   introTime: 3,
   breather: 10,

@@ -15,7 +15,14 @@ import {
 import { WAVE_RULES } from '../config/waves';
 import { FACILITY_SPAWN_POINTS } from '../world/levels/facility';
 import { Rng } from '../utils/Rng';
-import { boostedArchetypes, composeModifiers, regionsNear } from './compose';
+import {
+  boostedArchetypes,
+  composeModifiers,
+  pressureOf,
+  regionsNear,
+  totalPressure,
+  withinPressure,
+} from './compose';
 import { decide, governorOn } from './director';
 import { bestDwellArea, dwellCell, emptyTelemetry, measureWave } from './measure';
 import { confidence, emptyProfile, foldEvidence, memoryOf, normalizeProfile } from './profile';
@@ -333,19 +340,64 @@ describe('the director: entering, staying, escalating, fading (D-026)', () => {
     expect(run(steady(5, 6, { dwell: [0.9, 1] })).state.active.map((a) => a.id)).toEqual([
       'ENTRENCHED',
     ]);
-    expect(run(steady(5, 6, { headshot: [0.9, 1], accuracy: [0.2, 1] })).state.active).toEqual([]);
+    expect(run(steady(6, 7, { headshot: [0.9, 1], accuracy: [0.2, 1] })).state.active).toEqual([]);
     expect(
-      run(steady(5, 6, { headshot: [0.9, 1], accuracy: [0.6, 1] })).state.active.map((a) => a.id),
+      run(steady(6, 7, { headshot: [0.9, 1], accuracy: [0.6, 1] })).state.active.map((a) => a.id),
     ).toEqual(['HEADHUNTER']);
   });
 
+  it('D-048: never enters before its answer can act (its own and its variant’s first wave)', () => {
+    // HEADHUNTER and CLOSE_QUARTERS from wave 8 (Helmeted / Armored scheduled, a Tank's cap).
+    for (const signals of [
+      { headshot: [0.9, 1], accuracy: [0.6, 1] },
+      { closeRange: [0.9, 1] },
+    ] as const) {
+      const r = run(steady(5, 6, signals));
+      expect(r.state.active, JSON.stringify(signals)).toEqual([]);
+      expect(r.outcomes.flatMap((o) => o.changes)).toEqual([]);
+      expect(run(steady(5, 7, signals)).state.active[0]?.since).toBe(8);
+    }
+    // NEGLECT of the Screamer from wave 9, when its cap first allows two.
+    expect(run(steady(5, 7, { 'neglect.screamer': [0.9, 1] })).state.active).toEqual([]);
+    expect(run(steady(5, 8, { 'neglect.screamer': [0.9, 1] })).state.active).toEqual([
+      { id: 'NEGLECT', key: 'screamer', level: 1, since: 9, levelSince: 9 },
+    ]);
+  });
+
+  it('D-048: pressure — two at level 2, but NEGLECT stands alone', () => {
+    // A camper who also ignores Screamers: HIGH_GROUND first; NEGLECT never joins it.
+    const both = run(steady(7, 11, { elevation: [0.9, 1], 'neglect.screamer': [0.95, 1] }));
+    expect(both.state.active.map((a) => a.id)).toEqual(['HIGH_GROUND']);
+    // Two ordinary ones may both reach level 2 (pressure 2 + 2).
+    const two = run(steady(5, 9, { elevation: [0.9, 1], longRange: [0.9, 1] }));
+    expect(two.state.active.map((a) => [a.id, a.level])).toEqual([
+      ['HIGH_GROUND', 2],
+      ['LONG_RANGE', 2],
+    ]);
+    expect(totalPressure(two.state.active)).toBe(ADAPTATION_GUARDRAILS.maxPressure);
+    // Any state, forced included, acts within the limit: NEGLECT beside another is set aside.
+    const forced = withinPressure([
+      { id: 'HIGH_GROUND', key: 'default', level: 2, since: 9, levelSince: 9 },
+      { id: 'NEGLECT', key: 'screamer', level: 1, since: 9, levelSince: 9 },
+    ]);
+    expect(forced.map((a) => a.id)).toEqual(['HIGH_GROUND']);
+    expect(pressureOf({ id: 'NEGLECT', level: 1 })).toBe(ADAPTATION_GUARDRAILS.maxPressure);
+  });
+
+  it('D-048: an adaptation with maxLevel 1 never escalates', () => {
+    const r = run(steady(7, 11, { 'neglect.screamer': [0.95, 1] }));
+    expect(r.state.active).toHaveLength(1);
+    expect(r.outcomes.flatMap((o) => o.changes.map((c) => c.kind))).not.toContain('escalate');
+    expect(r.state.active[0]?.level).toBe(1);
+  });
+
   it('NEGLECT picks the ignored archetype and names it', () => {
-    const r = run(steady(5, 6, { 'neglect.spitter': [0.9, 1], 'neglect.screamer': [0.65, 1] }));
+    const r = run(steady(10, 11, { 'neglect.spitter': [0.9, 1], 'neglect.screamer': [0.65, 1] }));
     expect(r.state.active).toEqual([
-      { id: 'NEGLECT', key: 'spitter', level: 1, since: 7, levelSince: 7 },
+      { id: 'NEGLECT', key: 'spitter', level: 1, since: 12, levelSince: 12 },
     ]);
     expect(r.outcomes[1]?.changes[0]?.text).toBe(
-      'You let the Spitters do their work. More of them are coming.',
+      'You let the Spitters do their work. Every one the signal allows is coming.',
     );
   });
 
@@ -400,7 +452,7 @@ describe('composition (caps, unlocks, mutation ownership)', () => {
       dwellRegions: ['west'],
     });
     expect(before).toEqual([
-      { source: 'adaptive', archetypeWeights: { runner: 1.25 }, spawnBias: ['west'] },
+      { source: 'adaptive', archetypeShares: { runner: 0.35 }, spawnBias: ['west'] },
     ]);
     const after = composeModifiers([active('HIGH_GROUND', 2)], {
       wave: 8,
@@ -411,19 +463,22 @@ describe('composition (caps, unlocks, mutation ownership)', () => {
     ]);
   });
 
-  it('weights multiply across adaptations and clamp; traits wait for their schedule and cap', () => {
+  it('quotas: the larger ask wins (no stacking), capped in total; trait quotas wait and cap', () => {
+    const caps = ADAPTATION_GUARDRAILS.caps;
+    // Runners 0.45 (SKIRMISHER) and 0.35 (LONG_RANGE): the larger, not 0.8; with Screamers 0.15
+    // the total 0.6 is scaled to the cap.
     const both = composeModifiers([active('LONG_RANGE', 2), active('SKIRMISHER', 2)], { wave: 12 });
-    expect(both[0]?.archetypeWeights?.runner).toBe(ADAPTATION_GUARDRAILS.caps.weight[1]); // 1.3 × 1.5
+    const shares = both[0]?.archetypeShares ?? {};
+    expect(Object.values(shares).reduce((a, b) => a + b, 0)).toBeCloseTo(caps.shareTotal, 10);
+    expect(shares.runner).toBeCloseTo((0.45 * caps.shareTotal) / 0.6, 10);
     expect(composeModifiers([active('HEADHUNTER', 2)], { wave: 7 })).toEqual([]); // Helmeted from 8
     const traits = composeModifiers([active('HEADHUNTER', 2), active('CLOSE_QUARTERS', 2)], {
       wave: 12,
     });
-    const t = traits[0]?.traitChance ?? {};
-    expect((t.armored ?? 0) + (t.helmeted ?? 0)).toBeCloseTo(
-      ADAPTATION_GUARDRAILS.caps.traitTotal,
-      10,
-    );
+    const t = traits[0]?.traitShares ?? {};
+    expect((t.armored ?? 0) + (t.helmeted ?? 0)).toBeCloseTo(caps.traitShareTotal, 10);
     expect(t).not.toHaveProperty('elite');
+    expect(traits[0]).not.toHaveProperty('traitChance');
   });
 
   it('never carries anything a mutation owns', () => {

@@ -203,6 +203,15 @@ export interface AdaptiveResponse {
   readonly subjectWeight?: number;
   /** Added trait chances: Armored and Helmeted only, only once a trait's schedule has started. */
   readonly traitChance?: Readonly<Partial<Record<'armored' | 'helmeted', number>>>;
+  /**
+   * Quotas (D-048): the least share of the wave's budget spent on an archetype, on every seed,
+   * within its unlock and cap. What makes a response visible; the budget stays the same.
+   */
+  readonly share?: Readonly<Partial<Record<ImplementedEnemyId, number>>>;
+  /** A quota for the variant's subject archetype (NEGLECT). */
+  readonly subjectShare?: number;
+  /** Trait quotas (D-048): this share of the wave carries the trait beyond the scheduled rolls. */
+  readonly traitShare?: Readonly<Partial<Record<'armored' | 'helmeted', number>>>;
   /** An archetype outside the roster, exactly `count` per wave, from its adaptive unlock. */
   readonly extra?: {
     readonly archetype: AdaptiveExtraArchetype;
@@ -222,6 +231,8 @@ export interface AdaptationVariant {
   /** The archetype a `subjectWeight` applies to. */
   readonly subject?: ImplementedEnemyId;
   readonly levels: readonly [AdaptiveResponse, AdaptiveResponse];
+  /** Not before this wave, when it is later than the adaptation's (its response acts from here). */
+  readonly firstWave?: number;
 }
 
 export interface AdaptationConfig {
@@ -242,13 +253,29 @@ export interface AdaptationConfig {
   readonly cooldownWaves: number;
   /** Waves it may stay active before it is made to fade (and rest). */
   readonly maxActiveWaves: number;
-  /** Not before this wave (D-026: 5). */
+  /**
+   * Not before this wave (D-026: 5; later where the response cannot act yet, D-048: an adaptation
+   * never enters while its answer would change nothing).
+   */
   readonly firstWave: number;
+  /** Highest level (D-048: 1 where a cap is the limit and a level 2 could add nothing). */
+  readonly maxLevel?: 1 | 2;
+  /**
+   * How much pressure each level adds (D-048; default 1 and 2). Active adaptations together stay
+   * within `ADAPTATION_GUARDRAILS.maxPressure`: a heavy answer keeps its partner at level 1.
+   */
+  readonly pressure?: readonly [number, number];
   /** Lines for SIGNAL ANALYSIS (`{name}` is the variant's subject name). */
   readonly analysis: { readonly enter: string; readonly escalate: string; readonly fade: string };
   /** `dormant`: defined but never evaluated (WEAPON_FOCUS until a second firearm exists). */
   readonly status?: 'dormant';
 }
+
+/**
+ * NEGLECT's first wave per subject (D-048): where it can first bring more than a wave already
+ * has (Screamers: their cap is 2 from wave 9; Spitters: wave 10 always has exactly one).
+ */
+const NEGLECT_FIRST_WAVE: Readonly<Record<SupportArchetype, number>> = { screamer: 9, spitter: 11 };
 
 const COMMON = {
   confidence: { enter: 0.6, exit: 0.35 },
@@ -273,7 +300,7 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
             extra: {
               archetype: 'climber',
               count: 1,
-              fallback: { archetypeWeights: { runner: 1.25 } },
+              fallback: { share: { runner: 0.35 } },
             },
             spawnBias: 'dwellNearest',
           },
@@ -281,7 +308,7 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
             extra: {
               archetype: 'climber',
               count: 2,
-              fallback: { archetypeWeights: { runner: 1.4 } },
+              fallback: { share: { runner: 0.45 } },
             },
             spawnBias: 'dwellNearest',
           },
@@ -306,8 +333,8 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
         key: 'default',
         signal: 'dwell',
         levels: [
-          { spawnBias: 'dwellNearest', archetypeWeights: { spitter: 1.25 } },
-          { spawnBias: 'dwellNearest', archetypeWeights: { spitter: 1.25, runner: 1.25 } },
+          { spawnBias: 'dwellNearest', share: { spitter: 0.2, runner: 0.25 } },
+          { spawnBias: 'dwellNearest', share: { spitter: 0.2, runner: 0.3 } },
         ],
       },
     ],
@@ -329,7 +356,10 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
       {
         key: 'default',
         signal: 'mobility',
-        levels: [{ archetypeWeights: { runner: 1.3 } }, { archetypeWeights: { runner: 1.5 } }],
+        levels: [
+          { share: { runner: 0.4 } },
+          { share: { runner: 0.45 }, spawnBias: 'dwellNearest' },
+        ],
       },
     ],
     threshold: { enter: 0.45, exit: 0.3 },
@@ -350,16 +380,18 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
         key: 'default',
         signal: 'closeRange',
         levels: [
-          { archetypeWeights: { tank: 1.3 } },
-          { archetypeWeights: { tank: 1.3 }, traitChance: { armored: 0.08 } },
+          { share: { tank: 0.35 }, traitShare: { armored: 0.15 } },
+          { share: { tank: 0.35 }, traitShare: { armored: 0.25 } },
         ],
       },
     ],
     threshold: { enter: 0.5, exit: 0.35 },
     ...COMMON,
+    // D-048: before wave 8 a Tank's cap and Armored's schedule left it nothing to do.
+    firstWave: 8,
     analysis: {
-      enter: 'You fight them up close. Heavier bodies are coming.',
-      escalate: 'They are arriving armoured.',
+      enter: 'You fight them up close. Heavier, armoured bodies are coming.',
+      escalate: 'Even more of them arrive armoured.',
       fade: 'You keep your distance. The heavy ones hang back.',
     },
   },
@@ -372,10 +404,7 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
       {
         key: 'default',
         signal: 'longRange',
-        levels: [
-          { archetypeWeights: { runner: 1.3 } },
-          { archetypeWeights: { runner: 1.3, screamer: 1.2 } },
-        ],
+        levels: [{ share: { runner: 0.35 } }, { share: { runner: 0.35, screamer: 0.15 } }],
       },
     ],
     threshold: { enter: 0.45, exit: 0.3 },
@@ -395,12 +424,14 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
       {
         key: 'default',
         signal: 'headshot',
-        levels: [{ traitChance: { helmeted: 0.08 } }, { traitChance: { helmeted: 0.12 } }],
+        levels: [{ traitShare: { helmeted: 0.15 } }, { traitShare: { helmeted: 0.25 } }],
       },
     ],
     threshold: { enter: 0.55, exit: 0.4 },
     gate: { signal: 'accuracy', min: 0.4 },
     ...COMMON,
+    // D-048: Helmeted is in the schedule from wave 8; before it, the answer would change nothing.
+    firstWave: 8,
     confidence: { enter: 0.65, exit: 0.4 },
     analysis: {
       enter: 'Your aim goes for the head. They are covering up.',
@@ -417,17 +448,17 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
       {
         key: 'burst',
         signal: 'weaponFocus.burst',
-        levels: [{ traitChance: { armored: 0.08 } }, { traitChance: { armored: 0.12 } }],
+        levels: [{ traitShare: { armored: 0.15 } }, { traitShare: { armored: 0.25 } }],
       },
       {
         key: 'automatic',
         signal: 'weaponFocus.automatic',
-        levels: [{ archetypeWeights: { tank: 1.25 } }, { archetypeWeights: { tank: 1.4 } }],
+        levels: [{ share: { tank: 0.3 } }, { share: { tank: 0.4 } }],
       },
       {
         key: 'precision',
         signal: 'weaponFocus.precision',
-        levels: [{ archetypeWeights: { runner: 1.25 } }, { archetypeWeights: { runner: 1.4 } }],
+        levels: [{ share: { runner: 0.35 } }, { share: { runner: 0.45 } }],
       },
     ],
     threshold: { enter: 0.75, exit: 0.55 },
@@ -450,12 +481,20 @@ export const ADAPTATIONS: Readonly<Record<AdaptationId, AdaptationConfig>> = {
       key: a,
       signal: `neglect.${a}`,
       subject: a,
-      levels: [{ subjectWeight: 1.3 }, { subjectWeight: 1.5 }],
+      // The subject at its per-wave cap, every wave: the cap is the limit, so one level.
+      levels: [{ subjectShare: 0.3 }, { subjectShare: 0.3 }],
+      // D-048: from when the cap allows more than the one a wave usually has (Screamers 2 from 9).
+      firstWave: NEGLECT_FIRST_WAVE[a],
     })),
     threshold: { enter: 0.6, exit: 0.4 },
     ...COMMON,
+    maxLevel: 1,
+    // Support zombies at their cap (frenzying Screamers, acid) are the heaviest answer: it stands
+    // alone (its pressure is the whole limit). Paired with anything, even at level 1, the survival
+    // tripwire's defender died on wave 12 (D-048).
+    pressure: [4, 4],
     analysis: {
-      enter: 'You let the {name}s do their work. More of them are coming.',
+      enter: 'You let the {name}s do their work. Every one the signal allows is coming.',
       escalate: 'The {name}s are gathering.',
       fade: 'You hunt the {name}s first now. Fewer of them come.',
     },
@@ -472,6 +511,11 @@ export const ADAPTATION_GUARDRAILS = {
   minWavesOfEvidence: 2,
   /** Most adaptations active at once (from different families). */
   maxActiveAdaptations: 2,
+  /**
+   * Most combined pressure of the active adaptations (D-048; levels count 1 and 2 by default):
+   * two at level 2, but a heavy answer (NEGLECT) alone.
+   */
+  maxPressure: 4,
   /** Level 2 needs this confidence and this many waves at level 1, and no strain. */
   escalate: { confidence: 0.85, afterWaves: 2 },
   /** Evidence from archetypes an active adaptation brought counts this much toward its own signal. */

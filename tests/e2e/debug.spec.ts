@@ -97,6 +97,7 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'clearAdaptation',
     'setAdaptive',
     'feedEvidence',
+    'adaptationScenario',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }

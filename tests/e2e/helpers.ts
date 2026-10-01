@@ -91,6 +91,9 @@ export interface WaveSnapshot {
   readonly endless: boolean;
   readonly spawningPaused: boolean;
   readonly composition: Record<string, number> | null;
+  /** What has actually spawned this wave (Phase 8.1 evidence). */
+  readonly spawnedComposition: Record<string, number>;
+  readonly spawnedTraits: Record<string, number>;
   readonly mutation: string | null;
   readonly surges: {
     readonly done: number;
@@ -278,6 +281,38 @@ export interface AdaptationSnapshot {
   readonly telemetry: { wave: number; samples: number; elevated: number };
   /** The last wave's reading per signal (score, weight). */
   readonly lastEvidence: Readonly<Record<string, { score: number; weight: number }>> | null;
+  /** The wave the adaptations shape, with and without them (Phase 8.1). */
+  readonly nextWave: NextWaveReport;
+}
+
+/** A wave's make-up (`tls.adaptation().nextWave`). */
+export interface WaveMakeup {
+  readonly composition: Record<string, number>;
+  readonly traits: Record<string, number>;
+  readonly total: number;
+  readonly spent: number;
+  readonly spawnBias: readonly string[];
+}
+
+/** `tls.adaptation().nextWave` and `tls.adaptationScenario()`. */
+export interface NextWaveReport {
+  readonly wave: number;
+  readonly seed: string;
+  readonly mutation: string | null;
+  readonly budget: number;
+  readonly adapted: WaveMakeup;
+  readonly reference: WaveMakeup;
+  readonly delta: Record<string, number>;
+  readonly perAdaptation: readonly {
+    id: string;
+    key: string;
+    level: number;
+    delta: Record<string, number>;
+    affected: boolean;
+  }[];
+  readonly generated: boolean;
+  readonly matchesGenerated: boolean | null;
+  readonly spawned: { composition: Record<string, number>; traits: Record<string, number> } | null;
 }
 
 /** The `window.tls` commands used by the specs (see src/debug/installDebug.ts). */
@@ -287,6 +322,7 @@ export interface TlsApi {
   clearAdaptation(): AdaptationSnapshot;
   setAdaptive(enabled?: boolean): boolean;
   feedEvidence(signal: string, score: number, waves?: number): AdaptationSnapshot;
+  adaptationScenario(id: string, level?: 1 | 2, key?: string, wave?: number): NextWaveReport;
   inspect(): DevHandles;
   help(): readonly { name: string; available: boolean }[];
   state(): unknown;

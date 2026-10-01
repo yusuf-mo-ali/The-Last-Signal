@@ -24,7 +24,7 @@ import {
 import { Rng } from '../utils/Rng';
 import { mutationRng, selectMutation } from './WaveMutation';
 import { generateWave } from './WaveGenerator';
-import { eliteMax, isUnlocked, waveCap } from './WaveDifficulty';
+import { eliteMax, isUnlocked, traitChance, waveCap } from './WaveDifficulty';
 
 /** Every live adaptation variant at level 2. */
 const SINGLES: ActiveAdaptation[] = ADAPTATION_IDS.filter((id) => !ADAPTATIONS[id].status).flatMap(
@@ -127,7 +127,9 @@ describe('adaptation shapes the mix and nothing else (D-026, D-047)', () => {
     }
   });
 
-  it('never more bodies: the mean count stays within ×0.85–1.1 and the most within ×1.1', () => {
+  // D-048: quotas buy dearer enemies (Tanks, Runners, armour) out of the same budget, so a wave may
+  // have fewer bodies, never more.
+  it('never more bodies: the mean count stays within ×0.7–1.1 and the most within ×1.1', () => {
     for (const wave of [5, 8, 10, 12, 15, 19, 25, 30]) {
       const seeds = Array.from({ length: 150 }, (_, i) => `s${i}`);
       const baseCounts = seeds.map((seed) => generateWave(wave, { seed }).spawns.length);
@@ -137,7 +139,7 @@ describe('adaptation shapes the mix and nothing else (D-026, D-047)', () => {
         const modifiers = composeModifiers(pair, { wave, dwellRegions: ['west'] });
         const counts = seeds.map((seed) => generateWave(wave, { seed, modifiers }).spawns.length);
         const mean = counts.reduce((a, b) => a + b, 0) / seeds.length;
-        expect(mean / baseMean, `wave ${wave} ${label(pair)}`).toBeGreaterThanOrEqual(0.85);
+        expect(mean / baseMean, `wave ${wave} ${label(pair)}`).toBeGreaterThanOrEqual(0.7);
         expect(mean / baseMean, `wave ${wave} ${label(pair)}`).toBeLessThanOrEqual(1.1);
         expect(Math.max(...counts), `wave ${wave} ${label(pair)}`).toBeLessThanOrEqual(
           Math.ceil(baseMax * 1.1),
@@ -237,6 +239,116 @@ describe('adaptation shapes the mix and nothing else (D-026, D-047)', () => {
           history.push(picked);
           expect(MUTATIONS[picked].status).toBe('enabled');
         }
+      }
+    }
+  });
+});
+
+describe('D-048: every adaptation leaves its signature on every wave it may act on', () => {
+  /** Every live variant at each level its adaptation allows. */
+  const LEVELS: ActiveAdaptation[] = ADAPTATION_IDS.filter((id) => !ADAPTATIONS[id].status).flatMap(
+    (id) =>
+      ADAPTATIONS[id].variants.flatMap((v) =>
+        ([1, 2] as const)
+          .filter((level) => level <= (ADAPTATIONS[id].maxLevel ?? 2))
+          .map((level) => ({ id, key: v.key, level, since: 5, levelSince: 5 })),
+      ),
+  );
+  const spend = (def: WaveDefinition, a: ImplementedEnemyId) =>
+    def.spawns.reduce((sum, s) => sum + (s.archetype === a ? s.cost : 0), 0);
+  const capOf = (a: ImplementedEnemyId, wave: number) => waveCap(a, wave, WAVE_RULES);
+
+  it('quotas hold on every seed: the share, the cap, the trait share, the Climbers; never a no-op', () => {
+    for (const a of LEVELS) {
+      const config = ADAPTATIONS[a.id];
+      const variant = config.variants.find((v) => v.key === a.key);
+      const from = Math.max(variant?.firstWave ?? config.firstWave, config.firstWave);
+      for (let wave = from; wave <= 30; wave++) {
+        if (wave === FINAL_WAVE) {
+          continue;
+        }
+        const modifiers = composeModifiers([a], { wave, dwellRegions: ['west'] });
+        const m = modifiers[0];
+        const where = `${a.id}/${a.key} L${a.level} wave ${wave}`;
+        expect(m, where).toBeDefined();
+        for (let s = 0; s < 40; s++) {
+          const seed = `sig-${s}`;
+          const base = generateWave(wave, { seed });
+          const def = generateWave(wave, { seed, modifiers });
+          // Never a silent no-op: the wave differs from the unadapted one.
+          expect(
+            JSON.stringify(def.spawns) !== JSON.stringify(base.spawns) ||
+              def.spawnBias.join() !== base.spawnBias.join(),
+            `${where} ${seed}`,
+          ).toBe(true);
+          for (const [id, share] of Object.entries(m?.archetypeShares ?? {}) as [
+            ImplementedEnemyId,
+            number,
+          ][]) {
+            if (!isUnlocked(id, wave, WAVE_RULES)) {
+              continue;
+            }
+            const capped = count(def, id) >= capOf(id, wave);
+            expect(
+              capped || spend(def, id) >= share * def.enemyBudget - 1e-6,
+              `${where} ${seed}: ${id} quota ${share}`,
+            ).toBe(true);
+          }
+          for (const [t, extra] of Object.entries(m?.traitShares ?? {}) as [
+            'armored' | 'helmeted',
+            number,
+          ][]) {
+            const eligible = def.spawns.filter((sp) => sp.archetype !== 'climber');
+            const have = eligible.filter((sp) => sp.traits.includes(t)).length;
+            // A running quota on top of the rolls: at least that share carries it (within one
+            // enemy: the last points may not pay for it), and never less than the schedule.
+            expect(have, `${where} ${seed}: ${t}`).toBeGreaterThanOrEqual(
+              Math.ceil(extra * eligible.length - 1e-9) - 1,
+            );
+            const baseEligible = base.spawns.filter((sp) => sp.archetype !== 'climber');
+            const baseHave = baseEligible.filter((sp) => sp.traits.includes(t)).length;
+            expect(have / eligible.length, `${where} ${seed}: ${t} share`).toBeGreaterThanOrEqual(
+              Math.min(baseHave / baseEligible.length, traitChance(t, wave)),
+            );
+          }
+          if (m?.extraCounts?.climber) {
+            expect(count(def, 'climber'), where).toBe(m.extraCounts.climber);
+          }
+          // The budget is the same, spent within one point.
+          expect(def.enemyBudget).toBe(base.enemyBudget);
+          expect(def.budgetSpent).toBeLessThanOrEqual(def.enemyBudget + 1e-6);
+          expect(def.budgetSpent).toBeGreaterThan(def.enemyBudget - 1);
+        }
+      }
+    }
+  });
+
+  it('quotas are clamped and only ever honoured from the adaptive source', () => {
+    const greedy: CompositionModifier = {
+      source: 'adaptive',
+      archetypeShares: { runner: 0.9, tank: 0.9, spitter: 0.9 },
+      traitShares: { helmeted: 0.9, armored: 0.9 },
+    };
+    const clamp = WAVE_RULES.modifierClamp.adaptive;
+    for (const seed of ['q1', 'q2', 'q3', 'q4']) {
+      const def = generateWave(15, { seed, modifiers: [greedy] });
+      // Total quota at most shareTotal of the budget (+ one enemy's overshoot each), and the Walker
+      // floor still holds; caps hold.
+      expect(spend(def, 'walker')).toBeGreaterThanOrEqual(
+        WAVE_RULES.minWalkerShare * def.enemyBudget,
+      );
+      expect(count(def, 'tank')).toBeLessThanOrEqual(capOf('tank', 15));
+      expect(count(def, 'spitter')).toBeLessThanOrEqual(capOf('spitter', 15));
+      const eligible = def.spawns.length;
+      const traitTotal = def.spawns.filter((sp) => sp.traits.length > 0).length / eligible;
+      expect(traitTotal).toBeLessThanOrEqual(
+        traitChance('armored', 15) + traitChance('helmeted', 15) + clamp.traitShareTotal + 0.35,
+      );
+      // From any other source a quota is ignored.
+      for (const source of ['mutation', 'debug'] as const) {
+        expect(generateWave(15, { seed, modifiers: [{ ...greedy, source }] }).spawns).toEqual(
+          generateWave(15, { seed }).spawns,
+        );
       }
     }
   });

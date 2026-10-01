@@ -8,12 +8,16 @@
  *   confidence, its gate fails, or it has shaped `maxActiveWaves` waves (then it rests
  *   `cooldownWaves`);
  * - **drops to level 1** while the strain governor is on;
- * - **escalates** to level 2 after `escalate.afterWaves` waves at level 1 with high confidence;
+ * - **escalates** to level 2 after `escalate.afterWaves` waves at level 1 with high confidence
+ *   (unless its `maxLevel` is 1, or the active adaptations' combined pressure would pass
+ *   `maxPressure`, D-048);
  * - otherwise stays.
  *
- * Then, from wave `firstAdaptiveWave` and with `minWavesOfEvidence` fought waves, adaptations whose
+ * Then, from wave `firstAdaptiveWave` (and each adaptation's and variant's own `firstWave`, from
+ * which its answer acts, D-048) and with `minWavesOfEvidence` fought waves, adaptations whose
  * signal and confidence are at or above their enter thresholds may **enter** at level 1, by
- * priority, at most one per family and `maxActiveAdaptations` in all, unless the governor is on.
+ * priority, at most one per family and `maxActiveAdaptations` in all, within `maxPressure` (a
+ * heavy answer stands alone), unless the governor is on.
  * Nothing changes for the final wave: it gets no adaptation at all.
  */
 
@@ -26,6 +30,7 @@ import {
 } from '../config/adaptation';
 import { ENEMY_STATS } from '../config/enemies';
 import { FINAL_WAVE } from '../config/waves';
+import { pressureOf, totalPressure } from './compose';
 import { confidence, memoryOf } from './profile';
 import type {
   ActiveAdaptation,
@@ -73,11 +78,15 @@ function gatePasses(config: AdaptationConfig, profile: BehaviorProfile): boolean
 function enteringVariant(
   config: AdaptationConfig,
   profile: BehaviorProfile,
+  nextWave: number,
 ): AdaptationVariant | null {
   let best: AdaptationVariant | null = null;
   let bestConfidence = -1;
   let bestMean = -1;
   for (const v of [...config.variants].sort((a, b) => a.key.localeCompare(b.key))) {
+    if (nextWave < (v.firstWave ?? config.firstWave)) {
+      continue; // D-048: never announced before its answer can act
+    }
     const m = memoryOf(profile, v.signal);
     const c = confidence(m);
     if (m.mean < config.threshold.enter || c < config.confidence.enter) {
@@ -90,6 +99,14 @@ function enteringVariant(
     }
   }
   return best;
+}
+
+/** The combined pressure (D-048) if `a` went to level 2, with the others as they are. */
+function pressureAfterEscalating(active: readonly ActiveAdaptation[], a: ActiveAdaptation): number {
+  return active.reduce(
+    (sum, other) => sum + pressureOf(other.id === a.id ? { id: a.id, level: 2 } : other),
+    0,
+  );
 }
 
 /** Whether the strain governor is on (heavy damage, wave after wave). */
@@ -153,6 +170,8 @@ export function decide(
     }
     if (
       a.level === 1 &&
+      (config.maxLevel ?? 2) >= 2 &&
+      pressureAfterEscalating(state.active, a) <= g.maxPressure &&
       !governor &&
       c >= g.escalate.confidence &&
       memory.mean >= config.threshold.enter &&
@@ -178,7 +197,7 @@ export function decide(
       ) {
         continue;
       }
-      const variant = enteringVariant(config, profile);
+      const variant = enteringVariant(config, profile, nextWave);
       if (!variant || !gatePasses(config, profile)) {
         continue;
       }
@@ -188,6 +207,9 @@ export function decide(
       }
       if (active.length >= g.maxActiveAdaptations) {
         break;
+      }
+      if (totalPressure(active) + pressureOf({ id, level: 1 }) > g.maxPressure) {
+        continue; // D-048: a heavy answer stands alone
       }
       const entered: ActiveAdaptation = {
         id,

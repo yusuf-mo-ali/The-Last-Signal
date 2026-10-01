@@ -20,7 +20,7 @@
 
 import { Vector3 } from 'three';
 import type { CombatEvents } from '../combat/CombatSystem';
-import type { ImplementedEnemyId } from '../config/enemies';
+import type { EnemyModifierId, ImplementedEnemyId } from '../config/enemies';
 import { MUTATIONS, type MutationId } from '../config/mutations';
 import {
   WAVE_RULES,
@@ -85,6 +85,9 @@ export interface WaveStatus {
   readonly spawningPaused: boolean;
   /** The wave's Signal Mutation (D-045), if any. */
   readonly mutation: MutationId | null;
+  /** What has actually spawned this wave, by archetype and by trait (D-047 evidence). */
+  readonly spawnedComposition: Readonly<Partial<Record<ImplementedEnemyId, number>>>;
+  readonly spawnedTraits: Readonly<Partial<Record<EnemyModifierId, number>>>;
   /** Surges (extra spawn events): done of total, and one announced but not arrived yet. */
   readonly surges: {
     readonly done: number;
@@ -118,6 +121,8 @@ export class WaveManager implements FixedUpdateSystem {
   private head = 0;
   private readonly alive = new Set<string>();
   private spawnedCount = 0;
+  private spawnedByArchetype = new Map<ImplementedEnemyId, number>();
+  private spawnedByTrait = new Map<EnemyModifierId, number>();
   private killedCount = 0;
   /** Seconds of the intro (WAVE_START) or breather (WAVE_COMPLETE) left. */
   private timer = 0;
@@ -185,6 +190,8 @@ export class WaveManager implements FixedUpdateSystem {
       alive: this.alive.size,
       remaining: queued + this.alive.size,
       spawned: this.spawnedCount,
+      spawnedComposition: Object.fromEntries(this.spawnedByArchetype),
+      spawnedTraits: Object.fromEntries(this.spawnedByTrait),
       killed: this.killedCount,
       maxAlive: this.def?.maxAlive ?? 0,
       timer: this.timer,
@@ -203,6 +210,24 @@ export class WaveManager implements FixedUpdateSystem {
           : null,
       },
     };
+  }
+
+  /**
+   * Debug evidence (D-047): what generating wave `n` next would be given (the run seed and the
+   * mutation it would get), so a preview can rebuild it exactly. Changes nothing.
+   */
+  planFor(n: number): {
+    readonly wave: number;
+    readonly seed: string;
+    readonly mutation: MutationId | null;
+  } {
+    const wave = Math.max(1, Math.floor(n));
+    return { wave, seed: this.runSeed, mutation: this.mutationFor(wave) };
+  }
+
+  /** The wave `beginWave` generates next (a debug jump's target, else the one after this). */
+  get upcomingWave(): number {
+    return this.jumpTo ?? this.waveNumber + 1;
   }
 
   /** The mutations this run has met so far, by wave. */
@@ -309,6 +334,8 @@ export class WaveManager implements FixedUpdateSystem {
     this.head = 0;
     this.alive.clear();
     this.spawnedCount = 0;
+    this.spawnedByArchetype.clear();
+    this.spawnedByTrait.clear();
     this.killedCount = 0;
     this.timer = 0;
     this.activeTime = 0;
@@ -437,17 +464,8 @@ export class WaveManager implements FixedUpdateSystem {
     this.skipping = false;
     // A wave generated again (a debug jump within the intro) forgets its earlier mutation.
     this.mutationLog = this.mutationLog.filter((m) => m.wave !== this.waveNumber);
-    const forced = this.forcedMutation;
+    const mutation = this.mutationFor(this.waveNumber);
     this.forcedMutation = null;
-    const mutation =
-      forced === 'none' || !this.mutationsEnabled
-        ? null
-        : (forced ??
-          selectMutation(
-            this.waveNumber,
-            this.mutationLog.map((m) => m.id),
-            mutationRng(this.runSeed, this.waveNumber),
-          ));
     if (mutation) {
       this.mutationLog.push({ wave: this.waveNumber, id: mutation });
     }
@@ -467,6 +485,8 @@ export class WaveManager implements FixedUpdateSystem {
     this.surgePending = null;
     this.alive.clear();
     this.spawnedCount = 0;
+    this.spawnedByArchetype.clear();
+    this.spawnedByTrait.clear();
     this.killedCount = 0;
     this.activeTime = 0;
     this.pulled = null;
@@ -482,6 +502,22 @@ export class WaveManager implements FixedUpdateSystem {
     this.options.onPrepare?.(def);
     this.events.emit('waveStarting', { wave: this.waveNumber, definition: def });
     this.progress();
+  }
+
+  /** The mutation wave `n` gets when it is generated next (pure: changes nothing). */
+  private mutationFor(n: number): MutationId | null {
+    const forced = this.forcedMutation;
+    if (forced === 'none' || !this.mutationsEnabled) {
+      return null;
+    }
+    return (
+      forced ??
+      selectMutation(
+        n,
+        this.mutationLog.filter((m) => m.wave !== n).map((m) => m.id),
+        mutationRng(this.runSeed, n),
+      )
+    );
   }
 
   private activate(): void {
@@ -611,6 +647,13 @@ export class WaveManager implements FixedUpdateSystem {
       }
       spawned++;
       this.alive.add(enemy.id);
+      this.spawnedByArchetype.set(
+        entry.archetype,
+        (this.spawnedByArchetype.get(entry.archetype) ?? 0) + 1,
+      );
+      for (const t of entry.traits) {
+        this.spawnedByTrait.set(t, (this.spawnedByTrait.get(t) ?? 0) + 1);
+      }
       this.events.emit('enemySpawned', {
         wave: this.waveNumber,
         id: enemy.id,

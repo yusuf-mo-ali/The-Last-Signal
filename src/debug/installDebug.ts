@@ -15,6 +15,7 @@ import { Vector3, type Camera, type Scene } from 'three';
 import type { CombatSystem, DamagedEvent } from '../combat/CombatSystem';
 import type { TrainingRange } from '../combat/training/TrainingRange';
 import type { AdaptiveSystem } from '../adaptive/AdaptiveSystem';
+import { explainWave, makeupOf } from '../adaptive/inspect';
 import { confidence } from '../adaptive/profile';
 import { ADAPTATION_IDS, ADAPTATIONS, SIGNAL_IDS, type AdaptationId } from '../config/adaptation';
 import {
@@ -1316,10 +1317,68 @@ function registerAdaptiveCommands(commands: DebugCommands, context: DebugContext
         : null,
     };
   };
+  /**
+   * Evidence that the adaptation reaches the wave (Phase 8.1): the wave the frozen adaptations
+   * shape (the one in its intro or being fought, else the next), generated with and without them
+   * from the same seed and mutation, and — once generated — whether the real wave matches.
+   */
+  const nextWave = () => {
+    const state = context.game.state.current;
+    const generated = waves.definition;
+    const current = (state === 'WAVE_START' || state === 'WAVE_ACTIVE') && generated !== null;
+    const wave = current ? waves.wave : waves.upcomingWave;
+    const plan = waves.planFor(wave);
+    const s = adaptive.snapshot;
+    const explanation = explainWave({
+      wave,
+      seed: plan.seed,
+      mutation: current ? generated.mutation : plan.mutation,
+      active: s.enabled ? s.state.active : [],
+      dwellRegions: adaptive.dwellRegions,
+    });
+    return {
+      ...explanation,
+      generated: current,
+      matchesGenerated: current
+        ? JSON.stringify(makeupOf(generated)) === JSON.stringify(explanation.adapted)
+        : null,
+      spawned: current
+        ? {
+            composition: waves.status.spawnedComposition,
+            traits: waves.status.spawnedTraits,
+          }
+        : null,
+    };
+  };
   commands.register(
     'adaptation',
-    'The Adaptive system: signals (mean, evidence, persistence, confidence), active adaptations, rest timers, the next wave’s modifiers',
-    status,
+    'The Adaptive system: signals (mean, evidence, persistence, confidence), active adaptations, rest timers, the next wave’s modifiers, and `nextWave`: that wave generated with and without adaptation (delta per archetype and trait, what each adaptation changed, whether the real wave matches and what has spawned)',
+    () => ({ ...status(), nextWave: nextWave() }),
+  );
+  commands.register(
+    'adaptationScenario',
+    `Deterministic check: god mode, force an adaptation, start wave n with no mutation, and report the wave with and without it: tls.adaptationScenario(id, level?, key?, wave?) (then tls.wave().spawnedComposition counts what really spawns)`,
+    (id: string, level: 1 | 2 = 2, key?: string, wave = 8) => {
+      const a = ADAPTATIONS[adaptationArg(id)];
+      const variant = key ?? a.variants[0]?.key ?? 'default';
+      if (!a.variants.some((v) => v.key === variant)) {
+        throw new Error(
+          `${a.id} has no variant "${variant}" (${a.variants.map((v) => v.key).join(', ')})`,
+        );
+      }
+      const n = Math.max(1, Math.floor(wave));
+      if (context.playerHealth) {
+        context.playerHealth.godMode = true;
+      }
+      adaptive.clear();
+      adaptive.force(a.id, level === 2 ? 2 : 1, variant, n);
+      if (!waves.startWave(n, 'none')) {
+        throw new Error(
+          `Cannot start a wave in ${context.game.state.current} (start a run first)`,
+        );
+      }
+      return nextWave();
+    },
   );
   commands.register(
     'forceAdaptation',

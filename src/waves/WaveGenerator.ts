@@ -21,6 +21,13 @@
  * its own (`modifierClamp.adaptive`) before everything is clamped together, adds no Elite chance
  * and no trait before its schedule, never reaches the finale, and never touches the budget, the
  * Elite limits or the surges (those are a mutation's, D-045).
+ *
+ * Adaptive quotas (D-048): an adaptive `archetypeShares` entry is placed before the random fill
+ * (after the guarantees and counted extras, before the Walker floor) until that archetype has its
+ * share of the budget, within its unlock, cap and the budget; an adaptive `traitShares` entry is
+ * a running quota on top of the scheduled rolls: that share of the trait-eligible enemies gets
+ * the trait beyond what they rolled. Both hold on every seed, so the player sees them; neither
+ * ever changes the budget.
  */
 
 import {
@@ -237,6 +244,42 @@ export function generateWave(
   const counts = new Map<ImplementedEnemyId, number>();
   let remaining = budget;
 
+  // Adaptive trait shares (D-048): a running quota on top of the scheduled rolls. Each
+  // trait-eligible enemy that did not roll a trait, added while the trait's adaptive count is
+  // behind its extra share, gets it; so that share of the wave carries it beyond the schedule, on
+  // every seed (within one enemy, when the last points of budget cannot pay for it). No randomness
+  // is drawn for it; never Elite; only once the trait's schedule has started.
+  const traitShares = new Map<'armored' | 'helmeted', number>();
+  for (const m of fromAdaptive) {
+    for (const [key, extra] of Object.entries(m.traitShares ?? {})) {
+      // Armored and Helmeted only (never Elite, whatever the data says).
+      const t = key === 'armored' || key === 'helmeted' ? key : null;
+      if (t && wave >= rules.traits[t].from && extra > 0) {
+        traitShares.set(
+          t,
+          Math.max(traitShares.get(t) ?? 0, Math.min(extra, adaptiveClamp.traitShare)),
+        );
+      }
+    }
+  }
+  const traitShareExtra = [...traitShares.values()].reduce((sum, x) => sum + x, 0);
+  const traitShareScale =
+    traitShareExtra > adaptiveClamp.traitShareTotal
+      ? adaptiveClamp.traitShareTotal / traitShareExtra
+      : 1;
+  for (const [t, extra] of traitShares) {
+    traitShares.set(t, extra * traitShareScale);
+  }
+  let eligibleCount = 0;
+  const forcedCounts = new Map<EnemyModifierId, number>();
+  /** The traits the running quota adds to the next eligible enemy (beyond what it rolled). */
+  const quotaTraits = (rolled: readonly EnemyModifierId[]): EnemyModifierId[] =>
+    [...traitShares.entries()]
+      .filter(
+        ([t, share]) =>
+          !rolled.includes(t) && (forcedCounts.get(t) ?? 0) < share * (eligibleCount + 1) - EPSILON,
+      )
+      .map(([t]) => t);
   const rollTraits = (): EnemyModifierId[] => {
     const traits: EnemyModifierId[] = [];
     for (const t of ENEMY_MODIFIER_IDS) {
@@ -248,8 +291,17 @@ export function generateWave(
     return traits;
   };
   const add = (archetype: ImplementedEnemyId, withTraits: boolean): boolean => {
-    let traits = withTraits && !extras.has(archetype) ? rollTraits() : [];
+    const eligible = !extras.has(archetype);
+    const rolled = withTraits && eligible ? rollTraits() : [];
+    const required = eligible ? quotaTraits(rolled) : [];
+    // What it gets, dearest first; dropped down to what the budget can pay for: the rolled traits
+    // go first, then the required ones, then none.
+    let traits = normalizeTraits([...rolled, ...required]);
     let cost = spawnCost(archetype, traits);
+    if (cost > remaining + EPSILON && traits.length > 0) {
+      traits = normalizeTraits(required);
+      cost = spawnCost(archetype, traits);
+    }
     if (cost > remaining + EPSILON && traits.length > 0) {
       traits = [];
       cost = spawnCost(archetype, traits);
@@ -262,6 +314,14 @@ export function generateWave(
     }
     if (extras.has(archetype)) {
       extrasLeft--;
+    }
+    if (eligible) {
+      eligibleCount++;
+      for (const t of required) {
+        if (traits.includes(t)) {
+          forcedCounts.set(t, (forcedCounts.get(t) ?? 0) + 1);
+        }
+      }
     }
     spawns.push({ archetype, traits, cost });
     counts.set(archetype, (counts.get(archetype) ?? 0) + 1);
@@ -288,6 +348,39 @@ export function generateWave(
   for (const [a, n] of [...counted.entries()].sort((x, y) => x[0].localeCompare(y[0]))) {
     for (let i = 0; i < n && underCap(a) && add(a, false); i++) {
       // placed
+    }
+  }
+  // Adaptive quotas (D-048): each archetype's least share of the budget, the larger of two asks,
+  // clamped per archetype and in total; within its unlock, cap and the budget.
+  const quotas = new Map<ImplementedEnemyId, number>();
+  for (const m of fromAdaptive) {
+    for (const [a, share] of Object.entries(m.archetypeShares ?? {}) as [
+      EnemyArchetypeId,
+      number,
+    ][]) {
+      if (
+        isImplemented(a) &&
+        roster.includes(a) &&
+        isUnlocked(a, wave, rules) &&
+        Number.isFinite(share) &&
+        share > 0
+      ) {
+        quotas.set(a, Math.max(quotas.get(a) ?? 0, Math.min(share, adaptiveClamp.share)));
+      }
+    }
+  }
+  const quotaTotal = [...quotas.values()].reduce((sum, q) => sum + q, 0);
+  const quotaScale =
+    quotaTotal > adaptiveClamp.shareTotal ? adaptiveClamp.shareTotal / quotaTotal : 1;
+  for (const [a, share] of [...quotas.entries()].sort((x, y) => x[0].localeCompare(y[0]))) {
+    const target = share * quotaScale * budget;
+    let spent = spawns.reduce((sum, sp) => sum + (sp.archetype === a ? sp.cost : 0), 0);
+    while (spent + EPSILON < target && underCap(a)) {
+      const before = remaining;
+      if (!add(a, true)) {
+        break;
+      }
+      spent += before - remaining;
     }
   }
   const walkerFloor = rules.minWalkerShare * budget;
