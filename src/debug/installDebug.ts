@@ -33,6 +33,7 @@ import { GameStateId } from '../core/GameState';
 import type { InputState } from '../input/InputState';
 import type { PointerLock } from '../input/PointerLock';
 import type { EnemyManager } from '../enemies/EnemyManager';
+import type { EnemyProjectiles } from '../enemies/EnemyProjectiles';
 import type { TrainingEncounter } from '../enemies/TrainingEncounter';
 import type { EnemyTarget } from '../enemies/types';
 import type { Player } from '../player/Player';
@@ -56,6 +57,7 @@ import {
 } from '../config/mutations';
 import type { EffectRouter } from '../modifiers/EffectRouter';
 import type { ScreenEffects } from '../modifiers/ScreenEffects';
+import type { GlitchState } from '../render/GlitchPass';
 import type { SignalMutationSystem } from '../signal/SignalMutationSystem';
 import { mutationSchedule } from '../waves/WaveMutation';
 import type { Environment } from '../world/Environment';
@@ -110,6 +112,10 @@ export interface DebugContext {
   readonly effects?: EffectRouter;
   readonly environment?: Environment;
   readonly screenEffects?: ScreenEffects;
+  /** The Spitter's acid (D-046), for `tls.projectiles()`. */
+  readonly projectiles?: EnemyProjectiles;
+  /** Signal Glitch on screen (D-046): the pass's state, for `tls.mutation()`. */
+  readonly glitch?: () => GlitchState;
   /** View settings access, for `tls.view()`. */
   readonly getView?: () => ViewSettings;
   readonly applyView?: (settings: ViewSettings) => ViewSettings;
@@ -206,6 +212,7 @@ export function installDebug(context: DebugContext): DebugTools {
     ...(context.effects ? { effects: context.effects } : {}),
     ...(context.environment ? { environment: context.environment } : {}),
     ...(context.screenEffects ? { screenEffects: context.screenEffects } : {}),
+    ...(context.projectiles ? { projectiles: context.projectiles } : {}),
     ...context.extras,
   });
 
@@ -664,7 +671,9 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     ...(player ? [formatPlayer(player)] : []),
     ...(weapons ? [formatWeapons(weapons)] : []),
     ...(context.combat ? [formatCombat(context.combat, lastHit)] : []),
-    ...(context.enemies ? [formatEnemies(context.enemies, context.playerHealth)] : []),
+    ...(context.enemies
+      ? [formatEnemies(context.enemies, context.playerHealth, context.projectiles)]
+      : []),
     ...(context.waves?.isAttached ? [formatWaves(context.waves)] : []),
     ...(context.waves?.isAttached && context.mutations
       ? [formatMutation(context.mutations, context.waves, context.screenEffects)]
@@ -743,6 +752,8 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
       attacks: e.attacks,
       traits: [...e.config.traits],
       hasted: e.haste(enemies.now) > 1,
+      frenzied: e.frenzied(enemies.now) ? e.frenzyKind : null,
+      investigating: e.investigating,
     }));
   commands.register('enemies', 'Every enemy: state, health, position, target, attack', summary);
   commands.register('enemy', 'One enemy in detail: tls.enemy(id)', (id: string) => {
@@ -775,7 +786,21 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
         threatCost: round(e.config.threatCost),
         behavior: e.config.behavior,
         ability: e.config.ability ?? null,
+        preferredRange: e.config.preferredRange ?? null,
+        projectile: e.config.projectile ?? null,
       },
+      lastKnown: e.lastKnownTargetPosition.toArray().map(round),
+      frenzy: e.frenzied(enemies.now)
+        ? {
+            kind: e.frenzyKind,
+            left: round(e.frenzyUntil - enemies.now),
+            cooldownScale: e.frenzyCooldownScale,
+            windupScale: e.frenzyWindupScale,
+            turnScale: e.frenzyTurnScale,
+            staggerScale: e.frenzyStaggerScale,
+          }
+        : null,
+      cornered: e.cornered,
       plates: e.plates.map((plate) => ({
         id: plate.id,
         durability: round(plate.durability),
@@ -916,12 +941,31 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
   );
   commands.register(
     'forceAbility',
-    'Make an enemy use its attack or ability now (a Screamer screams), ignoring its cooldown: tls.forceAbility(id)',
+    'Make an enemy use its attack or ability now (a Screamer screams, a Spitter spits), ignoring its cooldown: tls.forceAbility(id)',
     (id: string) => enemies.forceAttack(id),
   );
   commands.register('killEnemy', 'Kill an enemy through combat: tls.killEnemy(id)', (id: string) =>
     enemies.kill(id),
   );
+  const projectiles = context.projectiles;
+  if (projectiles) {
+    commands.register(
+      'projectiles',
+      "The Spitter's acid in flight (position, velocity, age) and totals (fired, direct, splash, expired)",
+      () => ({
+        live: projectiles.slots
+          .filter((p) => p.active)
+          .map((p) => ({
+            id: p.id,
+            owner: p.ownerId,
+            position: p.position.toArray().map(round),
+            velocity: p.velocity.toArray().map(round),
+            age: round(p.age),
+          })),
+        ...projectiles.stats,
+      }),
+    );
+  }
   commands.register('killAll', 'Kill every living enemy', () => {
     let killed = 0;
     for (const e of enemies.enemies) {
@@ -1002,16 +1046,25 @@ function registerEnemyCommands(commands: DebugCommands, context: DebugContext): 
   };
 }
 
-function formatEnemies(enemies: EnemyManager, health: PlayerHealth | undefined): string {
+function formatEnemies(
+  enemies: EnemyManager,
+  health: PlayerHealth | undefined,
+  projectiles: EnemyProjectiles | undefined,
+): string {
   const counts = new Map<string, number>();
+  let frenzied = 0;
   for (const e of enemies.enemies) {
     counts.set(e.state, (counts.get(e.state) ?? 0) + 1);
+    if (e.alive && e.frenzied(enemies.now)) {
+      frenzied++;
+    }
   }
   const states = [...counts].map(([state, n]) => `${state} ${n}`).join(', ');
   const player = health
     ? `  player ${Math.ceil(health.current)}/${health.max}${health.godMode ? ' god' : ''}`
     : '';
-  return `enemies ${enemies.aliveCount} alive${states ? ` (${states})` : ''}${player}`;
+  const extra = `${frenzied > 0 ? ` · frenzied ${frenzied}` : ''}${projectiles && projectiles.count > 0 ? ` · acid ${projectiles.count}` : ''}`;
+  return `enemies ${enemies.aliveCount} alive${states ? ` (${states})` : ''}${extra}${player}`;
 }
 
 function registerWaveCommands(commands: DebugCommands, context: DebugContext): () => void {
@@ -1210,6 +1263,7 @@ function registerMutationCommands(commands: DebugCommands, context: DebugContext
       screenEffects?.nextIn === null || !screenEffects ? null : round(screenEffects.nextIn),
     surges: waves.status.surges,
     history: waves.mutations,
+    glitch: context.glitch?.() ?? null,
   });
   commands.register(
     'mutation',

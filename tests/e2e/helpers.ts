@@ -34,6 +34,9 @@ import type { Environment } from '../../src/world/Environment';
 import type { ScreenEffects } from '../../src/modifiers/ScreenEffects';
 import type { EffectRouter } from '../../src/modifiers/EffectRouter';
 import type { LightingController } from '../../src/world/LightingController';
+import type { EnemyProjectiles } from '../../src/enemies/EnemyProjectiles';
+import type { ProjectileView } from '../../src/enemies/ProjectileView';
+import type { WorldView } from '../../src/world/WorldView';
 
 /** What `tls.inspect()` returns in development builds (see src/debug/installDebug.ts). */
 export interface DevHandles {
@@ -66,6 +69,9 @@ export interface DevHandles {
   readonly environment: Environment;
   readonly screenEffects: ScreenEffects;
   readonly lighting: LightingController;
+  readonly projectiles: EnemyProjectiles;
+  readonly projectileView: ProjectileView;
+  readonly view: WorldView;
 }
 
 /** What `tls.wave()` returns. */
@@ -110,6 +116,14 @@ export interface MutationSnapshot {
   readonly staticBurst: { readonly until: number; readonly intensity: number } | null;
   readonly nextBurstIn: number | null;
   readonly history: { readonly wave: number; readonly id: string }[];
+  /** Signal Glitch on screen (D-046). */
+  readonly glitch: {
+    readonly active: boolean;
+    readonly intensity: number;
+    readonly step: number;
+    readonly steps: number;
+    readonly frames: number;
+  } | null;
 }
 
 /** One entry of `tls.spawnPoints()`. */
@@ -206,6 +220,10 @@ export interface EnemySnapshot {
   readonly attacks: number;
   readonly traits: string[];
   readonly hasted: boolean;
+  /** What frenzied it, while it is frenzied (D-046). */
+  readonly frenzied: 'scream' | 'deathCry' | null;
+  /** Rushing where a death cry said the player was (D-046). */
+  readonly investigating: boolean;
 }
 
 /** What `tls.playerHealth()` (and the other player-health commands) return. */
@@ -295,6 +313,13 @@ export interface TlsApi {
   applyTrait(id: string, trait: string): string[];
   removeTrait(id: string, trait: string): string[];
   forceAbility(id: string): boolean;
+  projectiles(): {
+    live: { id: number; owner: string; position: number[]; velocity: number[]; age: number }[];
+    fired: number;
+    direct: number;
+    splash: number;
+    expired: number;
+  };
   killEnemy(id: string): boolean;
   killAll(): number;
   damageEnemy(id: string, amount?: number): { health: number; killed: boolean } | null;
