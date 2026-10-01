@@ -101,15 +101,20 @@ test.describe('adaptation (development build)', () => {
     const a = await adaptation(page);
     expect(a.active.map((x) => x.id)).toContain('HIGH_GROUND');
     expect(a.forWave).toBe(8);
+    // The mutation wave 8 will draw, from the run's own history (adaptation never enters it).
+    expect(a.nextWave.wave).toBe(8);
+    const drawn = a.nextWave.mutation;
     // Wave 8: the Climber arrives with it (adaptive unlock 8); the card is gone.
     await page.evaluate(() => window.tls!.skipWaveTimer());
     await expect.poll(async () => (await wave(page)).wave).toBe(8);
     expect((await wave(page)).composition?.climber).toBeGreaterThanOrEqual(1);
     await frames(page, 3);
     expect((await analysis(page))?.shown).toBe(false);
-    // The mutations are exactly the run's schedule (adaptation never touches them).
+    // The mutations are the run's own (adaptation never touches them). After the debug jump to
+    // wave 7 the history differs from a full run's, so wave 8 is compared with the draw announced
+    // in the breather, not with the full-run schedule.
     expect(await page.evaluate(() => window.tls!.mutationSchedule(1, 20))).toEqual(schedule);
-    expect((await wave(page)).mutation ?? '—').toBe(schedule[8]);
+    expect((await wave(page)).mutation).toBe(drawn);
     expect(issues.problems()).toEqual([]);
   });
 
@@ -165,6 +170,67 @@ test.describe('adaptation (development build)', () => {
       })
       .toBeLessThan(0.3);
     expect(await programs(page)).toBe(before);
+    expect(issues.problems()).toEqual([]);
+  });
+
+  test('Phase 8.1: what the horde announces is what spawns — Climbers, then a Runner-heavy wave', async ({
+    page,
+    issues,
+  }) => {
+    test.setTimeout(300_000);
+    await play(page);
+    /** Plays the current wave out (god mode), killing wave enemies as they arrive. */
+    const playOut = async () => {
+      await page.evaluate(() => window.tls!.skipWaveTimer());
+      await expect
+        .poll(
+          async () => {
+            await page.evaluate(() => window.tls!.killAll());
+            return (await wave(page)).state;
+          },
+          { timeout: 180_000, intervals: [500] },
+        )
+        .toBe('WAVE_COMPLETE');
+      return wave(page);
+    };
+
+    // 1. HIGH_GROUND at level 2 on wave 8: two Climbers predicted against a wave with none.
+    const high = await page.evaluate(() =>
+      window.tls!.adaptationScenario('HIGH_GROUND', 2, 'default', 8),
+    );
+    expect(high.generated).toBe(true);
+    expect(high.matchesGenerated).toBe(true);
+    expect(high.adapted.composition.climber).toBe(2);
+    expect(high.reference.composition.climber ?? 0).toBe(0);
+    expect(high.delta.climber).toBe(2);
+    expect(high.perAdaptation[0]?.affected).toBe(true);
+    // Both Climbers really spawn in normal play, and everything else spawns as generated.
+    const highPlayed = await playOut();
+    expect(highPlayed.spawnedComposition.climber).toBe(2);
+    expect(highPlayed.spawnedComposition).toEqual(high.adapted.composition);
+
+    // 2. SKIRMISHER at level 2 on wave 9: a visibly Runner-heavy wave (its quota of the budget).
+    const runners = await page.evaluate(() =>
+      window.tls!.adaptationScenario('SKIRMISHER', 2, 'default', 9),
+    );
+    expect(runners.matchesGenerated).toBe(true);
+    const adaptedRunners = runners.adapted.composition.runner ?? 0;
+    expect(adaptedRunners).toBeGreaterThanOrEqual((runners.reference.composition.runner ?? 0) + 2);
+    expect(adaptedRunners * 1.5).toBeGreaterThanOrEqual(0.45 * runners.budget);
+    expect(runners.adapted.spent).toBeLessThanOrEqual(runners.budget);
+    expect(runners.reference.spent).toBeLessThanOrEqual(runners.budget);
+    const runnersPlayed = await playOut();
+    expect(runnersPlayed.spawnedComposition.runner).toBe(adaptedRunners);
+    expect(runnersPlayed.spawnedComposition).toEqual(runners.adapted.composition);
+    expect(runnersPlayed.spawnedTraits).toEqual(runners.adapted.traits);
+    // Switched off, the same wave is exactly the unadapted one.
+    await page.evaluate(() => window.tls!.setAdaptive(false));
+    const off = await page.evaluate(() => {
+      window.tls!.startWave(9, 'none');
+      return window.tls!.adaptation().nextWave;
+    });
+    expect(off.adapted).toEqual(runners.reference);
+    expect(off.matchesGenerated).toBe(true);
     expect(issues.problems()).toEqual([]);
   });
 
