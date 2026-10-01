@@ -16,39 +16,26 @@
  * response: nearby enemies are told where the target is, hastened and frenzied, D-046).
  */
 
-import { Vector3 } from 'three';
 import { countDown, TIMER_EPSILON } from '../../weapons/timing';
 import type { Enemy } from '../Enemy';
 import type { EnemyTarget } from '../types';
 import type { BrainContext, EnemyBrain } from './brain';
 import {
   alertTo,
-  checkProgress,
   cooldownOf,
   enterIdle,
-  followPath,
   horizontalDistance,
   perceive,
-  planChase,
   resetPose,
   stagger,
   thinkIdle,
+  thinkStandoff,
   transition,
   updatePatrol,
+  updateStandoff,
   windupOf,
   yawToward,
 } from './common';
-
-/** Metres per retreat step. */
-const RETREAT_STEP = 3;
-/** Directions tried when backing away: straight away first, then veering off (radians). */
-const RETREAT_ANGLES = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2];
-
-const _away = new Vector3();
-
-function band(enemy: Enemy): { min: number; max: number } {
-  return enemy.config.preferredRange ?? { min: 0, max: enemy.config.attackRange * 0.8 };
-}
 
 function canUseAbility(enemy: Enemy, target: EnemyTarget): boolean {
   const pos = enemy.motor.position;
@@ -105,22 +92,6 @@ function release(enemy: Enemy, ctx: BrainContext): void {
   });
 }
 
-/** Where to back away to: a walkable point away from the target, or none (stand its ground). */
-function planRetreat(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
-  const pos = enemy.motor.position;
-  const away = yawToward(target.position, pos);
-  for (const offset of RETREAT_ANGLES) {
-    const yaw = away + offset;
-    _away.set(pos.x - Math.sin(yaw) * RETREAT_STEP, pos.y, pos.z - Math.cos(yaw) * RETREAT_STEP);
-    if (ctx.lines.walkable(pos, _away, enemy.config.body.radius)) {
-      enemy.patrolPoint.copy(_away);
-      enemy.retreating = true;
-      return;
-    }
-  }
-  enemy.retreating = false;
-}
-
 function recover(enemy: Enemy, ctx: BrainContext): void {
   if (enemy.target) {
     transition(enemy, 'CHASE');
@@ -143,20 +114,7 @@ export const screamerBrain: EnemyBrain = {
     if (enemy.state !== 'CHASE' || !target) {
       return;
     }
-    const d = horizontalDistance(enemy.motor.position, target.position);
-    const { min, max } = band(enemy);
-    if (!enemy.canSeeTarget || d > max) {
-      enemy.retreating = false;
-      planChase(enemy, ctx, target);
-    } else if (d < min) {
-      if (!enemy.retreating) {
-        planRetreat(enemy, ctx, target);
-      }
-    } else {
-      enemy.retreating = false;
-      enemy.navMode = 'none';
-    }
-    checkProgress(enemy, ctx);
+    thinkStandoff(enemy, ctx, target);
   },
 
   update(enemy, ctx) {
@@ -203,21 +161,7 @@ export const screamerBrain: EnemyBrain = {
           startAbility(enemy, ctx, target);
           break;
         }
-        const d = horizontalDistance(pos, target.position);
-        const { min, max } = band(enemy);
-        if (enemy.retreating) {
-          if (d >= min || horizontalDistance(pos, enemy.patrolPoint) < ctx.rules.arrivalRadius) {
-            enemy.retreating = false;
-            enemy.faceYaw = yawToward(pos, target.position);
-          } else {
-            enemy.moveGoal.copy(enemy.patrolPoint);
-            enemy.moveSpeed = 1;
-          }
-        } else if (enemy.canSeeTarget && d <= max) {
-          enemy.faceYaw = yawToward(pos, target.position); // hold its ground
-        } else {
-          followPath(enemy, ctx, target, max * 0.9);
-        }
+        updateStandoff(enemy, ctx, target);
         break;
       }
 

@@ -148,7 +148,7 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
         on: 'enemy:died',
         action: 'deathCry',
         params: {
-          radius: 9,
+          radius: 8,
           alertDuration: 6,
           hasteMultiplier: 1.25,
           hasteDuration: 3,
@@ -173,7 +173,7 @@ export const MUTATIONS: Readonly<Record<MutationId, MutationConfig>> = {
     effects: [
       {
         kind: 'spawnRule',
-        composition: { budgetMultiplier: 1.2 },
+        composition: { budgetMultiplier: 1.15 },
         surges: { at: [0.5], extraGroupSize: 1, warning: 2 },
       },
     ],

@@ -11,6 +11,7 @@ import { CombatSystem } from './combat/CombatSystem';
 import { TrainingDummyView } from './combat/training/TrainingDummyView';
 import { TrainingRange } from './combat/training/TrainingRange';
 import { EnemyManager } from './enemies/EnemyManager';
+import { EnemyProjectiles } from './enemies/EnemyProjectiles';
 import { EnemyView } from './enemies/EnemyView';
 import { TrainingEncounter } from './enemies/TrainingEncounter';
 import { boundKeyCodes, DEFAULT_BINDINGS } from './config/input';
@@ -202,6 +203,18 @@ function boot(app: HTMLElement): () => void {
     strict: import.meta.env.DEV,
     modifiers: stats, // HUNGER (D-045)
   });
+  // The Spitter's acid (D-046): flown in fixed steps right after the enemies; every hit goes
+  // through the player's health rules (D-029).
+  const projectiles = new EnemyProjectiles({
+    world: world.collision,
+    targets: () => [playerTarget],
+    active: playing,
+    killPlaneY: FACILITY.killPlaneY,
+    enemyEvents: enemies.events,
+  });
+  cleanups.push(() => {
+    projectiles.dispose();
+  });
   // Waves (D-044): the run's waves, entering at fair spawn points. The wave runtime steps before
   // the enemies, so a group spawned this step moves with everyone else.
   const spawns = new SpawnDirector({
@@ -241,6 +254,7 @@ function boot(app: HTMLElement): () => void {
   game.addSystem(environment); // overlay fades, in simulated time
   game.addSystem(screenEffects); // STATIC's burst schedule
   game.addSystem(enemies);
+  game.addSystem(projectiles);
   // The Phase 4–5 test encounter: only in the sandbox (`?sandbox=1`) now that waves exist.
   const encounter = new TrainingEncounter({ enemies, active: playing });
   if (sandbox) {
@@ -318,6 +332,7 @@ function boot(app: HTMLElement): () => void {
       playerHealth.reset();
       weapons.reset();
       enemies.clear();
+      projectiles.clear();
       if (sandbox) {
         encounter.reset();
         training.reset();
@@ -349,6 +364,16 @@ function boot(app: HTMLElement): () => void {
     }),
     game.state.onEnter('VICTORY', () => {
       pointerLock.exit(); // the cursor back, and the "Signal transmitted" prompt
+    }),
+    // No acid outlives its wave, or the run.
+    game.state.onEnter('WAVE_COMPLETE', () => {
+      projectiles.clear();
+    }),
+    game.state.onEnter('GAME_OVER', () => {
+      projectiles.clear();
+    }),
+    game.state.onEnter('VICTORY', () => {
+      projectiles.clear();
     }),
   );
   cleanups.push(

@@ -164,6 +164,44 @@ describe('wave generator: properties over waves 1–200 × 30 seeds', () => {
   });
 });
 
+describe('wave generator: the Spitter (D-046)', () => {
+  it('arrives on wave 10 alone, then a few at most; never in the opening; spend unchanged', () => {
+    let later = 0;
+    for (const [seed, n, def] of allWaves()) {
+      const c = count(def, 'spitter');
+      if (n < 10) {
+        expect(c, `${seed} wave ${n}`).toBe(0);
+      } else if (n === 10) {
+        expect(c, `${seed} wave ${n}`).toBe(1);
+      } else if (n <= FINAL_WAVE) {
+        expect(c, `${seed} wave ${n}`).toBeLessThanOrEqual(1 + Math.floor((n - 10) / 5));
+        later += c;
+      }
+      const opening = Math.ceil(def.spawns.length * WAVE_RULES.openingShare);
+      for (const s of def.spawns.slice(0, opening)) {
+        expect(s.archetype, `${seed} wave ${n} opening`).not.toBe('spitter');
+      }
+    }
+    // It is a regular from then on, not a one-off.
+    expect(later).toBeGreaterThan(SEEDS.length * 3);
+  });
+
+  it('waves 1–9 are exactly what they were before the Spitter', () => {
+    // The Spitter's unlock is the only new rule before it: earlier waves spend the same budget on
+    // the same roster as Phase 7 (no Spitter weight, cap or theme reaches them).
+    for (const seed of SEEDS.slice(0, 5)) {
+      for (let n = 1; n <= 9; n++) {
+        const def = generateWave(n, { seed });
+        const without = generateWave(n, {
+          seed,
+          roster: DEFAULT_ROSTER.filter((a) => a !== 'spitter'),
+        });
+        expect(def.spawns, `${seed} wave ${n}`).toEqual(without.spawns);
+      }
+    }
+  });
+});
+
 describe('wave generator: determinism and themes', () => {
   it('the same seed and wave give the same wave, in any generation order', () => {
     const a = generateWave(12, { seed: 'run' });

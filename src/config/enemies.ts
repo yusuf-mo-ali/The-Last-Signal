@@ -50,17 +50,25 @@ export const AI_STATES = [
 ] as const;
 export type AiState = (typeof AI_STATES)[number];
 
-export const ENEMY_ARCHETYPE_IDS = ['walker', 'runner', 'tank', 'screamer', 'climber'] as const;
+export const ENEMY_ARCHETYPE_IDS = [
+  'walker',
+  'runner',
+  'tank',
+  'screamer',
+  'spitter',
+  'climber',
+] as const;
 export type EnemyArchetypeId = (typeof ENEMY_ARCHETYPE_IDS)[number];
 
 export const ENEMY_MODIFIER_IDS = ['armored', 'helmeted', 'elite'] as const;
 export type EnemyModifierId = (typeof ENEMY_MODIFIER_IDS)[number];
 
 /**
- * Generic behaviours an archetype can use (enemies/ai, D-043): the melee chaser (Walker, Runner,
- * Tank) and the support caster that keeps its distance and uses an ability (Screamer).
+ * Generic behaviours an archetype can use (enemies/ai, D-043, D-046): the melee chaser (Walker,
+ * Runner, Tank), the support caster that keeps its distance and uses an ability (Screamer), and
+ * the ranged attacker that keeps its distance and throws a projectile (Spitter).
  */
-export const ENEMY_BEHAVIOR_IDS = ['melee', 'screamer'] as const;
+export const ENEMY_BEHAVIOR_IDS = ['melee', 'screamer', 'ranged'] as const;
 export type EnemyBehaviorId = (typeof ENEMY_BEHAVIOR_IDS)[number];
 
 /**
@@ -154,8 +162,31 @@ export interface EnemyArchetypeConfig {
     readonly minDistance: number;
     readonly maxDistance: number;
   };
-  /** Keeps its distance (Screamer): backs away inside `min`, closes in beyond `max`. Metres. */
-  readonly preferredRange?: { readonly min: number; readonly max: number };
+  /**
+   * Keeps its distance (Screamer, Spitter): closes in beyond `max`, holds between `min` and `max`,
+   * and backs away once the target is closer than `retreat` (default `min`) until it is at `min`
+   * again. Metres.
+   */
+  readonly preferredRange?: {
+    readonly min: number;
+    readonly max: number;
+    readonly retreat?: number;
+  };
+  /**
+   * What a ranged attack throws (Spitter, D-046): at the end of the wind-up one projectile is
+   * lobbed on a low arc at where the target is then (no lead), so moving dodges it. A direct hit
+   * deals `damage`; hitting the level, it splashes `splashDamage` within `splashRadius` (not
+   * through walls). It never hits other enemies. Metres, seconds, m/s, m/s².
+   */
+  readonly projectile?: {
+    readonly speed: number;
+    readonly gravity: number;
+    readonly radius: number;
+    readonly damage: number;
+    readonly splashDamage: number;
+    readonly splashRadius: number;
+    readonly lifetime: number;
+  };
   /**
    * What its attack does when it is not a melee hit. `scream`: at the end of the wind-up it raises
    * an alarm (a generic `alarm` event) heard within `radius`; the wind-up, cooldown and trigger
@@ -191,18 +222,19 @@ export interface EnemyArchetypeConfig {
 }
 
 /**
- * Archetypes with a full definition (D-043). The Climber is deferred: it will arrive as adaptive
+ * Archetypes with a full definition (D-043; the Spitter since Phase 7.1, D-046). The Climber is deferred: it will arrive as adaptive
  * content (a counter to camping on high ground), not in the default roster.
  */
-export const IMPLEMENTED_ENEMY_IDS = ['walker', 'runner', 'tank', 'screamer'] as const;
+export const IMPLEMENTED_ENEMY_IDS = ['walker', 'runner', 'tank', 'screamer', 'spitter'] as const;
 export type ImplementedEnemyId = (typeof IMPLEMENTED_ENEMY_IDS)[number];
 
-/** O-3, resolved by D-043: the archetypes normal waves are made of. */
+/** O-3, resolved by D-043 (the Spitter added by D-046): the archetypes normal waves are made of. */
 export const DEFAULT_ROSTER: readonly ImplementedEnemyId[] = [
   'walker',
   'runner',
   'tank',
   'screamer',
+  'spitter',
 ];
 
 const RUNNER_SCALE: RigScale = {
@@ -236,6 +268,18 @@ const SCREAMER_SCALE: RigScale = {
   shoulders: 1,
 };
 const SCREAMER_RIG = scaleRig(HUMANOID_RIG, 'screamer', SCREAMER_SCALE);
+const SPITTER_SCALE: RigScale = {
+  width: 0.88,
+  height: 0.97,
+  depth: 0.95,
+  head: 1.1,
+  torso: 0.9,
+  arm: 0.8,
+  leg: 0.85,
+  shoulders: 1,
+};
+/** A forward hunch over its swollen throat. */
+const SPITTER_HUNCH = 0.18;
 /** Radians the Runner leans forward from the hips (a sprinter's crouch), and the Tank hunches. */
 const RUNNER_LEAN = 0.28;
 const TANK_HUNCH = 0.14;
@@ -390,6 +434,47 @@ export const ENEMY_STATS: Readonly<Record<ImplementedEnemyId, EnemyArchetypeConf
     threatCost: 2,
     drops: 'screamer',
   },
+  // Pass-1 values; reasoning in BALANCING.md §2.16 (D-046).
+  spitter: {
+    id: 'spitter',
+    name: 'Spitter',
+    behavior: 'ranged',
+    // Two Pistol headshots or three body shots.
+    health: 70,
+    moveSpeed: 1.7,
+    attackDamage: 14,
+    // It starts a spit within this distance (in sight); the arc reaches a little further.
+    attackRange: 18,
+    detectionRange: 22,
+    attackCooldown: 3.5,
+    body: { radius: 0.3, height: 1.75, eyeHeight: 1.55 },
+    rig: leanRig(scaleRig(HUMANOID_RIG, 'spitter', SPITTER_SCALE), 'spitter', SPITTER_HUNCH),
+    attackPose: null,
+    turnSpeed: 4,
+    acceleration: 8,
+    armor: 0,
+    resistance: 0,
+    // A Pistol body shot staggers it and spoils the spit.
+    staggerThreshold: 25,
+    staggerDuration: 0.7,
+    perception: { loseTargetRange: 30, targetMemory: 6, reactionTime: 0.5 },
+    // A long, readable wind-up: the head rears back and the throat glows.
+    attack: { windup: 1, recovery: 0.8, reach: 18, arcDeg: 360, verticalReach: 4 },
+    preferredRange: { min: 10, max: 16, retreat: 8 },
+    projectile: {
+      speed: 13,
+      gravity: 7,
+      radius: 0.18,
+      damage: 14,
+      splashDamage: 6,
+      splashRadius: 1.6,
+      lifetime: 3,
+    },
+    patrol: { radius: 3, pauseMin: 2, pauseMax: 5, speedFactor: 0.4 },
+    corpseTime: 5,
+    threatCost: 2.5,
+    drops: 'spitter',
+  },
 };
 
 /** The full definition of an implemented archetype (throws for one that has none yet). */
@@ -480,6 +565,11 @@ export const ENEMY_ARCHETYPES: Readonly<
   runner: { name: 'Runner', purpose: 'Punishes standing still; dangerous in groups', inV1: true },
   tank: { name: 'Tank', purpose: 'Forces focus fire; blocks chokepoints', inV1: true },
   screamer: { name: 'Screamer', purpose: 'Forces target prioritisation', inV1: true },
+  spitter: {
+    name: 'Spitter',
+    purpose: 'Punishes standing still at range; dodgeable acid from cover',
+    inV1: true,
+  },
   climber: {
     name: 'Climber',
     purpose: 'Counters camping on high ground (deferred: adaptive content)',

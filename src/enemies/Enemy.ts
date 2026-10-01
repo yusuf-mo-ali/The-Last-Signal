@@ -156,6 +156,8 @@ export class Enemy {
   speedCap = Number.POSITIVE_INFINITY;
   /** Backing away from its target (keeping its distance). */
   retreating = false;
+  /** Too close to its target with nowhere to back away to: it fights where it stands. */
+  cornered = false;
   /**
    * A combat frenzy from an alarm (D-046), until this sim time: attacks sooner, winds up faster,
    * turns faster and may resist staggers. Never stacked: the strongest scales win.
@@ -379,6 +381,7 @@ export class Enemy {
     this.accelerationMultiplier = 1;
     this.speedCap = Number.POSITIVE_INFINITY;
     this.retreating = false;
+    this.cornered = false;
     this.frenzyUntil = Number.NEGATIVE_INFINITY;
     this.frenzyCooldownScale = 1;
     this.frenzyWindupScale = 1;

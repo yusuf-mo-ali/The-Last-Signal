@@ -34,6 +34,7 @@ export const DROP_TABLE_IDS = [
   'runner',
   'tank',
   'screamer',
+  'spitter',
   'elite',
 ] as const;
 export type DropTableId = (typeof DROP_TABLE_IDS)[number];
@@ -52,6 +53,7 @@ export const DROP_TABLES: Readonly<Record<DropTableId, readonly DropEntry[]>> = 
   runner: [{ pickup: 'ammo', chance: 0.15 }],
   tank: [{ pickup: 'ammo', chance: 0.6 }],
   screamer: [{ pickup: 'ammo', chance: 0.3 }],
+  spitter: [{ pickup: 'ammo', chance: 0.3 }],
   // The Elite trait's bonus reward, rolled on top of the archetype's own table.
   elite: [{ pickup: 'ammo', chance: 1 }],
 };

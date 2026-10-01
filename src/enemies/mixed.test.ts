@@ -106,7 +106,8 @@ describe('a mixed group', () => {
       expect(enemy.target?.id, enemy.id).toBe('player');
       expect(enemy.motor.position.y).toBeGreaterThan(-0.5);
     }
-    // Everyone that fights in melee got its hits in; the Screamers screamed and never hit.
+    // Everyone that fights in melee got its hits in; the Screamers screamed and the Spitters spat
+    // (D-046), and neither struck in melee.
     const hitters = new Set(t.of('attackHit').map((h) => h.id));
     for (const enemy of enemies) {
       if (enemy.config.behavior === 'melee') {
@@ -116,7 +117,12 @@ describe('a mixed group', () => {
       }
     }
     expect(t.of('alarm').length).toBeGreaterThan(0);
-    expect(target.hits.length).toBe(t.of('attackHit').length);
+    expect(t.of('spat').length).toBeGreaterThan(0);
+    // Every hit the target took was a melee strike or a Spitter's acid.
+    const spitters = new Set(enemies.filter((e) => e.config.projectile).map((e) => e.id));
+    const acid = target.hits.filter((h) => spitters.has(h.attackerId)).length;
+    expect(acid).toBeGreaterThan(0);
+    expect(target.hits.length - acid).toBe(t.of('attackHit').length);
   });
 
   it('the Runners arrive first and the Tanks last', () => {

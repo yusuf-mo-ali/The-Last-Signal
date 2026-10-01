@@ -133,7 +133,7 @@ describe('gameplay config skeletons (plan §31)', () => {
     expect(Math.ceil(100 / (p.damage * p.headshotMultiplier))).toBeLessThanOrEqual(2);
   });
 
-  it('enemies: plan damage zones and multipliers, five archetypes, four in v1', () => {
+  it('enemies: plan damage zones and multipliers, six archetypes, five in v1 (D-046)', () => {
     expect(DEFAULT_ZONE_MULTIPLIERS).toEqual({
       HEAD: 2.5,
       TORSO: 1,
@@ -143,8 +143,9 @@ describe('gameplay config skeletons (plan §31)', () => {
       LEG_RIGHT: 0.5,
     });
     expect(AI_STATES).toEqual(['IDLE', 'PATROL', 'DETECT', 'CHASE', 'ATTACK', 'STAGGER', 'DEAD']);
-    expect(ENEMY_ARCHETYPE_IDS).toHaveLength(5);
-    expect(Object.values(ENEMY_ARCHETYPES).filter((a) => a.inV1)).toHaveLength(4);
+    // The plan's five, plus the Spitter (Phase 7.1, D-046).
+    expect(ENEMY_ARCHETYPE_IDS).toHaveLength(6);
+    expect(Object.values(ENEMY_ARCHETYPES).filter((a) => a.inV1)).toHaveLength(5);
   });
 
   it('waves: plan tiers cover waves 1–20 exactly; mutation-free start', () => {
@@ -358,8 +359,10 @@ describe('enemy data (Phase 4, D-042)', () => {
       }
     }
     // Phase 5: one of each archetype of the default roster, and each trait at least once.
+    // The Phase 4–5 roster: the sandbox has no Spitter (it would shoot across the training range
+    // the Phase 2–5 checks use; D-046).
     expect(new Set(TRAINING_ENEMIES.placements.map((p) => p.archetype))).toEqual(
-      new Set(DEFAULT_ROSTER),
+      new Set(DEFAULT_ROSTER.filter((a) => a !== 'spitter')),
     );
     expect(new Set(TRAINING_ENEMIES.placements.flatMap((p) => p.traits ?? []))).toEqual(
       new Set(ENEMY_MODIFIER_IDS),
@@ -372,8 +375,8 @@ describe('enemy archetypes (Phase 5, D-043)', () => {
   const headshot = pistol.damage * pistol.headshotMultiplier;
   const { walker, runner, tank, screamer } = ENEMY_STATS;
 
-  it('O-3: the default roster is Walker, Runner, Tank, Screamer; the Climber is deferred', () => {
-    expect(DEFAULT_ROSTER).toEqual(['walker', 'runner', 'tank', 'screamer']);
+  it('O-3 + D-046: the roster is Walker, Runner, Tank, Screamer, Spitter; the Climber is deferred', () => {
+    expect(DEFAULT_ROSTER).toEqual(['walker', 'runner', 'tank', 'screamer', 'spitter']);
     expect(IMPLEMENTED_ENEMY_IDS).toEqual(DEFAULT_ROSTER);
     expect(IMPLEMENTED_ENEMY_IDS).not.toContain('climber');
     expect(ENEMY_ARCHETYPES.climber.inV1).toBe(false);

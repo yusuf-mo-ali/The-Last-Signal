@@ -72,6 +72,14 @@ export const ENEMY_LOOKS: Readonly<Partial<Record<EnemyArchetypeId, EnemyLook>>>
     mouth: { color: 0x1a0f22, size: 0.55 },
     windupArms: RAISED_ARMS,
   },
+  // Sickly yellow-green skin and rags, acid-green eyes and throat; it rears back to spit (D-046).
+  spitter: {
+    zoneColors: { ...zones(0xa7b35e, 0x4f5a2b, 0x30362a), HEAD: 0xb5c266 },
+    eyes: 0xd4ff4a,
+    telegraph: 0x8cff2e,
+    mouth: { color: 0x334a05, size: 0.42 },
+    windupArms: -0.35,
+  },
 };
 
 /** What each trait adds to the outline (built into the enemy's single mesh). */

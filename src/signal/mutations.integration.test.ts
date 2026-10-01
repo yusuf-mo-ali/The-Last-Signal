@@ -16,6 +16,7 @@ import { DEFAULT_BINDINGS } from '../config/input';
 import { ENABLED_MUTATION_IDS, MUTATIONS, type MutationId } from '../config/mutations';
 import { Game } from '../core/Game';
 import { EnemyManager } from '../enemies/EnemyManager';
+import { EnemyProjectiles } from '../enemies/EnemyProjectiles';
 import { ActionMap } from '../input/ActionMap';
 import { InputState } from '../input/InputState';
 import { attachStepInput } from '../input/stepInput';
@@ -115,13 +116,28 @@ function headlessGame(seed = 'mutation-run') {
   game.addSystem(waves);
   game.addSystem(environment);
   game.addSystem(screen);
+  // The Spitter's acid, as `main.ts` wires it (D-046).
+  const projectiles = new EnemyProjectiles({
+    world: world.collision,
+    targets: () => [playerTarget],
+    active: playing,
+    killPlaneY: FACILITY.killPlaneY,
+    enemyEvents: enemies.events,
+  });
   game.addSystem(enemies);
+  game.addSystem(projectiles);
   game.addSystem(combat);
+  for (const state of ['WAVE_COMPLETE', 'GAME_OVER', 'VICTORY'] as const) {
+    game.state.onEnter(state, () => {
+      projectiles.clear();
+    });
+  }
   game.state.onEnter('PLAYING', () => {
     player.respawn();
     weapons.reset();
     playerHealth.reset();
     enemies.clear();
+    projectiles.clear();
   });
   playerHealth.events.on('died', () => {
     game.state.transition('GAME_OVER');
@@ -134,6 +150,19 @@ function headlessGame(seed = 'mutation-run') {
   );
   waves.events.on('surgeWarning', (e) => timeline.push(`${game.time.stepCount} surge ${e.region}`));
   enemies.events.on('alarm', (e) => timeline.push(`${game.time.stepCount} alarm ${e.kind}`));
+  enemies.events.on('frenzied', (e) =>
+    timeline.push(`${game.time.stepCount} frenzy ${e.id} ${e.kind} ${e.until.toFixed(4)}`),
+  );
+  enemies.events.on('spat', (e) =>
+    timeline.push(
+      `${game.time.stepCount} spit ${e.id} ${e.velocity.map((v) => v.toFixed(4)).join(',')}`,
+    ),
+  );
+  projectiles.events.on('projectileImpact', (e) =>
+    timeline.push(
+      `${game.time.stepCount} acid ${e.kind} ${e.amount} ${e.position.map((v) => v.toFixed(4)).join(',')}`,
+    ),
+  );
   mutations.events.on('staticBurst', (e) =>
     timeline.push(`${game.time.stepCount} burst ${e.until.toFixed(4)}`),
   );
@@ -167,12 +196,13 @@ function headlessGame(seed = 'mutation-run') {
   /**
    * A scripted defender at the spawn: every `interval` seconds it shoots a wave enemy it can see
    * within `range`, one headshot in every `headshotEvery` shots and body shots otherwise, with the
-   * Pistol (no god mode). Like a real player it picks priority targets first (D-046): the
-   * nearest visible enemy that does not fight in melee (a Screamer, a Spitter), else the nearest.
+   * Pistol (no god mode). Like a real player it picks its targets (D-046): a melee enemy about to
+   * reach it first (within `close`), then priority targets (the nearest visible enemy that does
+   * not fight in melee: a Screamer, a Spitter), else the nearest.
    */
   let shotClock = 0;
   let shots = 0;
-  const defend = ({ interval = 0.3, headshotEvery = 2, range = 40 } = {}) => {
+  const defend = ({ interval = 0.3, headshotEvery = 2, range = 40, close = 5 } = {}) => {
     shotClock += 1 / 60;
     if (shotClock < interval) {
       return;
@@ -186,7 +216,8 @@ function headlessGame(seed = 'mutation-run') {
       const head = e.motor.position.clone();
       head.y += e.config.body.height * 0.9;
       const d = head.distanceTo(from);
-      const priority = e.config.behavior === 'melee' ? 1 : 0;
+      const melee = e.config.behavior === 'melee';
+      const priority = melee ? (d < close ? 0 : 2) : 1;
       const better =
         !best || priority < best.priority || (priority === best.priority && d < best.d);
       if (d < range && better && enemies.lines.lineOfSight(from, head)) {
@@ -220,6 +251,7 @@ function headlessGame(seed = 'mutation-run') {
     player,
     playerHealth,
     enemies,
+    projectiles,
     waves,
     mutations,
     router,
@@ -350,6 +382,42 @@ describe('mutations integration: determinism', () => {
       expect(run(144, mutation), mutation).toEqual(at60);
     }
   });
+
+  it('Spitter volleys, death-cry frenzies and last-known rushes are identical at 30, 60 and 144 Hz', () => {
+    const run = (hz: number) => {
+      const g = headlessGame('det-spitter');
+      g.playerHealth.godMode = true;
+      g.startRun();
+      g.waves.startWave(16, 'SCREAM');
+      // Kill a wave enemy every 3 s of simulated time: cries, frenzies and rushes keep coming.
+      let clock = 0;
+      g.game.addSystem({
+        fixedUpdate: (dt) => {
+          clock += dt;
+          if (clock >= 3) {
+            clock = 0;
+            const victim = g.enemies.enemies.find((e) => e.alive && g.waves.isWaveEnemy(e.id));
+            if (victim) {
+              g.enemies.kill(victim.id);
+            }
+          }
+        },
+      });
+      g.until(
+        () =>
+          g.timeline.filter((l) => l.includes(' acid ')).length >= 3 &&
+          g.timeline.some((l) => l.includes(' frenzy ')),
+        240,
+        hz,
+      );
+      return [...g.timeline];
+    };
+    const at60 = run(60);
+    expect(at60.filter((l) => l.includes(' spit ')).length).toBeGreaterThanOrEqual(3);
+    expect(at60.some((l) => l.includes(' frenzy ') && l.includes('deathCry'))).toBe(true);
+    expect(run(30)).toEqual(at60);
+    expect(run(144)).toEqual(at60);
+  }, 60_000);
 });
 
 describe('mutations integration: no mutation silently makes a wave impossible', () => {
@@ -385,6 +453,10 @@ describe('mutations integration: no mutation silently makes a wave impossible', 
     for (const n of [6, 9, 12]) {
       for (const id of ['none', ...ENABLED_MUTATION_IDS] as const) {
         if (id !== 'none' && n < MUTATIONS[id].minWave) {
+          continue;
+        }
+        // Tuning runs: `BALANCE_REPORT=1 ONLY=12-HIVE,12-SCREAM` measures just those rows.
+        if (process.env.ONLY && !process.env.ONLY.split(',').includes(`${n}-${id}`)) {
           continue;
         }
         rows.push({ n, id, runs: SEEDS.map((seed) => defended(n, id, seed)) });

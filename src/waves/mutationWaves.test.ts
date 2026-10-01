@@ -14,6 +14,10 @@ import { WAVE_RULES } from '../config/waves';
 import { eliteMax, waveBudget, waveGroupMax } from './WaveDifficulty';
 import { generateWave, mutationModifiers } from './WaveGenerator';
 
+/** HIVE's budget multiplier, from its data. */
+const HIVE_BUDGET =
+  MUTATIONS.HIVE.effects.find((e) => e.kind === 'spawnRule')?.composition?.budgetMultiplier ?? 1;
+
 const SEEDS = Array.from({ length: 20 }, (_, i) => `mut-${i}`);
 const WAVES = [4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 19, 21, 25, 30, 40];
 const elitesOf = (spawns: readonly { traits: readonly string[] }[]) =>
@@ -35,7 +39,8 @@ describe('mutations in the generator: invariants for every v1 mutation', () => {
             def.spawns.every((s) => DEFAULT_ROSTER.includes(s.archetype)),
             where,
           ).toBe(true);
-          const expectedBudget = id === 'HIVE' ? Math.round(waveBudget(n) * 1.2) : waveBudget(n);
+          const expectedBudget =
+            id === 'HIVE' ? Math.round(waveBudget(n) * HIVE_BUDGET) : waveBudget(n);
           expect(def.enemyBudget, where).toBe(expectedBudget);
           expect(def.enemyBudget / waveBudget(n), where).toBeLessThanOrEqual(
             WAVE_RULES.modifierClamp.budget[1] + 0.05,

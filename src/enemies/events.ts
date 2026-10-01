@@ -10,8 +10,11 @@ import type { Vec3Tuple } from '../weapons/types';
 export type AttackMissReason = 'range' | 'height' | 'arc' | 'blocked' | 'dead';
 export type AttackCancelReason = 'stagger' | 'death' | 'lostTarget';
 export type TargetLossReason = 'dead' | 'range' | 'memory';
-/** What an attack does at the end of its wind-up: a melee strike, or a scream (an alarm). */
-export type AttackKind = 'strike' | 'scream';
+/**
+ * What an attack does at the end of its wind-up: a melee strike, a scream (an alarm), or a spit
+ * (a projectile, D-046).
+ */
+export type AttackKind = 'strike' | 'scream' | 'spit';
 
 /**
  * How an alarm was raised (D-043, D-045):
@@ -108,6 +111,17 @@ export interface EnemyEvents {
   alarm: AlarmEvent;
   /** Sped up by an alarm (or anything else), until sim time `until`. */
   hasted: { readonly id: string; readonly multiplier: number; readonly until: number };
+  /**
+   * A ranged attack let fly (D-046): a projectile leaves `position` with `velocity` (m/s), aimed at
+   * where the target was at release. `EnemyProjectiles` flies it.
+   */
+  spat: {
+    readonly id: string;
+    readonly targetId: string;
+    readonly archetype: EnemyArchetypeId;
+    readonly position: Vec3Tuple;
+    readonly velocity: Vec3Tuple;
+  };
   /** Frenzied by an alarm (D-046) until sim time `until`; `kind` is the alarm that did it. */
   frenzied: { readonly id: string; readonly kind: AlarmKind; readonly until: number };
   traitsChanged: { readonly id: string; readonly traits: readonly EnemyModifierId[] };

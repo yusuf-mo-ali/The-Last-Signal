@@ -15,6 +15,7 @@ import { boxTriangles } from '../world/levels/geometry';
 import type { LevelDefinition } from '../world/levels/types';
 import type { PickupManager } from '../world/PickupManager';
 import { EnemyManager, type StatMultipliers } from './EnemyManager';
+import { EnemyProjectiles } from './EnemyProjectiles';
 import type { EnemyEvents } from './events';
 import type { EnemyHit, EnemyTarget } from './types';
 
@@ -112,6 +113,14 @@ export function enemyTestWorld(
     ...(options.pickups ? { pickups: options.pickups } : {}),
     ...(options.modifiers ? { modifiers: options.modifiers } : {}),
   });
+  // The Spitter's acid flies right after the enemies, as in the game (D-046).
+  const projectiles = new EnemyProjectiles({
+    world,
+    targets: () => targets,
+    active: () => active,
+    killPlaneY: (options.level ?? TEST_LEVEL).killPlaneY,
+    enemyEvents: manager.events,
+  });
   const events: Recorded[] = [];
   for (const type of [
     'spawned',
@@ -128,6 +137,7 @@ export function enemyTestWorld(
     'alarm',
     'hasted',
     'frenzied',
+    'spat',
     'traitsChanged',
   ] as const) {
     manager.events.on(type, (payload: unknown) => {
@@ -137,6 +147,7 @@ export function enemyTestWorld(
   const step = (n = 1) => {
     for (let i = 0; i < n; i++) {
       manager.fixedUpdate(DT);
+      projectiles.fixedUpdate(DT);
       combat.fixedUpdate(DT);
     }
   };
@@ -160,6 +171,7 @@ export function enemyTestWorld(
     hitscan,
     combat,
     manager,
+    projectiles,
     targets,
     target: targets[0] ?? new TestTarget(),
     events,

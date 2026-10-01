@@ -15,6 +15,7 @@ import { DEFAULT_BINDINGS } from '../config/input';
 import { WAVE_RULES } from '../config/waves';
 import { Game } from '../core/Game';
 import { EnemyManager } from '../enemies/EnemyManager';
+import { EnemyProjectiles } from '../enemies/EnemyProjectiles';
 import { ActionMap } from '../input/ActionMap';
 import { InputState } from '../input/InputState';
 import { attachStepInput } from '../input/stepInput';
@@ -92,13 +93,28 @@ function headlessRun(seed = 'integration') {
   });
   waves.attach();
   game.addSystem(waves); // before the enemies: a group spawns before anything moves
+  // The Spitter's acid, as `main.ts` wires it (D-046).
+  const projectiles = new EnemyProjectiles({
+    world: world.collision,
+    targets: () => [playerTarget],
+    active: playing,
+    killPlaneY: FACILITY.killPlaneY,
+    enemyEvents: enemies.events,
+  });
   game.addSystem(enemies);
+  game.addSystem(projectiles);
   game.addSystem(combat);
+  for (const state of ['WAVE_COMPLETE', 'GAME_OVER', 'VICTORY'] as const) {
+    game.state.onEnter(state, () => {
+      projectiles.clear();
+    });
+  }
   game.state.onEnter('PLAYING', () => {
     player.respawn();
     weapons.reset();
     playerHealth.reset();
     enemies.clear();
+    projectiles.clear();
   });
   playerHealth.events.on('died', () => {
     game.state.transition('GAME_OVER');

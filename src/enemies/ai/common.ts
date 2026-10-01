@@ -20,6 +20,13 @@ const _targetEye = new Vector3();
 const NEAR_NODES = 4;
 const _near: number[] = [];
 const _spotNear: number[] = [];
+/** Metres per retreat step (keeping its distance). */
+const RETREAT_STEP = 3;
+/** Directions tried when backing away: straight away first, then veering off (radians). */
+const RETREAT_ANGLES = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2];
+/** A retreat step must gain at least this much distance (no sliding along a wall forever). */
+const RETREAT_GAIN = 1.5;
+const _away = new Vector3();
 /** Seconds a patrol walk may take before it is abandoned. */
 const PATROL_TIMEOUT = 8;
 /** Patrol point attempts per decision. */
@@ -282,6 +289,7 @@ export function checkProgress(enemy: Enemy, ctx: BrainContext): void {
   } else if (enemy.retreating) {
     // Backed into something: stand its ground this time.
     enemy.retreating = false;
+    enemy.cornered = true;
   } else if (enemy.navMode === 'direct') {
     // Something the straight-line test missed (a kerb below knee height, a beam above the chest):
     // take the route instead, to its end.
@@ -444,4 +452,91 @@ export function stagger(enemy: Enemy, ctx: BrainContext): void {
   enemy.staggerTimer = enemy.config.staggerDuration;
   transition(enemy, 'STAGGER');
   ctx.events.emit('staggered', { id: enemy.id });
+}
+
+// ---- keeping its distance (Screamer, Spitter) ------------------------------------------------
+
+/**
+ * Whether it is too close to attack from range (inside `retreat`): it backs away first, unless it
+ * is cornered.
+ */
+export function tooClose(enemy: Enemy, target: EnemyTarget): boolean {
+  return (
+    !enemy.cornered &&
+    horizontalDistance(enemy.motor.position, target.position) < standoffBand(enemy).retreat
+  );
+}
+
+/** The distance band it keeps: hold within `min`–`max`, back away inside `retreat`. */
+export function standoffBand(enemy: Enemy): { min: number; max: number; retreat: number } {
+  const band = enemy.config.preferredRange ?? { min: 0, max: enemy.config.attackRange * 0.8 };
+  return { min: band.min, max: band.max, retreat: band.retreat ?? band.min };
+}
+
+/** Where to back away to: a walkable point away from the target, or none (stand its ground). */
+export function planRetreat(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
+  const pos = enemy.motor.position;
+  const away = yawToward(target.position, pos);
+  const now = horizontalDistance(pos, target.position);
+  for (const offset of RETREAT_ANGLES) {
+    const yaw = away + offset;
+    _away.set(pos.x - Math.sin(yaw) * RETREAT_STEP, pos.y, pos.z - Math.cos(yaw) * RETREAT_STEP);
+    if (
+      horizontalDistance(_away, target.position) >= now + RETREAT_GAIN &&
+      ctx.lines.walkable(pos, _away, enemy.config.body.radius)
+    ) {
+      enemy.patrolPoint.copy(_away);
+      enemy.retreating = true;
+      enemy.cornered = false;
+      return;
+    }
+  }
+  enemy.retreating = false;
+  enemy.cornered = true;
+}
+
+/**
+ * Positioning decisions while keeping its distance (in `think`): close in beyond `max` or without
+ * sight, back away inside `retreat`, otherwise hold.
+ */
+export function thinkStandoff(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
+  const d = horizontalDistance(enemy.motor.position, target.position);
+  const { max, retreat } = standoffBand(enemy);
+  if (d >= retreat) {
+    enemy.cornered = false;
+  }
+  if (!enemy.canSeeTarget || d > max) {
+    enemy.retreating = false;
+    planChase(enemy, ctx, target);
+  } else if (d < retreat) {
+    if (!enemy.retreating) {
+      planRetreat(enemy, ctx, target);
+    }
+  } else if (!enemy.retreating) {
+    enemy.navMode = 'none';
+  }
+  checkProgress(enemy, ctx);
+}
+
+/**
+ * Steering while keeping its distance (in `update`, CHASE): backing away until it is at `min`
+ * again (or at its retreat point), holding its ground facing the target, or closing in.
+ */
+export function updateStandoff(enemy: Enemy, ctx: BrainContext, target: EnemyTarget): void {
+  const pos = enemy.motor.position;
+  const d = horizontalDistance(pos, target.position);
+  const { min, max } = standoffBand(enemy);
+  if (enemy.retreating) {
+    if (d >= min || horizontalDistance(pos, enemy.patrolPoint) < ctx.rules.arrivalRadius) {
+      enemy.retreating = false;
+      enemy.faceYaw = yawToward(pos, target.position);
+    } else {
+      enemy.moveGoal.copy(enemy.patrolPoint);
+      enemy.moveSpeed = 1;
+    }
+  } else if (enemy.canSeeTarget && d <= max) {
+    enemy.faceYaw = yawToward(pos, target.position); // hold its ground
+  } else {
+    followPath(enemy, ctx, target, max * 0.9);
+  }
 }

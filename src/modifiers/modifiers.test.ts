@@ -235,7 +235,8 @@ describe('EffectRouter', () => {
     expect(t.stats.multiplier('enemy.acceleration')).toBeCloseTo(1.15);
     t.router.apply('mutation:SCREAM', MUTATIONS.SCREAM.effects);
     t.triggers.dispatch('enemy:died', { id: 'w', position: [0, 0, 0] });
-    expect(t.cries).toEqual([9]);
+    const cry = MUTATIONS.SCREAM.effects[0];
+    expect(t.cries).toEqual([cry?.kind === 'trigger' ? cry.params?.radius : -1]);
     t.router.apply('mutation:BLACKOUT', MUTATIONS.BLACKOUT.effects);
     expect(t.environment.sources()).toEqual(['mutation:BLACKOUT']);
     t.router.apply('mutation:STATIC', MUTATIONS.STATIC.effects, { rng: new Rng('s') });
