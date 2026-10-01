@@ -3,14 +3,24 @@
 > The working state of the project. Every session reads this file first and updates it last, so
 > work can be resumed safely (plan §36).
 >
-> **Last updated:** 2026-09-29 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
+> **Last updated:** 2026-10-01 · **Base branch:** `main` · **Working branch:** `claude/bold-mayer-n66vhb`
 > (open PR into `main`: yusuf-mo-ali/The-Last-Signal#1)
 
 ---
 
 ## Current Phase
 
-**Phase 7: Signal Mutations. Complete** (plan §14, D-045). From wave 4 every wave except the finale carries one Signal Mutation, chosen by a seeded, pure selector (never the same twice, never two sight mutations in a row, tier weights, a recent-use penalty) and applied through one data-driven effect runtime (stats, triggers, environment overlays, screen effects, spawn rules). Six ship (O-4): BLACKOUT, HUNGER, STATIC, SCREAM (shown as DEATH CRY), HIVE and BLOOD MOON; LOW GRAVITY and OVERLOAD stay in the data as deferred. Each is announced before its wave (card: name, rule, hint), badged during it and lifted after it; the lighting changes only intensities and colours of lights that exist from load. DEATH CRY is kept apart from the Screamer's scream (a different alarm kind: small, red, never reinforcements). Every value is clamped twice, and a scripted-defender tripwire checks that no mutation makes a wave impossible. See "Phase 7 acceptance review" below. Phase 8 (Adaptive System) has not started and is awaiting approval.
+**Phase 7.1: Mutation & Combat Polish. Complete** (D-046), after the Phase 7 hands-on playtest:
+- **BLACKOUT:** zombies are dark silhouettes with glowing eyes, and one close to the player is lifted out of the dark.
+- **Signal Glitch** (STATIC): the 3D image tears, splits and lags the zombies, with a clear centre and at most 3 pattern changes a second.
+- **DEATH CRY:** frenzies the zombies around a kill and sends them to where the player stood.
+- **Screamer:** a completed scream frenzies the pack.
+- **BLOOD MOON:** first appears on one of waves 9–12, 25 % on each.
+- **The Spitter** joins at wave 10: a ranged zombie with telegraphed, dodgeable acid.
+
+Phase 8 (Adaptive System) has not started and is awaiting approval. See "Phase 7.1 acceptance review" below.
+
+- Phase 7 (Signal Mutations) is complete (D-045): six data-driven mutations from wave 4, one effect runtime, guardrails and a survival tripwire.
 
 - Phase 6 (Wave System) is complete (D-044): seeded wave generation from a threat budget, fair spawn points, the wave cycle, victory at wave 20 and endless.
 
@@ -280,9 +290,66 @@
     - Performance (TESTING.md §7.4): the simulation step is unchanged by any mutation (~0.2 ms at 24 alive; a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms). The first lighting (three emergency and one muzzle point light, present from load) cost ~25 % of the frame in every wave on software rendering; it was replaced by emissive lamps with unlit floor pools and a fill-light rise on the muzzle flash, which measure within noise of Phase 6 with a constant program count.
   - Live Vercel preview: still not reachable from the container (proxy 403 for `*.vercel.app`).
 
+- [x] **Phase 7.1: Mutation & Combat Polish** (D-046), after the Phase 7 playtest; the plan was approved with an exclusive BLOOD MOON guarantee.
+  - **BLACKOUT:**
+    - The eyes are marked in the enemy geometry. One material patch, compiled once at load for every enemy, makes the eyes glow, darkens bodies toward silhouettes and lifts a close one out of the dark.
+    - The environment gained `eyeGlow`, `silhouette` and `proximity` channels. Blackout values: ambient 0.14, sun 0.04.
+    - The visibility guarantee is now eyes and proximity (ambient floor 0.12).
+  - **Signal Glitch** (STATIC; the id is unchanged):
+    - `render/GlitchPass`, burst-only: tear bands, a colour split and an afterimage, with a clear centre. During a burst the scene renders into a target that keeps the screen's shader programs (flagged as an XR target with RGBA8 storage), so nothing compiles mid-fight. It never reads the screen: copying the antialiased screen sometimes read black, and that version was replaced.
+    - `render/glitch.ts` holds the maths: the envelope, ≤ 3 Hz steps, seeded bands, reduced motion.
+    - `EnemyView` draws zombies 0.18 s behind where they are during a burst; hit volumes never move.
+    - The DOM grain is toned down to 0.12. Glitch fields are clamped.
+  - **Alarms:**
+    - `alertMode` (`live` or `lastKnown`: rush the spot, find the player only by sight);
+    - `frenzy` (cooldown, wind-up ≥ 70 %, turn, stagger resistance through the combat profile; never stacked, clamped, reset on reuse);
+    - a `frenzied` event.
+    - DEATH CRY: last-known, haste ×1.25 for 3 s, a 3 s frenzy, a red echo (two rings and a flare), red eyes, still no reinforcements and no chain.
+    - The Screamer's completed scream: a 6 s frenzy, a violet sonic wave (three rings and a column), violet eyes.
+  - **BLOOD MOON:** `guarantee: { by: 12 }`. While BLOOD MOON is unseen in waves 9–12 its own roll (1 in the waves left) is the only path, never the weighted pool, so its first appearance is 25 % on each of waves 9–12.
+  - **The Spitter:**
+    - config, look and drops;
+    - the `ranged` brain, sharing a keep-your-distance helper with the Screamer (moved into `ai/common.ts`; backs off before spitting, spits when cornered, retreat steps must gain distance);
+    - `EnemyProjectiles`: a fixed-step pool of 32 with swept level and capsule tests, direct hits and wall-blocked splash through the target's own rules, `bindToRun`;
+    - `ProjectileView`;
+    - wave rules: unlock 10 with exactly one, caps, weights, kept out of the opening.
+  - **Debug:**
+    - `projectiles()`;
+    - `spawnEnemy('spitter')`, and `forceAbility` makes a Spitter spit;
+    - frenzy and investigating fields in `enemies()` / `enemy()`;
+    - glitch state in `mutation()`;
+    - the overlay counts frenzied enemies and acid.
+  - **Balance (BALANCING §2.15–§2.16):**
+    - The tripwire defender now picks targets like a player.
+    - With the Spitter in wave 12, DEATH CRY's radius went back to 8 m and HIVE to ×1.15.
+    - HUNGER stays ×1.15: ×1.16–1.18 each lose one seed; open for you.
+  - Verified:
+    - 72 new unit, property, integration and view tests (1260 in the suite), including:
+      - BLOOD MOON's exact rule and 2000-run shares;
+      - frenzy, last-known alerts and the no-chain test;
+      - Spitter timing, ranges, dodge, splash and lifecycle;
+      - the shader patch, alarm looks and lag;
+      - glitch maths;
+      - generator properties for the Spitter;
+      - a Spitter, frenzy and death-cry timeline identical at 30 / 60 / 144 Hz.
+    - Planted bugs: 36 of 36 unit-level and 10 of 10 end-to-end. The runs found four weak checks, all fixed: an acid test that passed by luck, the silhouette measurement, the clear-centre measurement, and a missed acid-clear wiring path. After the glitch pass was rebuilt, the clear-centre plant passed once more (the random tear pattern seldom crossed the crosshair). The test now waits for a band across the centre: caught 3 of 3.
+    - `npm run check` passes; `npm run build` has no warnings (game 215.8 kB, 70.0 kB gzipped); no debug code in `dist/`; the plan's hash is unchanged.
+    - `npm run test:e2e` (development and production, run in four parts; ~6 FPS host): 93 passed, 10 failed.
+      - **Six documented wall-clock failures (TESTING §8):** four `player.spec` and two `combat.spec` marker tests, all timed in real time.
+      - **The Walker chase race in `enemies.spec`:** the test is fixed, 4 of 4.
+      - **Three `resilience.spec` context-loss tests:** a real bug (WebGL warnings after a restore, from the glitch targets), fixed; 13 of 13.
+      - **Earlier in this phase:** a black frame during Signal Glitch (the screen copy) and a too-late read in the DEATH CRY test, both fixed (TESTING §8).
+      - Re-runs after the fixes: `mutations.spec` 13 of 13 in both builds; the Signal Glitch tests 9 of 9 over 3 repeats; DEATH CRY 8 of 8.
+    - Browser screenshots inspected: BLACKOUT silhouettes at 12 m and 3 m, a held Signal Glitch burst.
+    - Performance against Phase 7, same host, alternating runs (TESTING.md §7.4):
+      - the simulation step is unchanged within noise;
+      - the browser is within noise outside bursts (wave 20: 4.02 vs 4.20 fps over 4 runs);
+      - a burst forced every second costs ~16 % with the shipped single-sample glitch target (a multisampled one cost ~27 %; the first, screen-copying version ~11 % but could show a black frame);
+      - one more program (the glitch quad), constant throughout.
+
 ## Active Task
 
-None. Phase 7 is complete; waiting for approval to start **Phase 8**.
+None. Phase 7.1 is complete; waiting for approval to start **Phase 8**.
 
 ## Known Bugs
 
@@ -299,8 +366,16 @@ None. Phase 7 is complete; waiting for approval to start **Phase 8**.
 
 **Needed from you:**
 - Approval to start Phase 8.
-- A manual QA pass of TESTING.md §6 in real browsers, including the new "Signal Mutations" section: how each mutation feels (and whether BLACKOUT needs a flashlight, O-10) can only be judged by hand.
-- Run the performance measurement on the reference machine (TESTING.md §7.2, with `tls.startWave(19, 'BLACKOUT')`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
+- A hands-on playtest of the Phase 7.1 changes (TESTING.md §6, "Signal Mutations" and "Phase 7.1"):
+  - the silhouettes and eyes in BLACKOUT, and whether a flashlight is still wanted (O-10);
+  - Signal Glitch comfort;
+  - DEATH CRY and Screamer frenzies;
+  - dodging the Spitter.
+- A decision on **HUNGER's speed**. The survival tripwire allows ×1.15 at most: ×1.16–×1.18 each lose one wave-12 seed to plain walkers. Options:
+  - keep ×1.15 and judge it by hand;
+  - make the tripwire's defender stronger (for example, let it step back);
+  - accept a stronger HUNGER on waves 12+ only.
+- Run the performance measurement on the reference machine (TESTING.md §7.2, with `tls.startWave(19, 'BLACKOUT')` and a forced `tls.staticBurst()`), and confirm the GTX 750's VRAM (1 GB or 2 GB).
 
 **Deferred on purpose:**
 - **From 0.2:** state-scoped timers and the `GameEvents` payload map arrive with the first system that needs them. The `EventBus` is implemented and tested but has no consumers yet.
@@ -357,6 +432,12 @@ None. Phase 7 is complete; waiting for approval to start **Phase 8**.
   - Mutation audio (a sting per mutation, static crackle, the death-cry cue, the surge roar; Phase 11): `MutationEvents` and `surgeWarning` / `surgeSpawned` are the hooks.
   - Mutation icons (UI phase); the badge is text for now.
   - The wave-20 rules with the boss (Phase 13): wave 20 has no mutation until then.
+
+- **From 7.1:**
+  - HUNGER faster than ×1.15 (open: see "Needed from you").
+  - Spitter audio (the gurgle of the wind-up, the splat) and a proper acid trail (Phase 11 / VFX); the Spitter in the sandbox encounter, if the earlier specs move away from its range.
+  - A frenzy cue in audio (Phase 11); frenzied eyes are the only cue for now.
+  - Leading shots for ranged enemies: deliberately not done (no lead keeps the acid dodgeable).
 
 ## Blocked Tasks
 
@@ -430,6 +511,25 @@ Reviewed 2026-09-25 against the code on this branch.
 - The live Vercel preview is blocked by the container's network policy.
 - No CI yet.
 - O-9 is resolved (D-037). The first reference-machine measurement is due now that the Phase 1 map exists.
+
+---
+
+## Phase 7.1 acceptance review (D-046)
+
+Reviewed 2026-10-01 against the approved Phase 7.1 plan (with the exclusive BLOOD MOON guarantee) and the code on this branch.
+
+| Phase 7.1 goal | Status | Evidence |
+|---|---|---|
+| BLACKOUT genuinely dark: silhouettes, eyes readable, fair up close, no new lights, simulation untouched | Done | The shader patch (one program, compiled at load); `EnemyView.test`; E2E: 60 %+ darker, eye peak > 3× the torso, torso ≤ 30 % of the wall, a Walker at 3 m lifted, program ids unchanged |
+| STATIC → Signal Glitch: tearing, displacement, afterimage, chroma, enemy lag; HUD readable; clear centre; ≤ 3 Hz; deterministic | Done | `GlitchPass` + `glitch.ts` (unit); E2E: lag during a burst and none after, ≤ 3 patterns, the image torn away from the centre but not at it, the grain under the HUD, program ids constant |
+| HUNGER ×1.18 / ×1.15, tuned with the survival test | Partly | The test allows ×1.15 at most (×1.16–1.18 each lose one seed), so HUNGER stays ×1.15. Your call (see "Needed from you") |
+| DEATH CRY stronger: red echo, last-known rush, short frenzy; no reinforcements, no chain, no unbounded stacking | Done | `frenzy.test` (last-known, never stacking, clamped, the 20-enemy no-chain test); E2E: echo rings and flare, red eyes, every listener frenzied |
+| Screamer: scream frenzy (stagger resistance, faster turning), a stronger sonic wave unlike DEATH CRY | Done | `frenzy.test`, `EnemyView.test`; E2E: ≥ 3 rings, a frenzied Walker with violet eyes |
+| BLOOD MOON first guaranteed on 9–12 (exclusive roll), then normal; never 1–3 or 20 | Done | `WaveMutation.test` (exact rule, 2000-run shares, never a second path); a played run; E2E over 40 seeds |
+| Spitter: telegraphed, dodgeable, splash, 10–16 m, retreats, wave 10, fixed-step, spawn-safe, no hitscan | Done | `rangedBrain.test`, `EnemyView.test`, generator properties, the acid lifecycle, determinism at 30 / 60 / 144 Hz; E2E: −14 standing still, 0 when moving, backs off, two headshots |
+| Tests, planted bugs, balance, performance, no regressions | Done | 36/36 + 10/10 planted bugs; tripwire green; TESTING §7.4; the full E2E run above |
+
+**Open items that do not block Phase 8:** HUNGER's speed; a hands-on playtest of the 7.1 changes and O-10; reference-machine measurement; Vercel preview not reachable from the container; no CI yet; the known wall-clock-sensitive E2E tests.
 
 ---
 
@@ -605,7 +705,7 @@ Reviewed 2026-09-25 against the code on this branch.
 |---|---|---|---|
 | **M1 Playable Prototype** | 0 Foundation · 1 FPS controller · 2 weapon framework (Pistol) · 3 basic combat · 4 zombie foundation (Walker) · basic 6 waves · minimal HUD, game over, restart | Player can enter a map, shoot zombies, survive waves, and die | Done in code with Phase 6 (a player can enter the map, shoot zombies, survive waves, die and restart); sign-off waits on the manual QA pass (TESTING.md §6) |
 | **M2 Core Game** | 2 (3 weapons) · 3 (full combat) · 5 archetypes · 6 wave scaling · health, ammo, reload · basic UI, main/pause menus · settings persistence (part of 19) | Genuinely playable for 15–20 minutes | In progress: Phase 5 (archetypes and traits) and Phase 6 (waves: scaling, fair spawns, victory at 20, endless) done; 3 weapons, menus and settings persistence to come |
-| **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | In progress: Phase 7 (Signal Mutations) done |
+| **M3 Signature Mechanics** | 7 mutations · 8 adaptive system · 9 progression · 10 builds · 11 dynamic environment | Two runs can feel meaningfully different | In progress: Phase 7 (Signal Mutations) and Phase 7.1 (polish, the Spitter) done |
 | **M4 Content** | 12 signal progression · 13 boss (Siren) · more variants, mutations and upgrades · map pass | Complete loop and meaningful progression | Not started |
 | **M5 Polish** | 16 audio · 17 VFX · lighting · UI polish · 18 performance · 21 stability · deployment | Feels like a finished indie browser game | Not started |
 
@@ -621,5 +721,5 @@ Testing (Phase 20) and save/settings (Phase 19) run throughout rather than as fi
 | `GAME_DESIGN.md` | Created (baseline) |
 | `PROGRESS.md` | Created |
 | `DECISIONS.md` | Created |
-| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed; Phase 6: wave curves, generator properties, spawn fairness, runtime and full-loop wave coverage, planted bugs, manual QA, wave performance; Phase 7: mutation data, effect runtime, selection, lifecycle, full loop and tripwire, presentation E2E, planted bugs, manual QA, light and mutation performance) |
-| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation; Phase 6 waves (budget curve, concurrency, pacing, unlocks, caps, themes, traits, spawn rules); Phase 7 Signal Mutations (selection, the six mutations, overlays, floors, clamps, tripwire) |
+| `TESTING.md` | Created (Phase 0.6), updated for each phase (Phase 5: archetype, trait, alarm and mixed-group coverage, mutations, manual QA, performance at 1–64 mixed; Phase 6: wave curves, generator properties, spawn fairness, runtime and full-loop wave coverage, planted bugs, manual QA, wave performance; Phase 7: mutation data, effect runtime, selection, lifecycle, full loop and tripwire, presentation E2E, planted bugs, manual QA, light and mutation performance; Phase 7.1: silhouettes, Signal Glitch, frenzy, BLOOD MOON guarantee, the Spitter, planted bugs, glitch performance) |
+| `BALANCING.md` | Created (Phase 2): Pass-1 values for movement and weapons, change log; Phase 3 combat, drops and training dummies; Phase 4 Walker, player health, enemy rules; Phase 5 Runner, Tank, Screamer, traits, separation; Phase 6 waves (budget curve, concurrency, pacing, unlocks, caps, themes, traits, spawn rules); Phase 7 Signal Mutations (selection, the six mutations, overlays, floors, clamps, tripwire); Phase 7.1 (BLACKOUT channels, Signal Glitch, DEATH CRY and Screamer frenzies, BLOOD MOON guarantee, the Spitter, tripwire tuning) |

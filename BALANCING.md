@@ -206,6 +206,8 @@ Support (GAME_DESIGN §7.5): it decides *what* the player shoots first.
 | Alarm radius | 18 m (half that in height) | Covers most of the yard from its post, not the whole map |
 | Alert duration | 8 s | Zombies that heard it know where the player is for 8 s, whatever the range or sight |
 | Haste | × 1.35 for 6 s (refreshed, not stacked) | A Walker becomes 2.2 m/s, a Tank 1.5: a real but short surge |
+| Frenzy (D-046) | 6 s for everyone within 18 m: cooldown ×0.6, wind-up ×0.85, turn ×1.6, stagger ×1.4 (never stacked; an interrupted scream gives none) | Makes it the priority target: a frenzied Walker attacks about every 1.1 s (its wind-up and recovery bound it) instead of 1.6, and a Pistol body shot (26) no longer staggers a frenzied Runner (20 → 28) |
+| Look (D-046) | a violet sonic wave: three rings 0.16 s apart, out to 18 m, and a 6 m column; violet eyes on the frenzied | Never confused with DEATH CRY's red echo (two rings, a short flare) |
 | Damage | 0 | It never hurts the player itself |
 | Threat cost | 2 | |
 | Drops | ammo, 30 % | |
@@ -255,14 +257,14 @@ Difficulty rises through the threat budget, the mix, traits and concurrency. Ene
 | Most wave enemies alive | `min(24, 5 + n)`; endless `min(32, 24 + ⌊(n−20)/5⌋)` | 6 at wave 1 (one screen of Walkers), 24 from wave 19 (the plan's default). Endless creeps up slowly, well under the hard cap of 64 |
 | Spawn rate | `min(2, 0.5 + 0.05n)` enemies/s | A steady trickle early, a flood late; the cap on alive enemies does the rest |
 | Group size | 1 … `min(4, 1 + ⌊n/6⌋)`; ambush +1 | Singles early; packs of 3–4 late; ambushes arrive in bigger groups |
-| Unlocks | Walker 1, Runner 3, Screamer 4, Tank 6 | GAME_DESIGN §3 teaching order: one new threat at a time |
+| Unlocks | Walker 1, Runner 3, Screamer 4, Tank 6, Spitter 10 (D-046) | GAME_DESIGN §3 teaching order: one new threat at a time; the ranged threat once the player has the basics and the mutations are under way |
 | First appearance | exactly one of the new archetype | A readable introduction |
-| Caps per wave | Screamers `1 + ⌊(n−4)/5⌋`; Tanks `1 + ⌊(n−6)/4⌋` | Two Screamers screaming together, or a wall of Tanks, before the player has seen them singly would be unreadable |
+| Caps per wave | Screamers `1 + ⌊(n−4)/5⌋`; Tanks `1 + ⌊(n−6)/4⌋`; Spitters `1 + ⌊(n−10)/5⌋` (1 at 10–14, 2 at 15–19, 3 at 20) | Two Screamers screaming together, a wall of Tanks or a firing line of Spitters before the player has seen them singly would be unreadable |
 | Walker floor | ≥ 30% of the budget | The horde stays a horde; specials punctuate it |
 | Finale (wave 20) | ≥ 2 Tanks and ≥ 2 Screamers; theme ×1.2 on both | "Major event" until the boss (Phase 13) |
-| Tier weights (Walker / Runner / Screamer / Tank) | intro 1 / 0.35 / – / –; variety 1 / 0.5 / 0.2 / 0.15; pressure 1 / 0.6 / 0.25 / 0.25; complex and wave 20 1 / 0.7 / 0.3 / 0.35 | Plan §13 tiers |
-| Themes (from wave 4, seeded rotation, never repeated back to back) | mixed (base); swarm Runner ×1.8, Walker ×1.2, Tank ×0.3; heavy Tank ×2, Walker ×1.2, Runner ×0.6; ambush Runner ×1.4, Screamer ×1.5 (+1 group size) | GAME_DESIGN §8 "swarm, heavy, mixed, ambush" |
-| Opening | no Tank or Screamer in the first 15% of the spawn order | A wave opens with the familiar before the heavy |
+| Tier weights (Walker / Runner / Screamer / Tank / Spitter) | intro 1 / 0.35 / – / – / –; variety 1 / 0.5 / 0.2 / 0.15 / –; pressure 1 / 0.6 / 0.25 / 0.25 / 0.15; complex and wave 20 1 / 0.7 / 0.3 / 0.35 / 0.2 | Plan §13 tiers |
+| Themes (from wave 4, seeded rotation, never repeated back to back) | mixed (base); swarm Runner ×1.8, Walker ×1.2, Tank ×0.3; heavy Tank ×2, Walker ×1.2, Runner ×0.6, Spitter ×0.7; ambush Runner ×1.4, Screamer ×1.5, Spitter ×1.3 (+1 group size) | GAME_DESIGN §8 "swarm, heavy, mixed, ambush"; Spitters suit ambushes (fire from the flank), not the heavy push |
+| Opening | no Tank, Screamer or Spitter in the first 15% of the spawn order | A wave opens with the familiar before the heavy |
 | Armored / Helmeted chance | from wave 8: 4% per wave, at most 25% each | "Pressure" tier adds protection that rewards headshots |
 | Elite chance | from wave 13: 3% per wave, at most 12%; at most 1 (13–15), 2 (16–19), 3 (20); endless `1 + ⌊n/8⌋` | Elites are events, not the norm |
 | Modifier clamps | weights ×0.5–2; trait chance ±0.2; budget ×0.5–1.5 (mutations only); ≤ 2 extra (adaptive) enemies | D-026: adaptation shapes the mix, never the size |
@@ -286,29 +288,34 @@ Every mutation is one wave's rule change, announced before it acts. The numbers 
 | First wave | HUNGER, BLACKOUT 4; DEATH CRY 5; STATIC 6; HIVE 7; BLOOD MOON 9 | The simplest (faster enemies, darkness) first; DEATH CRY after the Screamer has been met (wave 4), so the two alarms can be told apart; HIVE once waves are long enough to surge in; BLOOD MOON in the pressure tier |
 | Weights (variety / pressure / complex; endless = complex) | HUNGER 1.2/1/1; BLACKOUT 1/1/1; DEATH CRY 1/1/1; STATIC 0.8/1/1; HIVE 0.6/1/1.2; BLOOD MOON –/0.8/1.2 | Simpler rules more often early; the bigger ones later |
 | Repeats | never the previous; never two of BLACKOUT/STATIC in a row; ×0.35 if used in the last 3 waves | Variety; two sight-denial waves back to back is frustrating |
-| HUNGER speed / acceleration | ×1.15 / ×1.15 (clamp ×0.5–1.25) | Walker 1.6 → 1.84 m/s, Runner 5.2 → 5.98 m/s: noticeably faster, still slower than the player's sprint (7.5 m/s). ×1.2 failed the survival tripwire (below) |
+| HUNGER speed / acceleration | ×1.15 / ×1.15 (clamp ×0.5–1.25) | Walker 1.6 → 1.84 m/s, Runner 5.2 → 5.98 m/s: noticeably faster, still slower than the player's sprint (7.5 m/s). ×1.2 failed the survival tripwire (below). Phase 7.1 tried ×1.18, ×1.17 and ×1.16 (the playtest said "slightly too slow"); each lost one wave-12 seed to plain walkers, with any acceleration, so ×1.15 stays. Open for the owner (PROGRESS "Needed from you") |
 | HUNGER cap | never above max(own speed, 0.9 × sprint = 6.75 m/s), hasted included | The player can always outrun a hungry enemy by sprinting; a fast enemy is never made slower by the cap |
-| BLACKOUT lighting | ambient ×0.3, sun ×0.12, cold tint 50 %, near-black fog colour; fade in 2.5 s (intro), out 2 s (breather) | Dark enough to change how the player moves; fog distance unchanged, so the view range is the same |
-| BLACKOUT visibility aids | 3 red emergency lamps (glow 3) with pools of red light on the floor (radius 4.5 m, 1.4 m in front, opacity 0.6); while the muzzle flash shows, the fill light +45 % of normal and 35 % warmer; eyeshine 0.14 | Safe zones to hold, gunfire as a light source, and enemies stay readable as pairs of eyes |
-| Visibility floors | ambient ≥ 0.25; eyeshine ≥ 0.1 whenever ambient < 0.6 | No mutation (or stack of overlays) can make enemies invisible |
-| STATIC bursts | every 6–10 s, 0.4–0.7 s long, first ≥ 4 s in; opacity 0.26 (clamp ≤ 0.35; bursts ≤ 0.8 s; ≥ 5 s apart) | Short, readable interruptions; 0.35 in the first browser pass hid too much and was lowered |
-| STATIC safety | under the HUD; clear centre 10 vmin → full at 22 vmin; jitter ≤ 3 Hz; still with reduced motion | Aim and HUD are never covered; photosensitivity |
-| DEATH CRY alarm | radius 8 m, alert 6 s, haste ×1.2 for 2.5 s (clamp ≤ 10 m, ×1.25, 3 s); never reinforcements | A kill in a crowd costs attention, a kill of a straggler costs nothing: rewards isolating targets. Much smaller than the Screamer's 18 m, ×1.35 for 6 s |
-| HIVE budget | ×1.2 (clamp ×0.5–1.5; mutations only) | A fifth more enemies at the same concurrency: a longer wave, not a denser one. ×1.3 with two surges hurt the tripwire's defender the most and killed a slightly slower one in 3 of 10 runs |
+| BLACKOUT lighting (D-046) | ambient ×0.14, sun ×0.04, cold tint 50 %, near-black fog colour; fade in 2.5 s (intro), out 2 s (breather) | Genuinely dark (the Phase 7 ×0.3 / ×0.12 still showed whole bodies); fog distance unchanged, so the view range is the same |
+| BLACKOUT readability (D-046) | eyes glow 1.4 on their own; bodies darkened toward silhouettes by 0.75 (× 0.8 of the albedo); a close enemy lifted back by 0.6 (full within 2.5 m, none beyond 7 m) | Zombies read as eyes on silhouettes; one at arm's length is always readable. Measured at 12 m: eye peak ~217 against a black torso and a wall of ~12 (0–255) |
+| BLACKOUT light sources | 3 red emergency lamps (glow 3) with pools of red light on the floor (radius 4.5 m, 1.4 m in front, opacity 0.6); while the muzzle flash shows, the fill light +45 % of normal and 35 % warmer | Safe zones to hold, gunfire as a light source; a silhouette shows against a pool |
+| Visibility floors (D-046) | ambient ≥ 0.12; whenever ambient < 0.6, eye glow ≥ 0.9 and proximity ≥ 0.4 (scaled by how dark it is) | No mutation (or stack of overlays) can make enemies invisible: the guarantee is eyes and proximity, not light |
+| Signal Glitch bursts (STATIC) | every 6–10 s, 0.4–0.7 s long, first ≥ 4 s in; grain 0.12 (clamp ≤ 0.35; bursts ≤ 0.8 s; ≥ 5 s apart) | Short, readable interruptions; the distortion is in the image now, so the grain is only a top coat |
+| Signal Glitch distortion (D-046) | 4 tear bands, shift ≤ 2.5 % of the width, colour split 0.4 %, afterimage 35 %, enemies drawn 0.18 s behind; pattern steps 3 Hz (clamps: 6 bands, 4 %, 0.6 %, 50 %, 0.25 s, 3 Hz) | Aim where they are going: at a Walker's 1.6 m/s the drawn body lags ~0.3 m, a Runner's ~0.9 m: noticeable, not a miss guarantee |
+| Signal Glitch safety | the HUD (DOM) never glitched; clear centre 10 vmin → full at 22 vmin; ≤ 3 Hz; reduced motion: one still pattern, no tears, no afterimage, no lag, colour split only | Aim and HUD are never covered; photosensitivity |
+| DEATH CRY alarm (D-046) | radius 8 m, alert 6 s **at the kill-time position** (last-known), haste ×1.25 for 3 s, frenzy 3 s (cooldown ×0.7, wind-up ×0.85, turn ×1.4); never reinforcements | Kill, then move: the pack rushes where you stood and must see you again. 9 m failed the survival tripwire on one seed, so 8 m stays |
+| Frenzy clamps (D-046) | duration ≤ 6 s; cooldown ≥ ×0.5; wind-up ≥ ×0.7; turn ≤ ×2; stagger ≤ ×1.6; never stacked (strongest wins, ends ≤ one duration after the latest) | Telegraphs stay readable; repeated alarms cannot build an unbounded buff |
+| HIVE budget | ×1.15 (clamp ×0.5–1.5; mutations only) | More enemies at the same concurrency: a longer wave, not a denser one. ×1.3 with two surges (Phase 7) and then ×1.2 (once the Spitter shifted wave 12's mix, Phase 7.1) each killed the tripwire's defender on one seed |
 | HIVE surge | 1, halfway through the queue; the wave's largest group + 1 (≤ 6); warning 2 s (clamp ≤ 3 surges, +2, 1–4 s) | A flank the player can see coming: the warning names the direction. Two +2 surges overwhelmed a slightly slower defender |
 | BLOOD MOON | Elite chance +0.15 (the trait clamp is ±0.2); Elite limit +1, +1 more every 5 waves after 9 (≤ +3); at least 1 Elite | Elites become the wave's focus; the budget stays the same, so fewer but tougher enemies |
+| BLOOD MOON guarantee (D-046) | first appearance on one of waves 9–12: while unseen, only its own roll (1/4, 1/3, 1/2, then certain), never the weighted draw; afterwards normal | Every run meets it early, 25 % on each of waves 9–12 (measured over 2000 runs: within 22–28 % each) |
 | BLOOD MOON lighting | ambient ×0.9, sun ×0.85, red tint 45 %, dark red fog | Mood, not darkness |
-| Survival tripwire | a scripted defender (fires every 0.33 s at the nearest visible enemy within 22 m, alternating head and body shots, never moves) that clears the unmutated waves 6, 9, 12 unhurt (10 seeds) must clear every mutated one without dying | Catches a mutation that silently makes a wave impossible (TESTING §3). Measured values below |
+| Survival tripwire | a scripted defender (fires every 0.33 s within 22 m, alternating head and body shots, never moves; since D-046 it picks targets like a player: a melee enemy within 5 m first, then visible non-melee enemies, then the nearest) that clears the unmutated waves 6, 9, 12 unhurt (10 seeds) must clear every mutated one without dying | Catches a mutation that silently makes a wave impossible (TESTING §3). Measured values below |
 
 **Survival tripwire measurements** (`signal/mutations.integration.test.ts`, `BALANCE_REPORT=1`; health lost by the defender from 100, no healing, 10 seeds per wave; every other run lost 0):
 
-| Wave 12 | Pass-1 first values | Final values |
-|---|---|---|
-| No mutation | 0 in all 10 | 0 in all 10 |
-| HUNGER | ×1.2: **died** in 1, 35 in 1 | ×1.15: 45 in 1 |
-| HIVE | ×1.3, two +2 surges: 60 and 15 | ×1.2, one +1 surge: 35 in 1 |
-| DEATH CRY | 15 in 1 | 15 in 1 |
-| BLOOD MOON, BLACKOUT, STATIC | 0 | 0 (BLACKOUT and STATIC identical to no mutation by construction) |
+| Wave 12 | Phase 7 first values | Phase 7 final | Phase 7.1 (with the Spitter and frenzies) |
+|---|---|---|---|
+| No mutation | 0 in all 10 | 0 in all 10 | 0 in all 10 |
+| HUNGER | ×1.2: **died** in 1, 35 in 1 | ×1.15: 45 in 1 | ×1.15: 75 in 1 (×1.16–1.18: **died** in 1) |
+| HIVE | ×1.3, two +2 surges: 60 and 15 | ×1.2, one +1 surge: 35 in 1 | ×1.15: 30 in 1 (×1.2: **died** in 1, 60 in 1) |
+| DEATH CRY | 15 in 1 | 15 in 1 | 8 m with frenzy: 30 in 1 (9 m: **died** in 1) |
+| BLOOD MOON | 0 | 0 | 15 in 1 |
+| BLACKOUT, STATIC | 0 | 0 | 0 (identical to no mutation by construction) |
 
 Waves 6 and 9: 0 in every run for every mutation. A slightly slower defender (0.35 s) already loses 60 on one unmutated wave-12 seed; there, the first values killed it in 1 (HUNGER) and 3 (HIVE) runs of 10.
 
@@ -317,6 +324,28 @@ Waves 6 and 9: 0 in every run for every mutation. A slightly slower defender (0.
 - **Not a player's experience:** it is a regression guard against impossible waves; real players move, and HUNGER's counter-play is exactly keeping distance.
 
 These are a regression check, not a player's experience: the defender stands still and never misses its rhythm.
+
+### 2.16 The Spitter (`src/config/enemies.ts`, Phase 7.1, D-046)
+
+Ranged (GAME_DESIGN §7.6): it punishes standing still at range, and every shot can be seen coming and dodged.
+
+| Value | Setting | Why |
+|---|---|---|
+| Health | 70 | Two Pistol headshots (65 + 65) or three body shots (78): a priority target that dies fast once reached |
+| Stagger | 25 within 1 s, 0.7 s | A Pistol body shot spoils a spit in progress |
+| Move speed / turn / acceleration | 1.7 m/s / 4 rad/s / 8 m/s² | Slow: it keeps its distance by retreating early, not by outrunning the player |
+| Detection / reaction | 22 m / 0.5 s | It sees the player from further than anything else |
+| Preferred range | holds 10–16 m; backs away inside 8 m (to 10 m); a retreat step must gain 1.5 m | Close enough to hit, far enough to need a dodge; rushing it works, and it cannot slide along a wall forever. Cornered, it spits where it stands |
+| Fire range | ≤ 18 m, in sight | No blind fire |
+| Wind-up (telegraph) | 1.0 s: it rears back, its throat glows acid green | Long enough to see and react to, from across the yard |
+| Recovery / cooldown | 0.8 s / 3.5 s (spent when the spit starts) | At most one spit every 3.5 s; an interrupted spit still costs the cooldown |
+| Projectile | 13 m/s on the low arc, gravity 7 m/s², radius 0.18 m, lifetime 3 s; aimed at the chest where the player is at release, **no lead** | About 1.1 s of flight at 14 m: strafing at walking speed (5 m/s) moves ~5 m, far outside the 0.53 m hit radius (tested) |
+| Damage | 14 direct; 6 splash within 1.6 m of a burst, never through walls | Standing still costs about a Walker hit; near misses cost little |
+| Threat cost | 2.5 | Between the Screamer (2) and the Tank (4) |
+| Drops | ammo, 30 % | Like the Screamer |
+| Sandbox | not in the training encounter | It would shoot across the range the Phase 2–5 browser checks use |
+
+Measured with the survival tripwire (§2.15): unmutated wave 12, with its one Spitter, stays at 0 health lost in all 10 seeds, since the defender shoots Spitters early.
 
 ---
 
@@ -335,3 +364,11 @@ These are a regression check, not a player's experience: the defender stands sti
 | 2026-09-29 | Signal Mutations: selection rules, the six v1 mutations, environment overlays, visibility floors, clamps | Initial Pass-1 values | Phase 7 (D-045). Verified by automated tests (data within clamps, selection properties over many seeds, generator per mutation, the lifecycle, determinism, the scripted-defender tripwire) and a browser check of each mutation's look; not play-tested by hand |
 | 2026-09-29 | STATIC opacity | 0.35 → 0.26; no screen blend; the clear centre widened | First browser look: the interference hid too much of the view |
 | 2026-09-29 | HUNGER; HIVE | speed and acceleration ×1.2 → ×1.15; budget ×1.3 → ×1.2, two +2 surges (40 %, 75 %) → one +1 surge (50 %) | The survival tripwire (§2.15): HUNGER ×1.2 killed a defender that clears the same unmutated waves unhurt (1 in 10, and the tripwire fails on it); HIVE hurt it most and killed a slightly slower one in 3 of 10 |
+| 2026-10-01 | BLACKOUT | ambient ×0.3 → ×0.14, sun ×0.12 → ×0.04; eyeshine (whole body) → eye glow 1.4, silhouette 0.75, proximity 0.6; floors ambient 0.25 → 0.12, eyes ≥ 0.9, proximity ≥ 0.4 | Phase 7 playtest: not dark enough and bodies glowed (D-046). Browser-measured: a 12 m Walker is a black silhouette with eyes at ~217/255; at 3 m it is lifted |
+| 2026-10-01 | STATIC → Signal Glitch | grain 0.26 → 0.12; new distortion (4 bands, 2.5 % shift, 0.4 % split, 35 % afterimage, 0.18 s enemy lag, 3 Hz) | Playtest: flat screen noise (D-046) |
+| 2026-10-01 | DEATH CRY | haste ×1.2 / 2.5 s → ×1.25 / 3 s; last-known alert; 3 s frenzy (×0.7 / ×0.85 / ×1.4); radius 8 m kept (9 m tried) | Playtest: too weak and ambiguous; 9 m killed the tripwire's defender on one wave-12 seed |
+| 2026-10-01 | Screamer | completed scream: 6 s frenzy (×0.6 / ×0.85 / ×1.6 / stagger ×1.4) | Playtest: not a priority target (D-046) |
+| 2026-10-01 | HIVE | budget ×1.2 → ×1.15 | With the Spitter in wave 12's mix, ×1.2 killed the tripwire's defender on one seed |
+| 2026-10-01 | HUNGER | ×1.15 kept (×1.18, 1.17, 1.16 tried) | Playtest asked for faster; each lost one wave-12 seed to plain walkers. Open for the owner |
+| 2026-10-01 | BLOOD MOON | first appearance guaranteed on waves 9–12 (exclusive roll, 25 % each) | Playtest: often not seen early (D-046) |
+| 2026-10-01 | Spitter; wave rules | Initial Pass-1 values (§2.16); unlock 10, caps, weights, opening | Phase 7.1 (D-046). Verified by automated tests (timing, ranges, dodge, splash, lifecycle) and browser checks; not play-tested by hand |

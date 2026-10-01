@@ -608,6 +608,40 @@ per step speed:  motor walkSpeed = config.moveSpeed × brain speedScale (a leap)
 - **Pools stay per archetype** (a freed Runner is never reused as a Tank); traits are per life, reset by `prepare`.
 - **Posture belongs to the rig** (`leanRig`): the view builds each body from its rig, so hit volumes and drawn bodies agree. Only short animation leans (a wind-up, a leap) are drawn without the rig following.
 
+**Phase 7.1 implementation (D-046).** A third behaviour (ranged), the first enemy projectiles, and two new alarm responses. It is still one state machine, one schedule and one combat pipeline.
+
+```text
+behaviours (config.behavior → brain), all built on ai/common.ts:
+  melee    (Walker, Runner, Tank)
+  screamer (Screamer)   standoff → wind-up → release: alarm {live, frenzy}
+  ranged   (Spitter)    standoff → wind-up (sight, ≤ attackRange) → release: lobVelocity → `spat`
+ai/common.ts (+): standoffBand, planRetreat, thinkStandoff, updateStandoff, tooClose,
+                  chaseSpot (live or last-known), windupOf / cooldownOf (frenzy-scaled)
+
+spat (enemy event) → EnemyProjectiles.fire          [FixedUpdateSystem, stepped after EnemyManager]
+  pool of 32 · gravity · per step a swept segment vs the level (ray) and vs each target's capsule
+  direct hit → target.receiveHit(damage) · level hit → splash on targets in radius with line of sight
+  all damage through EnemyTarget/PlayerHealth (D-029) · bindToRun: cleared on PLAYING,
+  WAVE_COMPLETE, GAME_OVER, VICTORY
+  → ProjectileView (presentation): pooled acid blobs, splats on `projectileImpact`
+
+alarm (+ alertMode 'live' | 'lastKnown', frenzy | null)
+  → EnemyManager.respondToAlarm: alertTo (lastKnown copies the target's position at the cry, then
+    only sight updates it) · haste · frenzy (strongest scale, end = max(until, now + duration),
+    clamped; stagger resistance through combat.configure) → `frenzied`
+```
+
+| Module | Layer | Role |
+|---|---|---|
+| `enemies/ai/rangedBrain.ts` | sim | The Spitter: keeps its band, spits when it sees the target in range, never point-blank (`tooClose`) |
+| `enemies/EnemyProjectiles.ts` | sim | Projectile pool, flight, hits and splash |
+| `enemies/ProjectileView.ts` | presentation | The acid and its splats |
+| `enemies/Enemy.ts` | sim | + frenzy (scales, end time, `clampFrenzy`), `investigating` (heading to a last-known spot) |
+| `enemies/EnemyView.ts` | presentation | + the eye/silhouette/proximity shader patch (§7.10), alarm looks (sonic wave, echo, columns; 8 rings), frenzied eyes, the Signal Glitch lag (`desync`) |
+
+- **The Screamer and the Spitter share the standoff.** The band, the retreat with its walkable check and the cornered rule are one implementation in `common.ts`. The Screamer's behaviour is unchanged (its tests are untouched).
+- **Projectiles are not enemies.** They have their own pool, so the enemy cap, separation and combat never see them. They never hit enemies.
+
 ### 7.5 Navigation (D-008)
 
 - **Flow fields.** Every zombie chases the same target, so one Dijkstra pass over the nav grid from the player's cell steers all of them. Cost scales with map size, not enemy count.
@@ -725,6 +759,17 @@ Three sources change the world. They are layered rather than competing:
 - `world/LightingController.ts` (presentation) writes the resolved channels to the rig `WorldView` builds at load: the hemisphere and sun (intensity, tint), fog and background colour, the level's emergency lamps (glow) and their floor pools (unlit additive discs placed by a raycast to the floor, shown only while lit: three real point lights cost ~18 % of the frame in software rendering, TESTING §7.4). While the muzzle flash shows (`WeaponView.muzzleFlashVisible`), it raises and warms the hemisphere by the `muzzleLight` channel (a blackout), instead of a muzzle point light (~7 % of the frame); `EnemyView` sets the eye glow from `eyeshine`. Nothing is added at runtime, so the shader program count never changes.
 - Overlays: `blackout` (priority 20) and `bloodMoon` (priority 10).
 
+**Phase 7.1 (D-046): visibility rests on eyes and proximity, not light.**
+- **Channels:** `eyeshine` became three channels: `eyeGlow` (eyes only), `silhouette` (how far bodies darken) and `proximity` (how much a close body is lifted).
+- **Floors:** the ambient floor is 0.12. Whenever the ambient is below `darkBelow`, eyes glow at least `eyeGlowInDark` and close bodies are lifted at least `proximityInDark`, in proportion to how dark it is.
+- **Blackout values:** ambient 0.14, sun 0.04, eye glow 1.4, silhouette 0.75, proximity 0.6.
+- **The shader patch:** `EnemyView` patches the enemy `MeshStandardMaterial` once (`onBeforeCompile`, with a constant `customProgramCacheKey`), so every enemy shares one program, compiled at load.
+  - The merged body geometry carries an `aEye` attribute: 1 on the eye spheres, 0 elsewhere.
+  - The patch adds `uEyeColor × aEye × uEyeGlow` to the emissive light.
+  - It darkens the body's albedo by `uSilhouette` (eyes excepted), less within ~7 m by `uProximity`.
+  - The channels are uniform writes per frame.
+  - The whole-body emissive is left to wind-up telegraphs and hit flashes.
+
 ### 7.11 Bosses
 
 - **`Boss` reuses the enemy framework** (health, hitboxes, AI scheduler) and adds a **phase FSM**.
@@ -753,6 +798,19 @@ Three sources change the world. They are layered rather than competing:
 - **Pooled:** `Pool<T>` for effects, fixed-capacity ring buffers for decals and impacts.
 - **`ScreenEffects`** handles overlays and post-processing: damage flash, low-health vignette, STATIC interference.
 - **Phase 7:** STATIC's timing lives in the simulation (`modifiers/ScreenEffects.ts`, seeded, simulated time); the picture is `ui/StaticOverlay.ts`, a noise canvas drawn once and shown by CSS opacity and a ≤ 3 Hz jitter (none with `prefers-reduced-motion`). No WebGL post-processing.
+- **Phase 7.1 (D-046): Signal Glitch, the first post-processing, only during bursts.**
+  - **Per frame:** `main.ts` turns the burst into a `GlitchFrame` (`render/glitch.ts`, pure: envelope, ≤ 3 Hz pattern steps, seeded tear bands, reduced motion). `WorldView.render` hands it to `render/GlitchPass`.
+  - **Idle:** the frame is `Renderer.render`, as before.
+  - **Active:**
+    - `Renderer.prepare` (resize, camera);
+    - the scene into a single-sample render target;
+    - at a new pattern step, that target into the afterimage target (the glitch quad drawn with no glitch);
+    - one full-screen quad to the screen: tear bands, a colour split, the afterimage, and a clear centre around the crosshair.
+  - **Same programs as the screen.** The target is flagged `isXRRenderTarget`, with an sRGB colour space and RGBA8 storage, so three gives it the screen's tone mapping and output encoding. The scene keeps its on-screen programs, and the program count stays 12.
+  - **It never reads the screen.** Copying the antialiased default framebuffer sometimes read black (TESTING §8).
+  - **Prewarm:** both targets are allocated and the quad compiled in `prewarm` (load, context restore). After a context loss the pass takes fresh targets: three's dispose listeners on the old ones belong to the dead context.
+  - **Never glitched:** the HUD (DOM above the canvas) and hit volumes. `EnemyView` only draws enemies `desync × envelope` seconds behind.
+  - `ui/StaticOverlay` remains as a faint grain under the HUD.
 
 ### 7.15 Save and settings (D-019)
 
@@ -880,6 +938,13 @@ Budgets below are for the weak reference at Low, 1080p, unless noted. They are s
 **Phase 7 baseline** (Signal Mutations; TESTING.md §7.4):
 - simulation per step unchanged by any mutation (~0.2 ms at 24 alive); a HIVE surge step ~1 ms; 24 deaths in one step under DEATH CRY 0.42 ms;
 - **no real-time lights were added.** Three emergency and one muzzle point light, present from load, cost ~25 % of the frame in software rendering in every wave, even at intensity 0; they were replaced by emissive lamps with unlit floor pools and a fill-light rise while the muzzle flash shows. Frame rates are within noise of Phase 6; the program count is constant (11).
+
+**Phase 7.1 baseline** (TESTING.md §7.4):
+- **Simulation:** within noise of Phase 7, acid included: 0.31–0.49 ms per step at 24 alive; 24 deaths in one step under DEATH CRY, with frenzy and last-known alerts, 0.68–0.70 ms.
+- **Browser:** within the run-to-run spread outside Signal Glitch bursts.
+- **Program count:** 12 (the glitch quad, compiled at load), constant through every mutation and burst.
+- **Burst frames:** with a burst forced every second, frames are ~16 % slower (budget ≤ 25 % while a burst shows). A multisampled glitch target would cost ~27 %, so it is single-sample.
+- **Draw calls:** + the acid blobs and splats while they show. Each enemy is still one draw call (the shader patch adds none).
 
 **Measurement tools:**
 - the debug overlay and `tls.stats()` (our CPU cost, draw calls);

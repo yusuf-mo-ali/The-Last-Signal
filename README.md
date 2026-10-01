@@ -2,15 +2,16 @@
 
 **Browser zombie FPS, Waves Edition.** Fast FPS combat, roguelite progression, wave survival, adaptive enemies and dynamic world events, running in the browser with no install.
 
-> **Status: Phase 7 (Signal Mutations) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and survive **waves** of the v1 zombie roster:
+> **Status: Phase 7.1 (Mutation & Combat Polish) complete.** You can enter a grey-box prototype map, move with full collision, shoot the Pistol and punch with Bare Hands, and survive **waves** of the v1 zombie roster:
 > - the **Walker**: slow and durable, with a swipe you can dodge;
 > - the **Runner** (from wave 3): fast and fragile; it zig-zags in the open and leaps at you;
-> - the **Screamer** (from wave 4): keeps its distance and screams to call and hasten the others, and to pull the next group in early; shoot it first;
-> - the **Tank** (from wave 6): a slow wall that soaks body shots and must be shot in the head.
+> - the **Screamer** (from wave 4): keeps its distance and screams to call, hasten and **frenzy** the others (faster attacks, harder to stagger), and to pull the next group in early; shoot it first;
+> - the **Tank** (from wave 6): a slow wall that soaks body shots and must be shot in the head;
+> - the **Spitter** (from wave 10): keeps 10–16 m away and lobs acid after a clear wind-up; strafe out of the arc, then close in.
 >
 > Each wave is announced, arrives from out of sight at spawn points around the facility, and is followed by a 10 s breather. Waves grow in size and mix (swarms, heavy waves, ambushes), and from wave 8 zombies can be **Armored** or **Helmeted**, from wave 13 **Elite**. Clearing wave 20 transmits the signal and wins the run; `?endless=1` keeps going. You have 100 health and no healing yet; when it runs out the run ends on the wave reached, and a click starts a new one. The Phase 3–5 training range and test encounter are still available with `?sandbox=1`.
 >
-> From wave 4 every wave (except the finale) carries a **Signal Mutation**, announced before the wave with its rule and a hint, and shown top centre while it lasts: **Blackout** (the lights fail; red emergency lights and your muzzle flash light the way), **Hunger** (zombies 15 % faster, never faster than your sprint), **Static** (bursts of interference, never over your HUD), **Death Cry** (every kill alerts and hurries the zombies around it), **Hive** (a bigger wave with an announced surge) and **Blood Moon** (Elites under a red sky). Upgrades, adaptation and bosses come in later phases.
+> From wave 4 every wave (except the finale) carries a **Signal Mutation**, announced before the wave with its rule and a hint, and shown top centre while it lasts: **Blackout** (near-darkness: zombies are silhouettes with glowing eyes, and close ones stay readable), **Hunger** (zombies 15 % faster, never faster than your sprint), **Signal Glitch** (bursts that tear the image and make zombies lag behind where they really are; the crosshair and HUD stay clear), **Death Cry** (every kill sends nearby zombies, frenzied, to where you stood), **Hive** (a bigger wave with an announced surge) and **Blood Moon** (Elites under a red sky, guaranteed once in waves 9–12). Upgrades, adaptation and bosses come in later phases.
 > See [`PROGRESS.md`](PROGRESS.md) for live status.
 
 ---
@@ -20,7 +21,7 @@
 You are trapped in a failing communications facility. Survive escalating zombie waves while restoring a mysterious signal tower.
 
 - **The horde adapts to how you play.** Camp on high ground and they learn to climb. Rely on the shotgun and they come armored.
-- **Every wave carries a Signal Mutation** that bends the rules: blackouts, frenzied hunger, static interference, screaming deaths.
+- **Every wave carries a Signal Mutation** that bends the rules: blackouts, frenzied hunger, signal glitches, screaming deaths.
 - **Build as you survive.** Choose one of three upgrades after each wave, and let a playstyle emerge.
 - **Restore the signal.** Collect components, restore power, repair and charge the transmitter, then transmit, all while the waves keep coming.
 
@@ -85,13 +86,13 @@ Development builds (`npm run dev`) include a debug overlay and console commands.
   - `tls.weapons()` shows the loadout and ammo; `tls.giveAmmo()`, `tls.setInfiniteAmmo(true)`, `tls.giveWeapon('pistol', 'secondary')` and `tls.unlockSecondary()` change it.
   - `tls.dummies()` and `tls.combat()` show the training dummies and the last hits; `tls.spawnDummy('zoned')`, `tls.resetDummies()`, `tls.aimAtTarget('dummy-2', 'ARM_LEFT')`, `tls.showHitboxes()`, `tls.damageNumbers(false)` and `tls.spawnPickup('ammo')` help test combat.
   - `tls.enemies()` and `tls.enemy('walker-1')` show every enemy's state, health, target and attack; `tls.spawnEnemy()`, `tls.spawnWalkers(16)`, `tls.alertEnemies()`, `tls.freezeEnemies()`, `tls.setEnemyState('walker-1', 'STAGGER')`, `tls.damageEnemy('walker-1', 25)`, `tls.killEnemy('walker-1')`, `tls.killAll()` and `tls.clearEnemies()` control them; `tls.showAI()` draws their states, ranges, targets and routes.
-  - `tls.spawnEnemy('runner', 10)`, `tls.spawnEnemy('tank', 8, 'armored,elite')`, `tls.spawnMixed(8)` spawn any archetype, with traits; `tls.traits()`, `tls.applyTrait('tank-3', 'helmeted')`, `tls.removeTrait('tank-3', 'elite')` and `tls.setTraits('walker-1', ['armored'])` change traits live; `tls.forceAbility('screamer-4')` makes a Screamer scream now.
+  - `tls.spawnEnemy('runner', 10)`, `tls.spawnEnemy('tank', 8, 'armored,elite')`, `tls.spawnMixed(8)` spawn any archetype, with traits; `tls.traits()`, `tls.applyTrait('tank-3', 'helmeted')`, `tls.removeTrait('tank-3', 'elite')` and `tls.setTraits('walker-1', ['armored'])` change traits live; `tls.forceAbility('screamer-4')` makes a Screamer scream (or a Spitter spit) now; `tls.projectiles()` lists the acid in flight.
   - `tls.playerHealth()`, `tls.setGodMode(true)`, `tls.healPlayer()`, `tls.damagePlayer(10)` and `tls.killPlayer()` test the player's health and game over.
   - `tls.transition('LOADING')` requests a game state change.
   - `tls.loseContext()` and `tls.restoreContext()` simulate a GPU reset.
   - `tls.throwError()` shows the error screen.
   - `tls.wave()` shows the current wave (state, theme, budget, queued, alive, timers); `tls.startWave(12)` jumps to a wave, `tls.skipWaveTimer()` ends the announcement or breather, `tls.completeWave()` clears the wave, `tls.pauseSpawning(true)` holds spawns, `tls.setEndless(true)` goes past wave 20, and `tls.runStats()` shows the run's tallies.
-  - `tls.startWave(9, 'BLOOD_MOON')` jumps to a wave with a given mutation (`'none'` for none); `tls.mutation()` shows the current one (phase, what is applied, next STATIC burst, surges); `tls.triggerMutation('HIVE')` sets the current wave's (during its announcement) or the next wave's mutation; `tls.mutationSchedule(1, 20)` lists a run's mutations; `tls.setMutations(false)` turns them off; `tls.clearMutation()` removes the current effects; `tls.staticBurst()` forces a burst; `tls.mutations()` lists the catalogue.
+  - `tls.startWave(9, 'BLOOD_MOON')` jumps to a wave with a given mutation (`'none'` for none); `tls.mutation()` shows the current one (phase, what is applied, next STATIC burst, surges); `tls.triggerMutation('HIVE')` sets the current wave's (during its announcement) or the next wave's mutation; `tls.mutationSchedule(1, 20)` lists a run's mutations; `tls.setMutations(false)` turns them off; `tls.clearMutation()` removes the current effects; `tls.staticBurst()` forces a Signal Glitch burst (`tls.mutation().glitch` shows what the screen draws); `tls.mutations()` lists the catalogue.
   - `tls.waveTable(1, 25)` prints the difficulty curve; `tls.previewWave(20)` lists what a wave will contain; `tls.spawnPoints()` and `tls.showSpawns()` show where the next group could enter (green) and why not (red: in view, orange: too close, grey: no room, violet: reserved).
 - The plan's remaining gameplay commands (`triggerMutation`, `spawnBoss`) are listed already. They report which phase will implement them.
 

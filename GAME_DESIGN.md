@@ -43,7 +43,7 @@ A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared a
 | 1–3 | Introduction | Collect components | Walker; Runner from wave 3 |
 | 4–5 | More variety | Collect components | Screamer; first mutations |
 | 6–7 | More variety | Restore power | Tank |
-| 8–10 | Higher pressure | Restore power | First adaptations (Armored / Helmeted modifiers) |
+| 8–10 | Higher pressure | Restore power | First adaptations (Armored / Helmeted modifiers); BLOOD MOON first on 9–12; the Spitter at 10 |
 | 11–12 | Higher pressure | Repair transmitter | Stronger adaptations (the Climber only as an adaptive response to high-ground play, D-043) |
 | 13–15 | Complex combinations | Repair transmitter | Elite modifier |
 | 16–19 | Complex combinations | Charge transmitter | Mixed compositions; strongest mutations |
@@ -57,6 +57,8 @@ A run is 20 waves in one compact facility. It ends in victory (wave 20 cleared a
 **Implemented (Phase 6, D-044):** the introduction order in the table: Runner from wave 3, Screamer from 4, Tank from 6, Armored and Helmeted from 8, Elite from 13. The Climber is never part of a normal wave. There is a 3 s announcement and a 10 s breather. Until the Siren exists (Phase 13), wave 20 is a finale wave with guaranteed Tanks and Screamers. The signal phases and upgrades are not built yet.
 
 **Implemented (Phase 7, D-045):** Signal Mutations (§9). Waves 1–3 and wave 20 have none; every other wave (endless included) has exactly one.
+
+**Implemented (Phase 7.1, D-046):** the Spitter from wave 10 (one on its first wave); BLOOD MOON first appears on one of waves 9–12 in every run.
 
 This maps onto the plan's first-session curve (§33):
 
@@ -218,10 +220,11 @@ Multipliers are configurable, and archetypes can override them (a Tank's body re
 | **Walker** | Baseline; teaches headshots | Slow, high health, melee | Headshots, positioning | Yes |
 | **Runner** | Punishes standing still; dangerous in groups | Fast, low health, lunges | Crowd control, retreat paths | Yes |
 | **Tank** | Forces focus fire; blocks chokepoints | Very slow, very high health, body-shot resistant; only headshots stagger it | Aim for the head weak point; kite | Yes |
-| **Screamer** | Forces target prioritisation | Keeps its distance; screams to alert and hasten nearby zombies; the scream triggers a screen/audio effect | Kill it first; interrupt the scream | Yes |
+| **Screamer** | Forces target prioritisation | Keeps its distance; screams to alert, hasten and frenzy nearby zombies; the scream triggers a screen/audio effect | Kill it first; interrupt the scream | Yes |
+| **Spitter** (D-046) | Punishes standing still at range | Keeps its distance (10–16 m); a telegraphed lob of acid at where the player is | Keep moving; rush it (it backs off before it spits); interrupt the wind-up | Yes (from wave 10) |
 | **Climber** | Counters camping on high ground | Scales walls using climb links; medium health | Move; watch the climb points | **Deferred** (O-3 resolved, D-043): not in normal waves; possible adaptive response |
 
-**The v1 roster (O-3, resolved by D-043).** Walker, Runner, Tank and Screamer are the default roster: they are what normal waves are built from. The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically (climb links, vertical navigation, climb animations) and only matters against one play style, so it is **deferred and kept as adaptive content**: later, the adaptive system (§10) may bring Climbers in as its response to heavy high-ground use, rather than them appearing in every run. Until it exists, the "elevated position" adaptation rule falls back to Runners with spawns biased toward flanking routes. The code keeps room for it (an archetype is data plus a behaviour; climb links belong in the level's navigation data).
+**The v1 roster (O-3, resolved by D-043; the Spitter added by D-046).** Walker, Runner, Tank, Screamer and (from wave 10) Spitter are the default roster: they are what normal waves are built from. The plan lists 5 archetypes (§12) but the initial build targets 4 (§42). The Climber is the most expensive technically (climb links, vertical navigation, climb animations) and only matters against one play style, so it is **deferred and kept as adaptive content**: later, the adaptive system (§10) may bring Climbers in as its response to heavy high-ground use, rather than them appearing in every run. Until it exists, the "elevated position" adaptation rule falls back to Runners with spawns biased toward flanking routes. The code keeps room for it (an archetype is data plus a behaviour; climb links belong in the level's navigation data).
 
 **Modifiers (traits)** (overlays on any archetype, D-012; implemented in Phase 5, §7.4):
 - **Armored:** flat armor on torso and limbs.
@@ -287,8 +290,20 @@ Support that never hurts the player itself: it changes *what* to shoot first. BA
 - **Keeps its distance:** it closes to about 11 m, holds its ground between 6 and 11 m facing the player, and backs away if the player comes closer than 6 m.
 - **The scream (the telegraph):** within 14 m and in sight, it throws its arms up and glows violet for 1.2 s, then screams. Everyone hears it within 18 m: nearby zombies learn where the player is (for 8 s) and move 35% faster for 6 s. The player sees a violet shockwave ring and, if within earshot, a violet pulse and shudder at the screen's edges. It can scream again 10 s after the last scream started.
 - **Interrupt it:** any hit of 25 or more during the wind-up staggers it and cancels the scream, and the cooldown is still spent.
+- **Frenzy (D-046):** a completed scream also frenzies everyone within 18 m for 6 s: they attack sooner (cooldown ×0.6), wind up faster (×0.85, never below 70 %), turn faster (×1.6) and shrug off staggers (×1.4: one Pistol body shot no longer staggers a frenzied Runner). Their eyes flare violet. The scream reads as a violet **sonic wave**: three rings in a row and a column of light. An interrupted scream frenzies nobody.
 - **Fragile:** 80 health (four body shots or two headshots).
 - **Look:** tall and thin with a big pale head and a gaping mouth, violet eyes.
+
+### 7.5a The Spitter (Phase 7.1, D-046)
+
+A ranged zombie: it punishes standing still at range, and every shot can be seen and dodged. No enemy uses hitscan. BALANCING.md §2.16.
+
+- **Keeps its distance:** it closes in beyond 16 m (or without sight), holds between 10 and 16 m, and backs away when the player comes within 8 m. Too close, it backs off **before** it spits, so rushing it works; cornered against a wall, it spits where it stands.
+- **The spit (the telegraph):** within 18 m and in sight, it rears back and its throat glows acid green for 1.0 s. Then one glob of acid arcs at where the player is at that moment, with no lead: about a second of flight at 14 m, so strafing dodges it. A direct hit costs 14; a glob bursting nearby splashes 6 within 1.6 m, never through a wall. At most one spit every 3.5 s.
+- **Interrupt it:** a Pistol body shot (25 or more) during the wind-up staggers it and spoils the spit; the cooldown is still spent.
+- **Fragile:** 70 health (two headshots or three body shots).
+- **Waves:** from wave 10, exactly one on its first wave, then up to 1 + ⌊(n − 10)/5⌋; more in ambush waves, fewer in heavy ones; never in a wave's opening.
+- **Look:** sickly yellow-green, hunched, a swollen throat and acid-green eyes.
 
 ### 7.6 Traits: Armored, Helmeted, Elite (Phase 5, D-043)
 
@@ -340,10 +355,10 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 
 | Mutation | Rule change | Tactical problem | Counter-play | Effect kind | v1 |
 |---|---|---|---|---|---|
-| **BLACKOUT** | Lights drop sharply; emergency lights stay on | Visibility | Hold lit zones; muzzle flash lights the area | environment | Yes |
+| **BLACKOUT** | Lights drop sharply; zombies become silhouettes with glowing eyes | Visibility | Hold lit zones; watch for eyes; muzzle flash lights the area | environment | Yes |
 | **HUNGER** | Enemy movement speed up | Less time per target | Positioning, retreat routes | stat | Yes |
-| **STATIC** | Periodic visual interference | Information denial | Rely on audio cues | screen | Yes |
-| **SCREAM** (shown as **DEATH CRY**) | Enemy deaths alert nearby enemies | Every kill pulls more attention | Fight at range; isolate targets | trigger | Yes |
+| **STATIC** (shown as **SIGNAL GLITCH**) | The image tears and zombies are drawn a moment behind | Information denial | Aim ahead; rely on audio cues | screen | Yes |
+| **SCREAM** (shown as **DEATH CRY**) | Enemy deaths send nearby enemies, frenzied, to where the player stood | Every kill pulls more attention | Kill, then move; isolate targets | trigger | Yes |
 | **HIVE** | Extra spawn events | Surprise flanks | Map awareness | spawnRule | Yes |
 | **BLOOD MOON** | Higher chance of Elite enemies | High-value targets | Prioritise; earn bonus rewards | spawnRule | Yes |
 | **LOW GRAVITY** | Player and enemy physics change | Movement and aim relearned | Vertical play | stat (`world.gravity`) | **Deferred (D-045)** |
@@ -359,22 +374,22 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 - The icon stays on the HUD for the whole wave.
 - **[Proposed]** Mutated waves pay a small reward bonus, so they read as a challenge rather than just a nerf.
 
-**BLACKOUT visibility [O-10, updated by D-045].** No flashlight for now: BLACKOUT is played with the red emergency lights, the muzzle flash (which lights the scene) and glowing enemy eyes. A flashlight is reconsidered after a hands-on playtest.
+**BLACKOUT visibility [O-10, updated by D-045 and D-046].** No flashlight for now: BLACKOUT is played with the red emergency lights, the muzzle flash (which lights the scene), zombies as dark silhouettes with glowing eyes, and a zombie close to the player lifted out of the dark. A flashlight is reconsidered after the next hands-on playtest.
 
-### 9.1 Implemented (Phase 7, D-045; values in BALANCING §2.15)
+### 9.1 Implemented (Phase 7, D-045; Phase 7.1, D-046; values in BALANCING §2.15)
 
 **When.** None on waves 1–3 (the player learns the basics first) or on wave 20 (the finale / boss rules). Exactly one on every other wave, endless waves included. The draw is seeded per run and wave, so a seed always gives the same sequence.
 
 | Mutation | First wave | What the player reads (rule · hint) | What it does |
 |---|---|---|---|
 | **HUNGER** | 4 | "Zombies move 15 % faster." · "Keep your distance and a way out." | Enemy speed and acceleration ×1.15 while the wave is live. Never above max(the enemy's own speed, 90 % of the player's sprint): the player can always outrun a Walker, a Tank or a Screamer, and a Runner stays below the sprint. The Runner's leap is unchanged |
-| **BLACKOUT** | 4 | "The lights are failing; only the red emergency lights stay on." · "Hold the lit zones. Your muzzle flash lights the way." | The lights fade to about a third over the announcement; three red emergency lights come on; each shot lights the area; enemy eyes glow. The fog distance and the HUD are untouched. The light comes back during the breather |
-| **DEATH CRY** (id `SCREAM`) | 5 | "Every kill cries out: zombies nearby surge at you." · "Kill them apart, or from range." | Each death alerts enemies within 8 m and hurries them (×1.2 for 2.5 s). A small red ring at the body shows its reach. It never brings more zombies |
-| **STATIC** | 6 | "Signal interference breaks up your view now and then." · "Your crosshair and HUD stay clear. Keep tracking through it." | Bursts of interference every 6–10 s, each 0.4–0.7 s, the first ≥ 4 s into the wave. The layer is under the HUD, at most 26 % opaque and nearly clear around the crosshair; it jitters at most 3 times a second and not at all with reduced motion. The badge flickers with each burst |
-| **HIVE** | 7 | "The horde is bigger and surges in at once midway." · "Watch for the surge warning and turn to face it." | 20 % more threat budget (the same concurrency cap, so a longer wave) and a surge halfway through: "HIVE SURGE · EAST" and an arrow warn 2 s before a bigger group (one more than the wave's largest, up to 6) arrives there |
-| **BLOOD MOON** | 9 | "Elite zombies are far more common." · "Fewer, tougher enemies: pick your targets." | A red sky; the Elite chance +15 %, one more Elite allowed (more on later waves), and at least one Elite. The budget stays the same: fewer, tougher enemies. Before wave 13 it is the only way to meet Elites. The badge counts them ("ELITES ×2") |
+| **BLACKOUT** | 4 | "The lights are failing; only the red emergency lights stay on." · "Hold the lit zones. Your muzzle flash lights the way." | The lights fade to near-dark (about a seventh) over the announcement; three red emergency lights come on; each shot lights the area. Zombies are dark silhouettes whose eyes glow on their own; one within a few metres is lifted back out of the dark, so close range stays fair (D-046). The fog distance and the HUD are untouched. The light comes back during the breather |
+| **DEATH CRY** (id `SCREAM`) | 5 | "Every kill cries out: zombies nearby rush where you stood, in a frenzy." · "Kill, then move: they charge your last position." | Each death tells enemies within 8 m where the player stood at the kill (not where they go next): they rush that spot, hurried (×1.25 for 3 s) and frenzied for 3 s (attacking sooner, winding up faster, turning faster), and must see the player again to find them (D-046). A red echo (two rings and a short flare) at the body shows its reach; frenzied eyes flare red. It never brings more zombies and cannot chain |
+| **SIGNAL GLITCH** (id `STATIC`) | 6 | "The signal tears: zombies flicker out of place." · "Aim where they're going, not where they flicker. Your crosshair stays clear." | Bursts every 6–10 s, each 0.4–0.7 s, the first ≥ 4 s into the wave (D-046). During a burst the 3D image tears into slipping bands, splits its colours slightly and keeps an afterimage, and zombies are drawn about 0.18 s behind where they are (their hit volumes are not), so the player aims ahead. The centre around the crosshair stays clear, the HUD is never glitched, the pattern changes at most 3 times a second, and with reduced motion only a slight colour split remains. A faint grain sits under the HUD; the badge flickers with each burst |
+| **HIVE** | 7 | "The horde is bigger and surges in at once midway." · "Watch for the surge warning and turn to face it." | 15 % more threat budget (the same concurrency cap, so a longer wave) and a surge halfway through: "HIVE SURGE · EAST" and an arrow warn 2 s before a bigger group (one more than the wave's largest, up to 6) arrives there |
+| **BLOOD MOON** | 9 | "Elite zombies are far more common." · "Fewer, tougher enemies: pick your targets." | A red sky; the Elite chance +15 %, one more Elite allowed (more on later waves), and at least one Elite. The budget stays the same: fewer, tougher enemies. Before wave 13 it is the only way to meet Elites. Every run meets it first on one of waves 9–12 (25 % each, D-046), then it can come back by the normal rules. The badge counts them ("ELITES ×2") |
 
-**Selection.** A mutation's first wave must have come. The previous wave's mutation is never repeated, and two sight mutations (BLACKOUT, STATIC) never follow each other. A mutation seen in the last three waves is less likely.
+**Selection.** A mutation's first wave must have come. The previous wave's mutation is never repeated, and two sight mutations (BLACKOUT, Signal Glitch) never follow each other. A mutation seen in the last three waves is less likely. BLOOD MOON's first appearance is guaranteed within waves 9–12: until it has appeared, on each of those waves it comes only by its own roll (1/4, 1/3, 1/2, then certain), never through the normal draw.
 
 **The player always knows why.**
 - During the announcement: a card under "WAVE N" with the name in its colour, the rule and a counter-play hint. Only lighting changes during the announcement; nothing that changes play acts before the wave starts.
@@ -383,14 +398,14 @@ Each mutation is pure data made from effect kinds (D-009). The plan lists 8 muta
 - On death: "You died · Wave 7 · Hunger".
 
 **The Screamer, DEATH CRY and adaptation are different things.**
-- A Screamer's scream (§7.5) is an enemy doing something: a wind-up the player can interrupt, a large **violet** ring, a violet pulse at the screen edges, and the next group of the wave arrives early.
-- DEATH CRY is a rule of the wave: every death, a small **red** ring, no screen pulse, and never extra zombies.
+- A Screamer's scream (§7.5) is an enemy doing something: a wind-up the player can interrupt, a large **violet** sonic wave (three rings and a column), a violet pulse at the screen edges, a frenzy with violet eyes, and the next group of the wave arrives early.
+- DEATH CRY is a rule of the wave: every death, a small **red** echo (two rings and a flare), red eyes on the frenzied, no screen pulse, and never extra zombies.
 - Adaptation (§10, Phase 8) is explained after a wave and changes which enemies come next; it never raises alarms and never chooses mutations.
 
 **Guardrails.** A mutation can never make a wave silently impossible or unfair:
 - it never changes the concurrency cap, the spawn distance or view rule, the damage window (none in the announcement or breather), unlocks or the roster;
 - speeds, budgets, surges, Elites, alarm reach and haste, darkness and interference strength are all capped, in the data and again when applied;
-- a scripted test player that clears waves 6, 9 and 12 unhurt without a mutation must also clear them under every mutation without dying (10 seeds each). It led to a gentler HUNGER (15 %) and HIVE (one surge).
+- a scripted test player that clears waves 6, 9 and 12 unhurt without a mutation must also clear them under every mutation without dying (10 seeds each). It led to a gentler HUNGER (15 %) and HIVE (one surge, then ×1.15 once the Spitter joined wave 12), and kept DEATH CRY's reach at 8 m (D-046).
 
 ---
 
@@ -563,6 +578,7 @@ Minimal. The player must understand the situation within one second (§22).
 - **Phase 4 placeholder:** health bottom left (`HEALTH 85` and a bar) and a brief red flash at the screen edges when the player is hit; "You died / Click to start a new run" at game over.
 - **Phase 6 placeholder:** `WAVE 7 · 12 LEFT` top left (queued + alive), a centred "WAVE 7" banner during the announcement and "WAVE 7 CLEARED · NEXT WAVE IN 8" during the breather.
 - **Phase 7 placeholder (D-045):** the mutation card under the wave banner during the announcement (name, rule, hint); the badge top centre for the whole wave (`◆ BLOOD MOON · ELITES ×2`), flickering with STATIC bursts and reading `… LIFTED` in the breather; the HIVE surge warning under it with a direction arrow; the STATIC layer under every HUD element.
+- **Phase 7.1 (D-046):** the Signal Glitch tears the 3D image only (the HUD is DOM above it, never glitched), and the grain under the HUD is fainter; frenzied zombies show it in their eyes (red: death cry, violet: scream); the Spitter's acid is a glowing green glob with a splat where it lands.
 - **Secondary:** wave and enemies remaining (top left), the active mutation (top centre), signal progress (top right) and Scrap (small).
 - **Optional (§22):** crosshair, damage direction indicator, kill feed, mutation announcement banner.
 - **Low health:** vignette plus a heartbeat sound (§23).
@@ -581,6 +597,9 @@ Audio should warn the player of danger before they see it (§23).
 | Mutation | Short "signal corruption" sound per mutation |
 | Runner approaching | Fast footsteps, spatialised, audible before the Runner is in view |
 | Screamer charging | Rising shriek wind-up, so the player can interrupt it |
+| Spitter winding up (D-046) | A wet, rising gurgle from its direction, so the player knows to move before the acid flies; a splat on impact |
+| Frenzy (D-046) | A short snarl layer on frenzied zombies, red (death cry) or violet (scream) in tone, matching their eyes |
+| Signal Glitch burst | A crackle of corrupted signal with each burst |
 | Tank | Heavy thuds with a low-frequency rumble |
 | Reload / empty magazine | Crisp mechanical clicks; a dry-fire click when empty |
 | Low health | Heartbeat, with other sounds muffled |

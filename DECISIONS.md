@@ -59,6 +59,7 @@ Architecture and design decisions, with their reasoning. New decisions are appen
 | D-043 | Phase 5 archetypes: the v1 roster (resolves O-3), the Runner, the Tank and the Screamer, composable traits, and a generic alarm event | Accepted |
 | D-044 | Phase 6 wave system: budget curve, seeded composition, fair spawn points, the wave cycle and slots for mutations, bosses and adaptation | Accepted |
 | D-045 | Phase 7 Signal Mutations: six v1 mutations as data, one effect runtime, DEATH CRY kept apart from the Screamer, and guardrails | Accepted |
+| D-046 | Phase 7.1 Mutation & Combat Polish: silhouettes in the dark, Signal Glitch, frenzy and last-known alarms, a guaranteed BLOOD MOON, and the Spitter | Accepted |
 | O-1 … O-13 | Open questions (see the end of this file) | Open (O-9 resolved by D-037, O-2 by D-039; O-1 and O-6 partly answered by D-039) |
 
 ---
@@ -1136,6 +1137,123 @@ Implements D-021's "Playwright when the first rendering smoke test is written" (
 
 ---
 
+## D-046 — Phase 7.1 Mutation & Combat Polish: silhouettes in the dark, Signal Glitch, frenzy and last-known alarms, a guaranteed BLOOD MOON, and the Spitter
+**Status:** Accepted · **Date:** 2026-10-01 · **Implements:** the approved Phase 7.1 plan (after the Phase 7 playtest) · **Amends:** D-045 (the BLACKOUT visibility guardrail, DEATH CRY, HUNGER, HIVE, selection), D-043 (the Screamer's alarm response, the roster) · **Updates:** O-10 · **Applies:** D-003, D-014, D-022, D-026, D-029
+
+**Context.** A hands-on playtest of Phase 7 found:
+- BLACKOUT was not dark enough: whole zombie bodies glowed, because the eye colour lit the entire body's emissive.
+- STATIC felt like a flat noise layer over the screen.
+- HUNGER felt slightly slow.
+- DEATH CRY felt weak and ambiguous.
+- The Screamer was not a priority target.
+- BLOOD MOON was often never seen early.
+- Every threat was melee.
+
+The fixes had to keep the Phase 7 architecture and guardrails: data-driven mutations, a deterministic simulation, no lights or shader programs added at run time (D-022), and the damage window (D-029).
+
+**Decision.**
+
+1. **BLACKOUT: silhouettes with glowing eyes (amends the D-045 guardrail).**
+   - The eyes are marked in the enemy geometry (`aEye`). One `onBeforeCompile` patch, with a constant program key and compiled at load for every enemy material, does three things:
+     - makes the eyes glow on their own (`eyeGlow`);
+     - darkens the rest of the body toward a silhouette (`silhouette`);
+     - lifts a body back toward its own colours as it nears the camera (`proximity`: full within 2.5 m, none beyond 7 m).
+   - Telegraph and hit glows keep using the material's emissive, unchanged.
+   - Blackout values: ambient 0.14, sun 0.04, eye glow 1.4, silhouette 0.75, proximity 0.6.
+   - The visibility guarantee moves from light to **eyes and proximity**. The ambient floor is 0.12. Whenever ambient is below 0.6, eye glow is at least 0.9 and proximity at least 0.4, scaled by how dark it is.
+   - The emergency pools and the muzzle-flash fill are unchanged.
+2. **STATIC is shown as "Signal Glitch" (the id stays `STATIC`).**
+   - A burst now distorts the 3D image:
+     - horizontal tear bands slip sideways (≤ 2.5 % of the width);
+     - red and blue split slightly (0.4 %);
+     - an afterimage of a moment ago lingers (35 %);
+     - zombies are drawn 0.18 s behind where they are (`desync`), so the player must aim ahead of them.
+   - The clear centre (10 → 22 vmin) keeps the crosshair area undistorted. The HUD is DOM above the canvas and never glitched.
+   - The tear pattern changes at most **3 times a second** (photosensitivity).
+   - With `prefers-reduced-motion` there is one still pattern, no tears, no afterimage and no lag; only the colour split remains.
+   - The DOM grain stays under the HUD, at 0.12.
+   - Every value is clamped in `EFFECT_CLAMPS.static`. The burst schedule (simulation) is unchanged.
+   - Hit volumes, damage and every rule use the simulation's positions; only the drawing lags.
+3. **The glitch is burst-only, as the first post-processing.**
+   - `render/GlitchPass` runs only on frames with an active burst. Otherwise the frame is the plain render.
+   - During a burst the scene renders into a render target. At each pattern step the target is copied into an afterimage target (the same quad, drawn with no glitch). One full-screen quad then draws the screen from both.
+   - **The target keeps the screen's shader programs.** three normally gives an off-screen target different tone mapping and colour space, and so a second program for every scene material, compiled mid-fight. The target is flagged `isXRRenderTarget` with an sRGB colour space, and three then uses the screen's settings. Its storage is plain RGBA8, because sRGB storage would encode twice.
+   - **It is single-sample.** A 4× multisampled target and its resolve cost 27 % against 16 % in software rendering (TESTING §7.4). The torn image hides the missing antialiasing for a burst's fraction of a second.
+   - **The first version was replaced.** It copied the finished screen (`copyFramebufferToTexture` from the antialiased default framebuffer), and that copy sometimes read black, so a burst frame held black (TESTING §8). The pass now never reads the screen.
+   - Both targets are allocated and the quad's single program compiled at load. Program ids stay constant across every mutation and burst (browser-tested: 12 throughout). Frame stats count the scene plus the quad.
+4. **Alarm responses: frenzy and last-known alerts.**
+   - `AlarmEvent` gains `alertMode` and `frenzy`.
+   - **`alertMode`:**
+     - `live` (the Screamer's scream, unchanged): listeners track the player for the alert duration.
+     - `lastKnown` (DEATH CRY): listeners learn only where the player stood at the kill. They rush that spot and find the player again only by sight. On reaching an empty spot, normal memory decides.
+   - **`frenzy`** `{duration, cooldownScale, windupScale, turnScale, staggerScale}`:
+     - a shorter cooldown and wind-up (never below 70 %, so every telegraph stays readable);
+     - faster turning;
+     - stagger resistance, applied to the combat profile while active.
+   - A frenzy never stacks: each scale takes the stronger value, and it ends at most one duration after the latest alarm.
+   - Clamped at the point of use: duration ≤ 6 s, cooldown ≥ ×0.5, wind-up ≥ ×0.7, turn ≤ ×2, stagger ≤ ×1.6.
+   - Alarms never hurt anyone, so a death cry cannot chain (tested: one kill in a crowd of 20 → one cry, no further deaths).
+5. **DEATH CRY** (red, `reinforcements: false`, no screen pulse, as before):
+   - 8 m, last-known alert for 6 s, haste ×1.25 for 3 s;
+   - frenzy for 3 s: cooldown ×0.7, wind-up ×0.85, turn ×1.4;
+   - looks: a red **echo** (two rings, the second fainter, and a short flare at the body), and red eyes on the frenzied.
+   - A 9 m radius was tried and failed the survival tripwire on one wave-12 seed, so it is back to 8 m.
+6. **The Screamer, a priority target.**
+   - A completed scream adds a 6 s frenzy to everyone within 18 m: cooldown ×0.6, wind-up ×0.85, turn ×1.6, stagger ×1.4. A Pistol body shot no longer staggers a frenzied Runner.
+   - Its look is a violet **sonic wave** (three rings in a row and a tall column), the existing screen pulse, and violet eyes on the frenzied.
+   - An interrupted scream does nothing.
+7. **BLOOD MOON is guaranteed once on waves 9–12.**
+   - `MutationConfig.guarantee: { by: 12 }`. Until BLOOD MOON has appeared, on each wave of its window it is chosen **only** by its own roll: 1 in the waves left, so 1/4, 1/3, 1/2, then certain.
+   - The weighted draw never offers it as a second path, so its first appearance is exactly 25 % on each of waves 9–12.
+   - Afterwards the normal weighted rules apply. Waves 1–3 and 20 are still mutation-free.
+8. **The Spitter, a ranged archetype at wave 10.**
+   - **Stats:** 70 health (two Pistol headshots or three body shots), 1.7 m/s, 22 m detection, threat cost 2.5.
+   - **Behaviour** (a new `ranged` brain sharing the Screamer's keep-your-distance logic, moved into `ai/common.ts`):
+     - it holds at 10–16 m;
+     - closer than 8 m it backs away before it spits (rushing it works), unless it is cornered;
+     - a retreat step must gain 1.5 m, so it cannot slide along a wall forever.
+   - **Attack:**
+     - a 1.0 s telegraphed wind-up: it rears back and its throat glows acid green;
+     - then one projectile lobbed on a low arc at where the player is at release, with **no lead**: 13 m/s, gravity 7, about 1.1 s of flight at 14 m;
+     - 14 direct damage, or 6 splash within 1.6 m that never passes through walls;
+     - cooldown 3.5 s; fires only in sight and within 18 m;
+     - a Pistol body shot staggers it and spoils the spit.
+   - No hitscan anywhere.
+   - **`EnemyProjectiles`** is a fixed-step, deterministic system:
+     - a pool of 32;
+     - swept tests against the level and the target's capsule;
+     - every hit goes through the target's own rules (D-029);
+     - `bindToRun` clears it at the wave's end, death, victory and a new run.
+   - `ProjectileView` draws pooled additive blobs and splats, with no lights.
+   - **Waves:**
+     - it unlocks on wave 10 with exactly one; cap 1 + ⌊(n − 10)/5⌋;
+     - weights: pressure 0.15, complex 0.2; ambush ×1.3, heavy ×0.7;
+     - kept out of a wave's opening;
+     - waves 1–9 are unchanged (tested).
+   - The sandbox training encounter keeps the Phase 4–5 roster: a Spitter would shoot across the range the earlier specs use.
+9. **Balance (the survival tripwire, BALANCING §2.15).**
+   - The scripted defender now picks targets the way a player does: a melee enemy within 5 m first, then visible non-melee enemies (Screamer, Spitter), then the nearest.
+   - With the Spitter in wave 12's mix, the tripwire lost one seed each on DEATH CRY at 9 m and on HIVE at ×1.2, so: DEATH CRY is back to 8 m and HIVE is ×1.15.
+   - **HUNGER stays ×1.15:** ×1.16, ×1.17 and ×1.18 each lose one wave-12 seed to plain walkers, whatever the acceleration. The playtest wish ("slightly too slow") is recorded as open for the next playtest; the guardrail was not relaxed.
+10. **Layer boundary.** A view's own unit tests (`*View.test.ts`) count as presentation for the D-003 lint rule.
+
+**Why.**
+- Eyes and proximity make the dark readable without lighting the scene, at no extra draw call or program.
+- A burst-only glitch on the final frame changes how the image reads (tears, lag) for the cost of one quad during bursts and nothing outside them.
+- Frenzy plus last-known alerts make DEATH CRY a positional threat (kill, then move) and the scream a reason to kill the Screamer first, both without reinforcements or stacking.
+- An exclusive guarantee roll gives every run a BLOOD MOON in 9–12, evenly spread, without distorting the weighted pool.
+- The Spitter adds a ranged threat that is always telegraphed and dodgeable, inside the existing spawn, cap and damage rules.
+
+**Consequences.**
+- Measured costs (TESTING §7.4), against Phase 7 on the same host, alternating runs:
+  - the simulation step is unchanged within noise (~0.3–0.5 ms at 24 alive, with or without 3 Spitters and 6 acid blobs in flight);
+  - in the browser, normal frames are within noise (wave 20: 4.02 vs 4.20 fps over 4 runs);
+  - with a burst forced every second, frames cost ~16 % more (the single-sample render-target pass, §3);
+  - one more program (the glitch quad), constant throughout.
+- Open: HUNGER's speed (above), and a flashlight (O-10) after the next playtest.
+
+---
+
 ## Open questions
 
 None of these block Phase 0. Each lists the phase that needs the answer and the default that applies if there is no answer.
@@ -1151,7 +1269,7 @@ None of these block Phase 0. Each lists the phase that needs the answer and the 
 | ~~**O-7**~~ | ~~"Every normal wave receives one mutation" (§14) vs "mutations become noticeable at 10–15 min" (§33).~~ **Resolved 2026-09-29 → D-045:** waves 1–3 mutation-free; one on every other wave (endless included); none on wave 20 (finale / boss rules) | — | — |
 | **O-8** | Where do the 3D models, animations, sounds and music come from, and under what licences? | Milestone 2 (first real assets) | CC0 sources (e.g. Kenney, Quaternius, CC0 sound libraries), with a CREDITS file; blockout until then (D-030) |
 | ~~**O-9**~~ | ~~What is the reference "weaker supported hardware" for the 30 FPS floor?~~ **Resolved 2026-09-25 → D-037:** i5-4440, 16 GB DDR3-1333, GTX 750; ~30 FPS at 1080p Low; ~60 FPS on capable hardware at High | — | — |
-| **O-10** | Does BLACKOUT need a player flashlight? (**Updated by D-045:** no flashlight in Phase 7; BLACKOUT relies on the emergency lamps, the muzzle flash lighting the scene and enemy eyeshine.) | After a hands-on playtest | A simple toggle (F) using one of the ≤2 shadow-casting light slots, only if playtests show BLACKOUT is frustrating |
+| **O-10** | Does BLACKOUT need a player flashlight? (**Updated by D-045:** no flashlight in Phase 7. **Updated by D-046:** zombies are silhouettes with glowing eyes, and one close to the player is lifted out of the dark; still no flashlight.) | After the next hands-on playtest | A simple toggle (F) using one of the ≤2 shadow-casting light slots, only if playtests show BLACKOUT is frustrating |
 | **O-11** | Project licence (code) and asset licence policy. | Before any public release | Decide before the first public deployment |
 | **O-12** | Are signal objectives mandatory to progress, or optional but rewarded? | Phase 12 | Optional but rewarded: the phase advances with wave number; objectives add signal strength and rewards (no soft-locks) |
 | **O-13** | How is the Supply Terminal presented (a screen in the between-wave flow, or a terminal in the facility reached with Interact), and what unlocks the Secondary slot (a wave / signal milestone, an XP level, or a Scrap purchase)? | Phase 9 (Progression) / Phase 14 (Economy) | A terminal-styled screen right after the upgrade choice (time stays frozen, no walking between waves); Secondary unlocks at the first signal milestone (end of wave 5, "components collected") |
