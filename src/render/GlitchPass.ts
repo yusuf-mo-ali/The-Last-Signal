@@ -13,8 +13,9 @@
  * The target is flagged `isXRRenderTarget` with an sRGB colour space but plain RGBA8 storage: three
  * then gives the scene the screen's tone mapping and output encoding, so every scene material
  * keeps its on-screen program (same cache key, no compile mid-fight, D-022), and the stored values
- * are exactly what the screen would show. It is multisampled when the screen is, so bursts keep
- * their antialiasing (three resolves it after the render).
+ * are exactly what the screen would show. It is single-sample: a multisampled target and its
+ * resolve made burst frames cost ~27 % instead of ~16 % (software rendering, TESTING §7.4), and a
+ * burst's torn image hides the lost antialiasing for its fraction of a second.
  *
  * The first version copied the screen itself (`copyFramebufferToTexture` from the default
  * framebuffer) after the normal render. With antialiasing that copy has to resolve the
@@ -122,8 +123,8 @@ export class GlitchPass {
 
   constructor(renderer: Renderer) {
     this.renderer = renderer;
-    this.target = makeTarget(renderer.quality.antialias ? 4 : 0, true);
-    this.history = makeTarget(0, false);
+    this.target = makeTarget(true);
+    this.history = makeTarget(false);
     this.material = new ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -264,9 +265,8 @@ export class GlitchPass {
   }
 }
 
-function makeTarget(samples: number, depthBuffer: boolean): WebGLRenderTarget {
+function makeTarget(depthBuffer: boolean): WebGLRenderTarget {
   const target = new WebGLRenderTarget(1, 1, {
-    samples,
     colorSpace: SRGBColorSpace,
     // Plain storage: the scene's shaders already write display-ready (sRGB-encoded) values.
     internalFormat: 'RGBA8',
