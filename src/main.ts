@@ -52,6 +52,8 @@ import { StatRegistry } from './modifiers/StatRegistry';
 import { TriggerRegistry } from './modifiers/TriggerRegistry';
 import { SignalMutationSystem } from './signal/SignalMutationSystem';
 import { MutationHud } from './ui/MutationHud';
+import { SignalAnalysis } from './ui/SignalAnalysis';
+import { ADAPTATIONS } from './config/adaptation';
 import { StaticOverlay } from './ui/StaticOverlay';
 import { MUTATIONS } from './config/mutations';
 import { PLAYER_MOVEMENT } from './config/player';
@@ -241,7 +243,7 @@ function boot(app: HTMLElement): () => void {
     player: playerHealth.events,
     endless,
     // The Adaptive system's frozen modifiers for this wave (D-047): composition only.
-    modifiers: (): readonly CompositionModifier[] => adaptive.modifiers(),
+    modifiers: (wave): readonly CompositionModifier[] => adaptive.modifiers(wave),
     onPrepare: (definition) => {
       enemyView.prewarm(definition.spawns);
     },
@@ -321,6 +323,8 @@ function boot(app: HTMLElement): () => void {
   const staticOverlay = new StaticOverlay(renderer.canvas);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const mutationHud = new MutationHud(app, mutations, waves);
+  // SIGNAL ANALYSIS (D-047): what the horde adapted, between waves only.
+  const signalAnalysis = new SignalAnalysis(app, adaptive, game.state);
   // Where the player looks from, for fair spawns: the eye, the look yaw and the camera's horizontal
   // field of view.
   const eye = new Vector3();
@@ -440,9 +444,13 @@ function boot(app: HTMLElement): () => void {
   cleanups.push(
     pointerLock.onLockChange((locked) => {
       const mutation = waves.status.mutation;
+      // What the horde adapted to during the run (D-047), on the end screens.
+      const adapted = [...new Set(adaptive.snapshot.history)].map((id) => ADAPTATIONS[id].name);
       const reached =
         waves.isAttached && waves.wave > 0
-          ? `Wave ${waves.wave}${mutation ? ` · ${MUTATIONS[mutation].name}` : ''}`
+          ? `Wave ${waves.wave}${mutation ? ` · ${MUTATIONS[mutation].name}` : ''}${
+              adapted.length > 0 ? ` · The horde adapted to: ${adapted.join(', ')}` : ''
+            }`
           : undefined;
       if (locked) {
         prompt.show('hidden');
@@ -509,6 +517,7 @@ function boot(app: HTMLElement): () => void {
       healthHud.update(simDt, hudVisible);
       waveHud.update(hudVisible);
       staticOverlay.update(screenEffects.burst, screenEffects.time, hudVisible);
+      signalAnalysis.update(hudVisible);
       mutationHud.update(hudVisible, simDt, {
         x: player.motor.position.x,
         z: player.motor.position.z,
@@ -551,6 +560,7 @@ function boot(app: HTMLElement): () => void {
         playerTarget,
         waves,
         mutations,
+        adaptive,
         effects,
         environment,
         screenEffects,
@@ -582,6 +592,7 @@ function boot(app: HTMLElement): () => void {
           lighting,
           staticOverlay,
           mutationHud,
+          signalAnalysis,
           stats,
           triggers,
         },
@@ -609,6 +620,7 @@ function boot(app: HTMLElement): () => void {
     healthHud.dispose();
     waveHud.dispose();
     mutationHud.dispose();
+    signalAnalysis.dispose();
     staticOverlay.dispose();
     mutations.detach();
     waves.detach();

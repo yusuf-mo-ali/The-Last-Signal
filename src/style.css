@@ -533,6 +533,44 @@ body {
   display: none;
 }
 
+/* SIGNAL ANALYSIS (D-047): between waves only, below the badge, clear of the crosshair. */
+.signal-analysis {
+  position: absolute;
+  top: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 0.4rem;
+  max-width: min(36rem, 90vw);
+  padding: 0.6rem 1rem;
+  border-left: 2px solid #7fe0ff;
+  background: rgb(4 12 18 / 55%);
+  text-shadow: 0 2px 6px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
+.signal-analysis__title {
+  color: #7fe0ff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+}
+
+.signal-analysis__line {
+  color: var(--color-text);
+  font-size: 0.95rem;
+}
+
+.signal-analysis__line--fade,
+.signal-analysis__line--rest,
+.signal-analysis__line--hold {
+  opacity: 0.75;
+}
+
+.signal-analysis[hidden] {
+  display: none;
+}
+
 /* Above the 3D view, below every HUD element (DOM order); the centre stays clear. */
 .static-overlay {
   position: absolute;

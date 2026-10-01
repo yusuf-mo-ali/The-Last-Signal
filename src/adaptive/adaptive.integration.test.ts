@@ -43,7 +43,7 @@ function play(g: HeadlessGame, style: Style, last: number, { seconds = 50, hz = 
   g.startRun();
   for (let wave = 1; wave <= last; wave++) {
     g.until(() => g.game.state.current === 'WAVE_ACTIVE', 20, hz);
-    const modifiersDuringWave = JSON.stringify(g.adaptive.modifiers());
+    const modifiersDuringWave = JSON.stringify(g.adaptive.modifiers(wave));
     for (let s = 0; s < seconds; s++) {
       if (style === 'camper') {
         g.place(...CATWALK);
@@ -53,7 +53,7 @@ function play(g: HeadlessGame, style: Style, last: number, { seconds = 50, hz = 
       }
       g.frames(hz, hz);
       // Nothing is decided during a wave.
-      expect(JSON.stringify(g.adaptive.modifiers())).toBe(modifiersDuringWave);
+      expect(JSON.stringify(g.adaptive.modifiers(wave))).toBe(modifiersDuringWave);
     }
     g.until(
       () => {

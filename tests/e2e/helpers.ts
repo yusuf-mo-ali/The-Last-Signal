@@ -255,8 +255,34 @@ export interface PlayerSnapshot {
   readonly groundDistance: number;
 }
 
+/** What `tls.adaptation()` returns (D-047). */
+export interface AdaptationSnapshot {
+  readonly enabled: boolean;
+  readonly forWave: number;
+  readonly active: readonly { id: string; key: string; level: number; since: number }[];
+  readonly restUntil: Readonly<Record<string, number>>;
+  readonly modifiers: readonly {
+    source: string;
+    archetypeWeights?: Record<string, number>;
+    traitChance?: Record<string, number>;
+    extraCounts?: Record<string, number>;
+    spawnBias?: readonly string[];
+  }[];
+  readonly wavesObserved: number;
+  readonly signals: Readonly<
+    Record<string, { mean: number; mass: number; persistence: number; confidence: number }>
+  >;
+  readonly history: readonly string[];
+  readonly telemetry: { wave: number; samples: number; elevated: number };
+}
+
 /** The `window.tls` commands used by the specs (see src/debug/installDebug.ts). */
 export interface TlsApi {
+  adaptation(): AdaptationSnapshot;
+  forceAdaptation(id: string, level?: 1 | 2, key?: string): AdaptationSnapshot;
+  clearAdaptation(): AdaptationSnapshot;
+  setAdaptive(enabled?: boolean): boolean;
+  feedEvidence(signal: string, score: number, waves?: number): AdaptationSnapshot;
   inspect(): DevHandles;
   help(): readonly { name: string; available: boolean }[];
   state(): unknown;

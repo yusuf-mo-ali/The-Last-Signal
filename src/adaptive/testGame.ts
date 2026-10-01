@@ -105,7 +105,7 @@ export function headlessGame(seed = 'adaptive-run', { adaptive: withAdaptive = t
     seed,
     combat: combat.events,
     player: playerHealth.events,
-    modifiers: (): readonly CompositionModifier[] => adaptive.modifiers(),
+    modifiers: (wave): readonly CompositionModifier[] => adaptive.modifiers(wave),
   });
   const mutations = new SignalMutationSystem({
     state: game.state,

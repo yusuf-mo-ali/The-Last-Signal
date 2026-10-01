@@ -58,7 +58,7 @@ export interface WaveManagerOptions {
   /** Damage taken (optional: stats). */
   readonly player?: EventBus<PlayerHealthEvents>;
   /** Adaptive and mutation influences on the next wave (Phases 7–8); none by default. */
-  readonly modifiers?: () => readonly CompositionModifier[];
+  readonly modifiers?: (wave: number) => readonly CompositionModifier[];
   /** Called when a wave is generated, before it starts (the views prewarm its looks). */
   readonly onPrepare?: (definition: WaveDefinition) => void;
   readonly rules?: WaveRules;
@@ -454,7 +454,11 @@ export class WaveManager implements FixedUpdateSystem {
     this.stats.recordMutation(this.waveNumber, mutation);
     const def = generateWave(
       this.waveNumber,
-      { seed: this.runSeed, modifiers: this.options.modifiers?.() ?? [], mutation },
+      {
+        seed: this.runSeed,
+        modifiers: this.options.modifiers?.(this.waveNumber) ?? [],
+        mutation,
+      },
       this.rules,
     );
     this.def = def;

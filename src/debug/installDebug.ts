@@ -14,6 +14,9 @@ import './debug.css';
 import { Vector3, type Camera, type Scene } from 'three';
 import type { CombatSystem, DamagedEvent } from '../combat/CombatSystem';
 import type { TrainingRange } from '../combat/training/TrainingRange';
+import type { AdaptiveSystem } from '../adaptive/AdaptiveSystem';
+import { confidence } from '../adaptive/profile';
+import { ADAPTATION_IDS, ADAPTATIONS, SIGNAL_IDS, type AdaptationId } from '../config/adaptation';
 import {
   AI_STATES,
   DAMAGE_ZONES,
@@ -112,6 +115,8 @@ export interface DebugContext {
   readonly effects?: EffectRouter;
   readonly environment?: Environment;
   readonly screenEffects?: ScreenEffects;
+  /** The Adaptive system (D-047), for `tls.adaptation()`, `tls.forceAdaptation()`, … */
+  readonly adaptive?: AdaptiveSystem;
   /** The Spitter's acid (D-046), for `tls.projectiles()`. */
   readonly projectiles?: EnemyProjectiles;
   /** Signal Glitch on screen (D-046): the pass's state, for `tls.mutation()`. */
@@ -298,6 +303,7 @@ export function installDebug(context: DebugContext): DebugTools {
   const disposeEnemies = registerEnemyCommands(commands, context);
   const disposeWaves = registerWaveCommands(commands, context);
   registerMutationCommands(commands, context);
+  registerAdaptiveCommands(commands, context);
   for (const [name, description, plannedFor] of PLANNED_COMMANDS) {
     commands.registerStub(name, description, plannedFor);
   }
@@ -678,6 +684,7 @@ function formatOverlay(s: FrameStatsSnapshot, context: DebugContext): string {
     ...(context.waves?.isAttached && context.mutations
       ? [formatMutation(context.mutations, context.waves, context.screenEffects)]
       : []),
+    ...(context.waves?.isAttached && context.adaptive ? [formatAdaptive(context.adaptive)] : []),
     `lock ${pointerLock.isLocked ? 'on' : 'off'}${pointerLock.isLocked ? (pointerLock.rawInput ? ' raw' : ' accel') : ''}  glitches ${input.discardedMotionEvents}`,
   ].join('\n');
 }
@@ -1244,6 +1251,122 @@ function mutationArg(value: string): MutationId | 'none' {
     throw new Error(`${m.name} is deferred (O-4): it is data only and cannot be applied yet`);
   }
   return m.id;
+}
+
+/** One overlay line: what is adapted, at what level, for which wave. */
+function formatAdaptive(adaptive: AdaptiveSystem): string {
+  const s = adaptive.snapshot;
+  const active = s.state.active.map(
+    (a) => `${a.id}${a.key === 'default' ? '' : `:${a.key}`} L${a.level}`,
+  );
+  return `adaptive ${s.enabled ? '' : 'OFF '}${active.length > 0 ? active.join(', ') : 'none'} · for wave ${adaptive.nextWave} · seen ${s.profile.wavesObserved}`;
+}
+
+function adaptationArg(value: string): AdaptationId {
+  const id = value.toUpperCase();
+  if (!(ADAPTATION_IDS as readonly string[]).includes(id)) {
+    throw new Error(`Unknown adaptation "${value}". Adaptations: ${ADAPTATION_IDS.join(', ')}`);
+  }
+  return id as AdaptationId;
+}
+
+function registerAdaptiveCommands(commands: DebugCommands, context: DebugContext): void {
+  const { adaptive, waves } = context;
+  if (!adaptive || !waves) {
+    return;
+  }
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  const status = () => {
+    const s = adaptive.snapshot;
+    const signals: Record<string, unknown> = {};
+    for (const id of SIGNAL_IDS) {
+      const m = s.profile.signals[id];
+      if (m && m.mass > 0) {
+        signals[id] = {
+          mean: round(m.mean),
+          mass: round(m.mass),
+          persistence: round(m.above / m.mass),
+          confidence: round(confidence(m)),
+        };
+      }
+    }
+    return {
+      enabled: s.enabled,
+      forWave: adaptive.nextWave,
+      active: s.state.active,
+      restUntil: s.state.restUntil,
+      modifiers: s.modifiers,
+      wavesObserved: s.profile.wavesObserved,
+      dwellCentroid: s.profile.dwellCentroid,
+      signals,
+      history: s.history,
+      telemetry: {
+        wave: s.telemetry.wave,
+        samples: s.telemetry.samples,
+        elevated: s.telemetry.elevated,
+      },
+    };
+  };
+  commands.register(
+    'adaptation',
+    'The Adaptive system: signals (mean, evidence, persistence, confidence), active adaptations, rest timers, the next wave’s modifiers',
+    status,
+  );
+  commands.register(
+    'forceAdaptation',
+    `Make an adaptation active for the next wave (generated after this; tls.startWave(n) rebuilds one): tls.forceAdaptation(id, level?, key?) (${ADAPTATION_IDS.join(', ')})`,
+    (id: string, level: 1 | 2 = 1, key?: string) => {
+      const a = ADAPTATIONS[adaptationArg(id)];
+      const variant = key ?? a.variants[0]?.key ?? 'default';
+      if (!a.variants.some((v) => v.key === variant)) {
+        throw new Error(
+          `${a.id} has no variant "${variant}" (${a.variants.map((v) => v.key).join(', ')})`,
+        );
+      }
+      adaptive.force(a.id, level === 2 ? 2 : 1, variant, waves.wave + 1);
+      return status();
+    },
+  );
+  commands.register(
+    'clearAdaptation',
+    'No adaptation active and no rest timers (the profile stays)',
+    () => {
+      adaptive.clear();
+      return status();
+    },
+  );
+  commands.register(
+    'setAdaptive',
+    'Switch adaptation on or off for the next waves (it keeps watching): tls.setAdaptive(false)',
+    (enabled?: boolean) => {
+      adaptive.setEnabled(enabled ?? !adaptive.snapshot.enabled);
+      return adaptive.snapshot.enabled;
+    },
+  );
+  commands.register(
+    'feedEvidence',
+    `Fold synthetic evidence, as if the last waves showed it, and decide again: tls.feedEvidence(signal, score, waves?) (${SIGNAL_IDS.join(', ')})`,
+    (signal: string, score: number, count = 2) => {
+      if (!(SIGNAL_IDS as readonly string[]).includes(signal)) {
+        throw new Error(`Unknown signal "${signal}". Signals: ${SIGNAL_IDS.join(', ')}`);
+      }
+      const wave = Math.max(waves.wave, 1);
+      adaptive.feed(
+        (n) => ({
+          wave: n,
+          signals: {
+            elevation: { score: signal === 'elevation' ? score : 0, weight: 1 },
+            accuracy: { score: 0.6, weight: 1 },
+            [signal]: { score, weight: 1 },
+          },
+          dwellCentroid: null,
+        }),
+        wave,
+        Math.max(1, Math.floor(count)),
+      );
+      return status();
+    },
+  );
 }
 
 function registerMutationCommands(commands: DebugCommands, context: DebugContext): void {

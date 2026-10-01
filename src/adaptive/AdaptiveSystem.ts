@@ -4,9 +4,9 @@
  *   PLAYING (a new run)   everything is forgotten (the profile, the adaptations, the rest timers)
  *   WAVE_START            this wave's telemetry starts (its mutation noted, for discounts)
  *   WAVE_ACTIVE           counting: samples, hits, shots, abilities, damage (`BehaviorTelemetry`)
- *   waveCompleted         measure → fold into the profile → decide → compose: the next wave's
+ *   waveCompleted         measure → fold into the profile → decide: the next wave's
  *                         modifiers are frozen here and the `adaptationDecided` event explains them
- *   WAVE_START (next)     the generator reads the frozen modifiers (`modifiers()`), once
+ *   WAVE_START (next)     the generator reads them (`modifiers(wave)`), once
  *
  * Nothing changes during a wave, and nothing marks an adapted enemy: the player learns what
  * changed between waves (SIGNAL ANALYSIS). It never selects, removes or changes a mutation (it does
@@ -101,7 +101,8 @@ export class AdaptiveSystem implements FixedUpdateSystem {
   private readonly telemetry = new BehaviorTelemetry();
   private profile: BehaviorProfile = emptyProfile();
   private adaptation: AdaptationState = EMPTY_STATE;
-  private frozen: readonly CompositionModifier[] = [];
+  /** The wave the last decision shapes (1 before any). */
+  private decidedFor = 1;
   private lastEvidence: WaveEvidence | null = null;
   private history: AdaptationId[] = [];
   private enabled = true;
@@ -111,9 +112,24 @@ export class AdaptiveSystem implements FixedUpdateSystem {
     this.options = options;
   }
 
-  /** The next wave's adaptive modifiers: frozen when the last wave ended (WaveManager reads them). */
-  modifiers(): readonly CompositionModifier[] {
-    return this.enabled ? this.frozen : [];
+  /**
+   * Wave `wave`'s adaptive modifiers (WaveManager reads them when it generates the wave): composed
+   * from the adaptations decided when the last wave ended, which nothing changes until the next
+   * wave ends. Empty while adaptation is off.
+   */
+  modifiers(wave: number): readonly CompositionModifier[] {
+    if (!this.enabled) {
+      return [];
+    }
+    return composeModifiers(this.adaptation.active, {
+      wave,
+      dwellRegions: regionsNear(this.profile.dwellCentroid, this.options.spawnPoints),
+    });
+  }
+
+  /** The wave the last decision was for (the next wave to be generated). */
+  get nextWave(): number {
+    return this.decidedFor;
   }
 
   get snapshot(): AdaptiveSnapshot {
@@ -121,7 +137,7 @@ export class AdaptiveSystem implements FixedUpdateSystem {
       enabled: this.enabled,
       profile: this.profile,
       state: this.adaptation,
-      modifiers: this.modifiers(),
+      modifiers: this.modifiers(this.decidedFor),
       lastEvidence: this.lastEvidence,
       telemetry: this.telemetry.wave,
       history: [...this.history],
@@ -207,7 +223,7 @@ export class AdaptiveSystem implements FixedUpdateSystem {
   reset(): void {
     this.profile = emptyProfile();
     this.adaptation = EMPTY_STATE;
-    this.frozen = [];
+    this.decidedFor = 1;
     this.lastEvidence = null;
     this.history = [];
     this.telemetry.begin(0, null);
@@ -229,13 +245,12 @@ export class AdaptiveSystem implements FixedUpdateSystem {
       ...this.adaptation,
       active: [...others, { id, key, level, since: nextWave, levelSince: nextWave }],
     };
-    this.refreeze(nextWave);
+    this.decidedFor = nextWave;
   }
 
   /** Debug: no active adaptation, no rest timers (the profile is kept). */
-  clear(nextWave: number): void {
+  clear(): void {
     this.adaptation = EMPTY_STATE;
-    this.refreeze(nextWave);
   }
 
   /**
@@ -272,20 +287,13 @@ export class AdaptiveSystem implements FixedUpdateSystem {
         this.history.push(c.id);
       }
     }
-    this.refreeze(wave + 1);
+    this.decidedFor = wave + 1;
     this.events.emit('adaptationDecided', {
       wave,
       forWave: outcome.forWave,
       changes: outcome.changes,
       active: outcome.state.active,
       governor: outcome.governor,
-    });
-  }
-
-  private refreeze(nextWave: number): void {
-    this.frozen = composeModifiers(this.adaptation.active, {
-      wave: nextWave,
-      dwellRegions: regionsNear(this.profile.dwellCentroid, this.options.spawnPoints),
     });
   }
 }

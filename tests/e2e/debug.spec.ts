@@ -91,6 +91,12 @@ test('development build: tls commands, plan §29 stubs and the stats overlay', a
     'setMutations',
     'mutationSchedule',
     'staticBurst',
+    // Phase 8 adaptive tools (D-047).
+    'adaptation',
+    'forceAdaptation',
+    'clearAdaptation',
+    'setAdaptive',
+    'feedEvidence',
   ]) {
     expect(commands.get(name), name).toBe(true);
   }
