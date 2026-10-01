@@ -560,7 +560,8 @@ test.describe('mutations (development build)', () => {
 
     // A still scene, held mid-burst: the image tears away from the centre, not at the crosshair.
     // A frozen Walker stands at the centre, so a tear or colour split there would show on its
-    // edges.
+    // edges. The tear pattern is random per burst: bursts are held until a strongly shifted band
+    // crosses the centre row, so a missing clear centre cannot hide behind a lucky pattern.
     await page.evaluate(() => {
       window.tls!.clearEnemies();
       window.tls!.freezeEnemies(true);
@@ -568,32 +569,49 @@ test.describe('mutations (development build)', () => {
     });
     await frames(page, 4);
     const before = await page.screenshot();
-    await page.evaluate(() => {
-      window.tls!.staticBurst();
-      const canvas = document.querySelector<HTMLCanvasElement>('canvas');
-      const { game } = window.tls!.inspect();
-      const hold = (): void => {
-        if (
-          canvas?.dataset.glitch === 'active' &&
-          window.tls!.inspect().view.glitch.state.intensity > 0.9
-        ) {
-          game.time.scale = 0;
-        } else {
-          requestAnimationFrame(hold);
-        }
-      };
-      requestAnimationFrame(hold);
-    });
-    await expect
-      .poll(() => page.evaluate(() => window.tls!.inspect().game.time.scale), { timeout: 20_000 })
-      .toBe(0);
-    await frames(page, 3);
-    const during = await page.screenshot();
-    await page.evaluate(() => {
-      window.tls!.inspect().game.time.scale = 1;
-    });
+    let during: Buffer | null = null;
+    for (let attempt = 0; attempt < 40 && !during; attempt++) {
+      await page.evaluate(() => {
+        window.tls!.staticBurst();
+        const canvas = document.querySelector<HTMLCanvasElement>('canvas');
+        const { game } = window.tls!.inspect();
+        const hold = (): void => {
+          if (
+            canvas?.dataset.glitch === 'active' &&
+            window.tls!.inspect().view.glitch.state.intensity > 0.9
+          ) {
+            game.time.scale = 0;
+          } else {
+            requestAnimationFrame(hold);
+          }
+        };
+        requestAnimationFrame(hold);
+      });
+      await expect
+        .poll(() => page.evaluate(() => window.tls!.inspect().game.time.scale), {
+          timeout: 20_000,
+        })
+        .toBe(0);
+      await frames(page, 3);
+      const bands = (await mutation(page)).glitch?.bands ?? [];
+      const crossesCentre = bands.some(
+        (b) => Math.abs(b.center - 0.5) < b.halfHeight * 0.6 && Math.abs(b.shift) > 0.5,
+      );
+      if (crossesCentre) {
+        during = await page.screenshot();
+      }
+      await page.evaluate(() => {
+        window.tls!.inspect().game.time.scale = 1;
+      });
+      if (!during) {
+        await expect
+          .poll(async () => (await mutation(page)).glitch?.active, { timeout: 10_000 })
+          .toBe(false);
+      }
+    }
+    expect(during).not.toBeNull();
     await page.evaluate(() => window.tls!.freezeEnemies(false));
-    const diff = await frameDifference(page, before, during);
+    const diff = await frameDifference(page, before, during!);
     expect(diff.outer).toBeGreaterThan(3);
     expect(diff.centre).toBeLessThan(diff.outer / 2);
     expect(diff.centre).toBeLessThan(4);
@@ -612,11 +630,22 @@ test.describe('mutations (development build)', () => {
       window.tls!.clearEnemies();
       window.tls!.teleportPlayer(0, 0, 14, 0);
       window.tls!.look(0, 0);
-      const w = window as unknown as { __alarms: unknown[]; __pulled: number };
+      const w = window as unknown as {
+        __alarms: unknown[];
+        __pulled: number;
+        __echo: unknown;
+      };
       w.__alarms = [];
       w.__pulled = 0;
-      const { enemies, waves } = window.tls!.inspect();
-      enemies.events.on('alarm', (a) => w.__alarms.push({ ...a }));
+      w.__echo = null;
+      const { enemies, waves, enemyView } = window.tls!.inspect();
+      enemies.events.on('alarm', (a) => {
+        w.__alarms.push({ ...a });
+        // The view drew its echo on this same event (it subscribed at load, before this
+        // listener). Read it now: the flare lives 0.5 s, less than a couple of slow headless
+        // frames.
+        w.__echo = { rings: enemyView.activeRingColors, columns: enemyView.activeColumns };
+      });
       waves.events.on('reinforcementsPulled', () => {
         w.__pulled++;
       });
@@ -634,14 +663,18 @@ test.describe('mutations (development build)', () => {
     await frames(page, 2);
 
     const seen = await page.evaluate(() => {
-      const w = window as unknown as { __alarms: Record<string, unknown>[]; __pulled: number };
+      const w = window as unknown as {
+        __alarms: Record<string, unknown>[];
+        __pulled: number;
+        __echo: { rings: number[]; columns: { color: number; height: number }[] } | null;
+      };
       const view = window.tls!.inspect().enemyView;
       const living = window.tls!.enemies().filter((e) => e.state !== 'DEAD');
       return {
         alarms: w.__alarms.map((a) => [a.kind, a.reinforcements, a.radius, a.alertMode]),
         pulled: w.__pulled,
-        rings: view.activeRingColors,
-        columns: view.activeColumns,
+        rings: w.__echo?.rings,
+        columns: w.__echo?.columns,
         hasted: living.filter((e) => e.hasted).length,
         frenzied: living.filter((e) => e.frenzied === 'deathCry').length,
         eyes: living.map((e) => view.eyes(e.id)?.color),

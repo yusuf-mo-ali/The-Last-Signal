@@ -220,7 +220,7 @@ export class WorldView {
       }
     });
     this.renderer.webgl.compile(this.scene, camera);
-    this.glitch.prewarm();
+    this.glitch.prewarm(this.scene, camera);
     this.renderer.render(this.scene, camera);
     for (const object of hidden) {
       object.visible = false;
@@ -230,9 +230,7 @@ export class WorldView {
   /** Draws the frame, glitched when `glitch` is active (a STATIC burst, D-046). */
   render(alpha: number, camera: PerspectiveCamera, glitch: GlitchFrame = IDLE_GLITCH): void {
     this.syncBeacon(alpha);
-    if (this.renderer.render(this.scene, camera)) {
-      this.glitch.apply(glitch);
-    }
+    this.glitch.draw(this.scene, camera, glitch);
   }
 
   dispose(): void {

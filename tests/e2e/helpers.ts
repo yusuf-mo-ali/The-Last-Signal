@@ -123,6 +123,11 @@ export interface MutationSnapshot {
     readonly step: number;
     readonly steps: number;
     readonly frames: number;
+    readonly bands: readonly {
+      readonly center: number;
+      readonly halfHeight: number;
+      readonly shift: number;
+    }[];
   } | null;
 }
 

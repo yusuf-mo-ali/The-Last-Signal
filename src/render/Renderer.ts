@@ -103,6 +103,19 @@ export class Renderer {
    * context is lost.
    */
   render(scene: Scene, camera: PerspectiveCamera): boolean {
+    if (!this.prepare(camera)) {
+      return false;
+    }
+    this.webgl.render(scene, camera);
+    return true;
+  }
+
+  /**
+   * Everything `render` does before drawing: applies a pending resize and syncs the camera.
+   * Returns whether a frame can be drawn. For passes that draw the scene somewhere else first
+   * (`GlitchPass`).
+   */
+  prepare(camera: PerspectiveCamera): boolean {
     if (this.context.lost) {
       return false;
     }
@@ -116,7 +129,6 @@ export class Renderer {
       camera.aspect = this.current.aspect;
       camera.updateProjectionMatrix();
     }
-    this.webgl.render(scene, camera);
     return true;
   }
 

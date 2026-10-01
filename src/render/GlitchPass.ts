@@ -1,35 +1,48 @@
 /**
  * Signal Glitch on screen (D-046): during a STATIC burst, the rendered 3D image tears into
  * horizontal bands that slip sideways, splits its red and blue a little, and keeps an afterimage
- * of a moment ago. Only during a burst: otherwise nothing here runs and the frame is the plain one.
+ * of a moment ago. Only during a burst: otherwise the frame takes the plain `Renderer.render` path
+ * and nothing here costs anything.
  *
  * How (cheap, and no new scene shaders):
- * - the scene is rendered to the screen as usual;
- * - the frame is copied into a texture (`copyFramebufferToTexture`), and, each time the tear
- *   pattern steps (at most 3 times a second), into a second one, the afterimage;
- * - one full-screen quad samples them with the glitch and draws over the frame.
- * Rendering the scene into a render target instead would need a second program for every scene
- * material (tone mapping and colour space differ off-screen), compiled mid-fight. The quad's one
- * program is compiled at load (`prewarm`), so program ids never change (D-022).
+ * - during a burst the scene is rendered into a render target (`target`) instead of the screen;
+ * - each time the tear pattern steps (at most 3 times a second) that image is copied into a second
+ *   target, the afterimage (`history`), by the same quad drawn with no glitch;
+ * - one full-screen quad samples both with the glitch and draws the screen.
+ *
+ * The target is flagged `isXRRenderTarget` with an sRGB colour space but plain RGBA8 storage: three
+ * then gives the scene the screen's tone mapping and output encoding, so every scene material
+ * keeps its on-screen program (same cache key, no compile mid-fight, D-022), and the stored values
+ * are exactly what the screen would show. It is multisampled when the screen is, so bursts keep
+ * their antialiasing (three resolves it after the render).
+ *
+ * The first version copied the screen itself (`copyFramebufferToTexture` from the default
+ * framebuffer) after the normal render. With antialiasing that copy has to resolve the
+ * multisampled screen, and it sometimes read black: a burst frame held black (TESTING §8). This
+ * version never reads the screen.
  *
  * The centre around the crosshair stays clear (a radial mask, `GLITCH_CLEAR`); the HUD is DOM
  * above the canvas and never glitched. Reduced motion: no tears or afterimage, a slight colour
- * split only (see `glitchFrame`).
+ * split only (see `glitchFrame`). Both targets are allocated and the quad compiled at load
+ * (`prewarm`), and again after a context restore.
  */
 
 import {
-  FramebufferTexture,
   Mesh,
   NearestFilter,
   OrthographicCamera,
   PlaneGeometry,
+  SRGBColorSpace,
   Scene,
   ShaderMaterial,
   Vector2,
   Vector4,
+  WebGLRenderTarget,
+  type PerspectiveCamera,
+  type Texture,
 } from 'three';
 import type { Renderer } from './Renderer';
-import { GLITCH_CLEAR, type GlitchFrame } from './glitch';
+import { GLITCH_CLEAR, type GlitchFrame, type TearBand } from './glitch';
 
 const MAX_BANDS = 6;
 
@@ -85,6 +98,8 @@ export interface GlitchState {
   readonly steps: number;
   /** Glitched frames drawn since load. */
   readonly frames: number;
+  /** The tear bands of the pattern showing (none when idle). */
+  readonly bands: readonly TearBand[];
 }
 
 export class GlitchPass {
@@ -93,25 +108,28 @@ export class GlitchPass {
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly material: ShaderMaterial;
   private readonly size = new Vector2();
-  private frame: FramebufferTexture;
-  private history: FramebufferTexture;
+  /** The scene, rendered here instead of the screen during a burst. */
+  private readonly target: WebGLRenderTarget;
+  /** The afterimage: `target` as it was when the tear pattern last stepped. */
+  private readonly history: WebGLRenderTarget;
   private lastBurst = Number.NaN;
   private lastStep = -1;
   private stepsThisBurst = 0;
   private framesDrawn = 0;
   private wasActive = false;
   private intensity = 0;
+  private bands: readonly TearBand[] = [];
 
   constructor(renderer: Renderer) {
     this.renderer = renderer;
-    this.frame = makeTexture(1, 1);
-    this.history = makeTexture(1, 1);
+    this.target = makeTarget(renderer.quality.antialias ? 4 : 0, true);
+    this.history = makeTarget(0, false);
     this.material = new ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
       uniforms: {
-        tFrame: { value: this.frame },
-        tHistory: { value: this.history },
+        tFrame: { value: this.target.texture },
+        tHistory: { value: this.history.texture },
         uIntensity: { value: 0 },
         uShift: { value: 0 },
         uChroma: { value: 0 },
@@ -136,43 +154,63 @@ export class GlitchPass {
       step: this.lastStep,
       steps: this.stepsThisBurst,
       frames: this.framesDrawn,
+      bands: this.bands,
     };
   }
 
-  /** Compiles the quad's program now (load, context restore), never mid-fight. */
-  prewarm(): void {
-    this.renderer.webgl.compile(this.scene, this.camera);
+  /**
+   * At load (and after a context restore), never mid-fight: compiles the quad, allocates both
+   * targets at the screen size, and renders `scene` once into the target and copies it to the
+   * history, so any per-target setup happens now.
+   */
+  prewarm(scene: Scene, camera: PerspectiveCamera): void {
+    const webgl = this.renderer.webgl;
+    webgl.compile(this.scene, this.camera);
+    this.fitToScreen();
+    webgl.setRenderTarget(this.target);
+    webgl.render(scene, camera);
+    this.snapshot();
+    webgl.setRenderTarget(null);
   }
 
   /**
-   * Glitches the frame just rendered to the screen. Call right after the scene render, every
-   * frame; with an idle `glitch` it does nothing.
+   * Draws one frame of `scene`: glitched when `glitch` is active, the plain render otherwise.
+   * Returns false when nothing could be drawn (no area, context lost).
    */
-  apply(glitch: GlitchFrame): void {
-    this.wasActive = glitch.active;
-    this.intensity = glitch.envelope;
+  draw(scene: Scene, camera: PerspectiveCamera, glitch: GlitchFrame): boolean {
     if (!glitch.active) {
+      this.wasActive = false;
+      this.intensity = 0;
+      this.bands = [];
       this.lastBurst = Number.NaN;
-      return;
+      return this.renderer.render(scene, camera);
     }
+    if (!this.renderer.prepare(camera)) {
+      return false;
+    }
+    this.wasActive = true;
+    this.intensity = glitch.envelope;
+    this.bands = glitch.bands;
     const webgl = this.renderer.webgl;
-    webgl.getDrawingBufferSize(this.size);
-    if (this.size.x !== this.frame.image.width || this.size.y !== this.frame.image.height) {
-      this.resize(this.size.x, this.size.y);
-    }
-    const newBurst = glitch.burstStart !== this.lastBurst;
-    if (newBurst) {
+    this.fitToScreen();
+    if (glitch.burstStart !== this.lastBurst) {
       this.lastBurst = glitch.burstStart;
       this.stepsThisBurst = 0;
       this.lastStep = -1;
     }
+    webgl.setRenderTarget(this.target);
+    webgl.render(scene, camera);
+    // Counted with the scene: the frame's stats (draw calls, triangles) keep the scene's numbers
+    // plus the quad's, rather than being reset to the quad alone.
+    const autoReset = webgl.info.autoReset;
+    webgl.info.autoReset = false;
     if (glitch.step !== this.lastStep) {
       // A new tear pattern: the afterimage is the frame as it is now.
-      webgl.copyFramebufferToTexture(this.history);
+      this.snapshot();
       this.lastStep = glitch.step;
       this.stepsThisBurst++;
     }
-    webgl.copyFramebufferToTexture(this.frame);
+    webgl.setRenderTarget(null);
     const u = this.material.uniforms;
     const p = glitch.params;
     (u.uIntensity as { value: number }).value = glitch.envelope;
@@ -185,38 +223,59 @@ export class GlitchPass {
       const t = glitch.bands[i];
       b.set(t?.center ?? 0, t?.halfHeight ?? 0, t?.shift ?? 0, t ? 1 : 0);
     });
-    // Over the frame, and counted with it: the frame's stats (draw calls, triangles) keep the
-    // scene's numbers plus the quad's, rather than being reset to the quad alone.
-    const autoClear = webgl.autoClear;
-    const autoReset = webgl.info.autoReset;
-    webgl.autoClear = false;
-    webgl.info.autoReset = false;
     webgl.render(this.scene, this.camera);
-    webgl.autoClear = autoClear;
     webgl.info.autoReset = autoReset;
     this.framesDrawn++;
+    return true;
   }
 
   dispose(): void {
-    this.frame.dispose();
+    this.target.dispose();
     this.history.dispose();
     this.material.dispose();
     (this.scene.children[0] as Mesh | undefined)?.geometry.dispose();
   }
 
-  private resize(width: number, height: number): void {
-    this.frame.dispose();
-    this.history.dispose();
-    this.frame = makeTexture(width, height);
-    this.history = makeTexture(width, height);
-    (this.material.uniforms.tFrame as { value: FramebufferTexture }).value = this.frame;
-    (this.material.uniforms.tHistory as { value: FramebufferTexture }).value = this.history;
+  /**
+   * Copies the target into the history: the same quad with no glitch (intensity 0 draws its input
+   * unchanged), reading the target in place of the history so nothing samples what it draws to.
+   * The same program as the glitched draw, so nothing new compiles; no read of the screen.
+   */
+  private snapshot(): void {
+    const webgl = this.renderer.webgl;
+    const u = this.material.uniforms;
+    (u.uIntensity as { value: number }).value = 0;
+    (u.uGhost as { value: number }).value = 0;
+    (u.tHistory as { value: Texture }).value = this.target.texture;
+    webgl.setRenderTarget(this.history);
+    webgl.render(this.scene, this.camera);
+    (u.tHistory as { value: Texture }).value = this.history.texture;
+  }
+
+  /** Keeps both targets at the drawing-buffer size (a resize reallocates them on next use). */
+  private fitToScreen(): void {
+    this.renderer.webgl.getDrawingBufferSize(this.size);
+    const width = Math.max(1, this.size.x);
+    const height = Math.max(1, this.size.y);
+    if (width !== this.target.width || height !== this.target.height) {
+      this.target.setSize(width, height);
+      this.history.setSize(width, height);
+    }
   }
 }
 
-function makeTexture(width: number, height: number): FramebufferTexture {
-  const texture = new FramebufferTexture(width, height);
-  texture.minFilter = NearestFilter;
-  texture.magFilter = NearestFilter;
-  return texture;
+function makeTarget(samples: number, depthBuffer: boolean): WebGLRenderTarget {
+  const target = new WebGLRenderTarget(1, 1, {
+    samples,
+    colorSpace: SRGBColorSpace,
+    // Plain storage: the scene's shaders already write display-ready (sRGB-encoded) values.
+    internalFormat: 'RGBA8',
+    minFilter: NearestFilter,
+    magFilter: NearestFilter,
+    depthBuffer,
+    generateMipmaps: false,
+  });
+  // The screen's tone mapping and output encoding, so the scene's programs are the screen's.
+  Object.assign(target, { isXRRenderTarget: true });
+  return target;
 }
