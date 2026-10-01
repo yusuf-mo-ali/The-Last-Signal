@@ -1,8 +1,9 @@
 /**
- * The Phase 5 archetypes and traits in a real browser (D-043): the Runner's fast chase and leap,
+ * The archetypes and traits in a real browser (D-043, D-046): the Runner's fast chase and leap,
  * the Tank's slow, heavy attack and armoured body, the Screamer's telegraphed scream (the alarm,
- * its shockwave, the player's alarm pulse, nearby enemies alerted and hastened), traits visible on
- * the body and felt in combat, and a mixed group sharing one combat and navigation. Development
+ * its violet sonic wave, the player's alarm pulse, nearby enemies alerted, hastened and frenzied),
+ * the Spitter's telegraphed, dodgeable acid, traits visible on the body and felt in combat, and a
+ * mixed group sharing one combat and navigation. Development
  * build only: each scenario is set up through `tls`; the production build is covered by the
  * real-input spec in enemies.spec.ts (the test encounter now holds one of each archetype).
  */
@@ -45,6 +46,11 @@ async function record(page: Page): Promise<void> {
       w.__log.push(`alarm ${e.sourceId} ${e.kind} r${e.radius} ${e.targetId ?? '-'}`),
     );
     enemies.events.on('hasted', (e) => w.__log.push(`${e.id} hasted ${e.multiplier}`));
+    enemies.events.on('frenzied', (e) => w.__log.push(`${e.id} frenzied ${e.kind}`));
+    enemies.events.on('spat', (e) => w.__log.push(`${e.id} spat`));
+    window
+      .tls!.inspect()
+      .projectiles.events.on('projectileImpact', (e) => w.__log.push(`acid ${e.kind} ${e.amount}`));
     enemies.events.on('traitsChanged', (e) => w.__log.push(`${e.id} traits ${e.traits.join('+')}`));
     enemies.events.on('died', (e) => w.__log.push(`${e.id} died`));
     combat.events.on('armorBroken', (e) => w.__log.push(`${e.targetId} lost ${e.plateId}`));
@@ -237,15 +243,25 @@ test.describe('archetypes and traits (development build)', () => {
     expect(seen.phases.slice(0, 3)).toEqual(['none', 'windup', 'recovery']);
     expect(seen.glow).toBeGreaterThan(0.3);
     // What the player sees and what the alarm did: a shockwave, the screen pulse, the Walker told.
+    // A sonic wave: three violet rings in a row (D-046).
     expect(
       await page.evaluate(() => (window as unknown as { __rings: number }).__rings),
-    ).toBeGreaterThan(0);
+    ).toBeGreaterThanOrEqual(3);
     expect(await pulses()).toBe('1');
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __pulse: number }).__pulse))
       .toBeGreaterThan(0.3);
     expect(events).toContain(`${walker} hasted 1.35`);
-    expect(await enemy(page, walker)).toMatchObject({ target: 'player', hasted: true });
+    // …and frenzied: its eyes flare violet while it lasts (D-046).
+    expect(events).toContain(`${walker} frenzied scream`);
+    expect(await enemy(page, walker)).toMatchObject({
+      target: 'player',
+      hasted: true,
+      frenzied: 'scream',
+    });
+    expect(await page.evaluate((w) => window.tls!.inspect().enemyView.eyes(w)?.color, walker)).toBe(
+      0xc070ff,
+    );
     expect(events.filter((e) => e.startsWith(`${screamer} hit`))).toEqual([]); // it never hits
 
     // The next scream can be interrupted: a body shot during the wind-up staggers it.
@@ -343,35 +359,41 @@ test.describe('archetypes and traits (development build)', () => {
     await emptyYard(page);
     await page.evaluate(() => window.tls!.setGodMode(true));
     await record(page);
-    const ids = await page.evaluate(() => window.tls!.spawnMixed(8, 9));
+    const ids = await page.evaluate(() => window.tls!.spawnMixed(10, 9));
     expect(ids.map((id) => id.split('-')[0])).toEqual([
       'walker',
       'runner',
       'tank',
       'screamer',
+      'spitter',
       'walker',
       'runner',
       'tank',
       'screamer',
+      'spitter',
     ]);
-    expect(await page.evaluate(() => window.tls!.alertEnemies())).toBe(8);
-    await expect.poll(() => page.evaluate(() => window.tls!.inspect().enemyView.count)).toBe(8);
-    expect(await page.evaluate(() => window.tls!.combat().targets)).toBe(8);
+    expect(await page.evaluate(() => window.tls!.alertEnemies())).toBe(10);
+    await expect.poll(() => page.evaluate(() => window.tls!.inspect().enemyView.count)).toBe(10);
+    expect(await page.evaluate(() => window.tls!.combat().targets)).toBe(10);
 
-    // Every melee archetype lands a hit, and a Screamer screams.
+    // Every melee archetype lands a hit, a Screamer screams and a Spitter spits.
     await expect
       .poll(
         async () => {
           const events = await log(page);
-          return ['walker', 'runner', 'tank', 'alarm'].filter((kind) =>
+          return ['walker', 'runner', 'tank', 'alarm', 'spat'].filter((kind) =>
             events.some((e) =>
-              kind === 'alarm' ? e.startsWith('alarm') : new RegExp(`^${kind}-\\d+ hit`).test(e),
+              kind === 'alarm'
+                ? e.startsWith('alarm')
+                : kind === 'spat'
+                  ? e.endsWith(' spat')
+                  : new RegExp(`^${kind}-\\d+ hit`).test(e),
             ),
           );
         },
         { timeout: 200_000 },
       )
-      .toEqual(['walker', 'runner', 'tank', 'alarm']);
+      .toEqual(['walker', 'runner', 'tank', 'alarm', 'spat']);
     const crowd = await page.evaluate(() => window.tls!.enemies());
     expect(crowd.every((e) => e.target === 'player')).toBe(true);
     for (const e of crowd) {
@@ -388,7 +410,79 @@ test.describe('archetypes and traits (development build)', () => {
       return root?.children.map((marker) => marker.children[4]?.visible ?? false) ?? [];
     });
     expect(abilityRings.filter(Boolean)).toHaveLength(2);
-    expect(await page.evaluate(() => window.tls!.killAll())).toBe(8);
+    expect(await page.evaluate(() => window.tls!.killAll())).toBe(10);
+    expect(issues.problems()).toEqual([]);
+  });
+
+  test('Spitter: rears back and glows, spits a visible arc; standing still costs 14, moving dodges it, it backs off, two headshots kill', async ({
+    page,
+    issues,
+  }) => {
+    test.setTimeout(180_000);
+    await play(page);
+    await emptyYard(page);
+    await record(page);
+    const spitter = await page.evaluate(() => window.tls!.spawnEnemy('spitter', 12));
+    await watchPhases(page, spitter);
+    // The most acid blobs drawn in any frame (a flight lasts about a second).
+    await page.evaluate(() => {
+      const w = window as unknown as { __acid: number };
+      w.__acid = 0;
+      const view = window.tls!.inspect().projectileView;
+      const tick = (): void => {
+        w.__acid = Math.max(w.__acid, view.visibleCount);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+
+    // Standing still: the telegraph, then the acid in flight, then 14 health.
+    await expect.poll(() => log(page), { timeout: 60_000 }).toContain(`player -14 from ${spitter}`);
+    const events = await log(page);
+    expect(events.indexOf(`${spitter} spit`)).toBeLessThan(events.indexOf(`${spitter} spat`));
+    expect(events).toContain('acid direct 14');
+    const seen = await phases(page);
+    expect(seen.phases.slice(0, 3)).toEqual(['none', 'windup', 'recovery']);
+    expect(seen.glow).toBeGreaterThan(0.3);
+    expect(
+      await page.evaluate(() => (window as unknown as { __acid: number }).__acid),
+    ).toBeGreaterThan(0);
+    expect(events.filter((e) => e.startsWith(`${spitter} hit`))).toEqual([]); // never melee
+
+    // Moving during the flight dodges it: aimed where the player was, with no lead.
+    await page.evaluate(() => {
+      const { enemies, player } = window.tls!.inspect();
+      enemies.events.on('spat', () => {
+        const p = player.motor.position;
+        window.tls!.teleportPlayer(p.x + 3, p.y, p.z, player.look.yaw);
+      });
+    });
+    const health = (await page.evaluate(() => window.tls!.playerHealth())).health;
+    await expect
+      .poll(async () => (await log(page)).filter((e) => e.startsWith('acid')).length, {
+        timeout: 60_000,
+      })
+      .toBeGreaterThanOrEqual(2);
+    expect((await log(page)).filter((e) => e.startsWith('acid')).at(-1)).toMatch(/^acid splash 0$/);
+    expect((await page.evaluate(() => window.tls!.playerHealth())).health).toBe(health);
+
+    // Rushed, it backs away before it spits again.
+    await page.evaluate((id) => {
+      const e = window.tls!.enemies().find((x) => x.id === id);
+      if (e) {
+        window.tls!.teleportPlayer(e.position[0], 0, e.position[2] + 4, 0);
+      }
+    }, spitter);
+    await expect
+      .poll(async () => (await enemy(page, spitter))?.targetDistance ?? 0, { timeout: 20_000 })
+      .toBeGreaterThan(7);
+
+    // Two Pistol headshots.
+    await page.evaluate(() => window.tls!.freezeEnemies(true));
+    await shootAt(page, spitter, 'HEAD');
+    expect((await enemy(page, spitter))?.state).not.toBe('DEAD');
+    await shootAt(page, spitter, 'HEAD');
+    expect((await enemy(page, spitter))?.state).toBe('DEAD');
     expect(issues.problems()).toEqual([]);
   });
 });

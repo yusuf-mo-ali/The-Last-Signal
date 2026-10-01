@@ -1,9 +1,11 @@
 /**
- * Signal Mutations in a real browser (Phase 7, D-045): every mutation announces itself (card and
- * badge) and is lifted when its wave is cleared; BLACKOUT darkens the scene without new shader
- * programs and without hiding enemies; STATIC stays under the HUD; DEATH CRY rings red and never
- * brings reinforcements; HIVE warns before a surge; BLOOD MOON shows its Elites; pausing freezes
- * the effects; dying names the mutation and a new run starts clean. The development specs drive
+ * Signal Mutations in a real browser (Phase 7, D-045; Phase 7.1, D-046): every mutation announces
+ * itself (card and badge) and is lifted when its wave is cleared; BLACKOUT turns zombies into
+ * silhouettes with glowing eyes (close ones lifted out of the dark) without new shader programs;
+ * Signal Glitch (STATIC) tears the 3D image and lags the zombies, keeps the crosshair clear and
+ * stays under the HUD; DEATH CRY echoes red, frenzies and never brings reinforcements; HIVE warns
+ * before a surge; BLOOD MOON shows its Elites and first appears on waves 9–12; pausing freezes the
+ * effects; dying names the mutation and a new run starts clean. The development specs drive
  * the waves through `tls`; the last spec uses only real input and the DOM, in every build.
  */
 
@@ -23,7 +25,7 @@ import {
 const V1: readonly (readonly [string, string])[] = [
   ['BLACKOUT', 'BLACKOUT'],
   ['HUNGER', 'HUNGER'],
-  ['STATIC', 'STATIC'],
+  ['STATIC', 'SIGNAL GLITCH'],
   ['SCREAM', 'DEATH CRY'],
   ['HIVE', 'HIVE'],
   ['BLOOD_MOON', 'BLOOD MOON'],
@@ -122,6 +124,140 @@ async function luminance(page: Page): Promise<{ mean: number; grid: number[] }> 
   }, png);
 }
 
+/**
+ * Where an enemy's eyes and torso are on screen (from its hit volumes and the camera), and the
+ * luminance there: the brightest eye pixel, the torso's mean, and the background either side.
+ */
+async function enemyRegions(page: Page, id: string) {
+  const png = (await page.screenshot()).toString('base64');
+  return page.evaluate(
+    async ([b64, target]) => {
+      const { enemies, camera } = window.tls!.inspect();
+      const e = enemies.get(target);
+      if (!e) {
+        throw new Error(`no enemy ${target}`);
+      }
+      const shapes = e.rig.definition.shapes;
+      const head = shapes.find((x) => x.zone === 'HEAD');
+      const torso = shapes.find((x) => x.zone === 'TORSO');
+      if (head?.kind !== 'sphere' || torso?.kind !== 'capsule') {
+        throw new Error('unexpected rig');
+      }
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const screen = (p: [number, number, number]): [number, number] => {
+        const v = e.rig.toWorld(p).project(camera);
+        return [((v.x + 1) / 2) * w, ((1 - v.y) / 2) * h];
+      };
+      const r = head.radius;
+      const c = head.center;
+      const eyes = [-1, 1].map((side) =>
+        screen([c[0] + side * r * 0.35, c[1] + r * 0.12, c[2] - r * 0.93]),
+      );
+      const t = screen([
+        (torso.a[0] + torso.b[0]) / 2,
+        (torso.a[1] + torso.b[1]) / 2,
+        (torso.a[2] + torso.b[2]) / 2,
+      ]);
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('2D canvas unavailable');
+      }
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, img.width, img.height).data;
+      const box = (cx: number, cy: number, hw: number, hh: number) => {
+        let max = 0;
+        let sum = 0;
+        let n = 0;
+        for (let y = Math.round(cy - hh); y <= cy + hh; y++) {
+          for (let x = Math.round(cx - hw); x <= cx + hw; x++) {
+            const i = (y * img.width + x) * 4;
+            const l =
+              0.2126 * (data[i] ?? 0) + 0.7152 * (data[i + 1] ?? 0) + 0.0722 * (data[i + 2] ?? 0);
+            max = Math.max(max, l);
+            sum += l;
+            n++;
+          }
+        }
+        return { max, mean: sum / n };
+      };
+      const sides = [box(t[0] - 25, t[1], 4, 6), box(t[0] + 25, t[1], 4, 6)];
+      return {
+        eyeMax: Math.max(...eyes.map(([x, y]) => box(x, y, 2, 2).max)),
+        torso: box(t[0], t[1], 3, 6).mean,
+        around: (sides[0]!.mean + sides[1]!.mean) / 2,
+      };
+    },
+    [png, id] as const,
+  );
+}
+
+/**
+ * How much two screenshots differ (mean absolute luminance) at the centre (around the crosshair)
+ * and away from it (beyond 30 % of the smaller side, HUD strips excluded).
+ */
+async function frameDifference(
+  page: Page,
+  a: Buffer,
+  b: Buffer,
+): Promise<{ centre: number; outer: number }> {
+  return page.evaluate(
+    async ([pa, pb]) => {
+      const pixels = async (b64: string) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${b64}`;
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          throw new Error('2D canvas unavailable');
+        }
+        ctx.drawImage(img, 0, 0);
+        return {
+          data: ctx.getImageData(0, 0, img.width, img.height).data,
+          w: img.width,
+          h: img.height,
+        };
+      };
+      const A = await pixels(pa);
+      const B = await pixels(pb);
+      const lum = (d: Uint8ClampedArray, i: number) =>
+        0.2126 * (d[i] ?? 0) + 0.7152 * (d[i + 1] ?? 0) + 0.0722 * (d[i + 2] ?? 0);
+      const cx = A.w / 2;
+      const cy = A.h / 2;
+      const minSide = Math.min(A.w, A.h);
+      let centre = 0;
+      let nc = 0;
+      let outer = 0;
+      let no = 0;
+      for (let y = Math.floor(A.h * 0.12); y < A.h * 0.85; y += 2) {
+        for (let x = 0; x < A.w; x += 2) {
+          const i = (y * A.w + x) * 4;
+          const d = Math.abs(lum(A.data, i) - lum(B.data, i));
+          const r = Math.hypot(x - cx, y - cy);
+          if (r < 0.05 * minSide) {
+            centre += d;
+            nc++;
+          } else if (r > 0.3 * minSide) {
+            outer += d;
+            no++;
+          }
+        }
+      }
+      return { centre: centre / nc, outer: outer / no };
+    },
+    [a.toString('base64'), b.toString('base64')] as const,
+  );
+}
+
 test.describe('mutations (development build)', () => {
   // eslint-disable-next-line no-empty-pattern
   test.beforeEach(({}, testInfo) => {
@@ -176,7 +312,7 @@ test.describe('mutations (development build)', () => {
     expect(issues.problems()).toEqual([]);
   });
 
-  test('BLACKOUT: the scene darkens, enemies stay visible, the light comes back', async ({
+  test('BLACKOUT: dark, zombies are silhouettes with glowing eyes, close ones readable, the light comes back', async ({
     page,
     issues,
   }) => {
@@ -204,21 +340,37 @@ test.describe('mutations (development build)', () => {
       .toBe(1);
     await frames(page, 6);
     const dark = await luminance(page);
-    expect(dark.mean).toBeLessThan(lit.mean * 0.6); // at least 40 % darker
+    expect(dark.mean).toBeLessThan(lit.mean * 0.4); // at least 60 % darker (D-046)
 
-    // A Walker 12 m ahead is still clearly there (it changes the picture where it stands).
-    await page.evaluate(() => {
+    // A Walker 12 m ahead: a silhouette darker than what is behind it, with eyes that glow.
+    const far = await page.evaluate(() => {
       window.tls!.freezeEnemies(true);
-      window.tls!.spawnEnemy('walker', 12);
+      return window.tls!.spawnEnemy('walker', 12);
     });
     await frames(page, 6);
+    const silhouette = await enemyRegions(page, far);
+    expect(silhouette.eyeMax).toBeGreaterThan(100);
+    expect(silhouette.eyeMax).toBeGreaterThan(3 * Math.max(silhouette.torso, 1));
+    expect(silhouette.torso).toBeLessThanOrEqual(silhouette.around);
     const withEnemy = await luminance(page);
     await page.evaluate(() => window.tls!.clearEnemies());
     await frames(page, 6);
     const without = await luminance(page);
     const changed = withEnemy.grid.filter((l, i) => Math.abs(l - (without.grid[i] ?? 0)) > 10);
     expect(changed.length).toBeGreaterThan(20);
-    await page.evaluate(() => window.tls!.freezeEnemies(false));
+
+    // At arm's length (3 m) it is lifted out of the dark: its body reads, not just its eyes.
+    const near = await page.evaluate(() => window.tls!.spawnEnemy('walker', 3));
+    await frames(page, 6);
+    const close = await enemyRegions(page, near);
+    expect(close.torso).toBeGreaterThan(silhouette.torso + 10);
+    const withNear = await luminance(page);
+    const nearChanged = withNear.grid.filter((l, i) => Math.abs(l - (without.grid[i] ?? 0)) > 10);
+    expect(nearChanged.length).toBeGreaterThan(20);
+    await page.evaluate(() => {
+      window.tls!.clearEnemies();
+      window.tls!.freezeEnemies(false);
+    });
 
     // Emergency lights on during the blackout; after the clear everything fades back.
     expect(
@@ -237,7 +389,7 @@ test.describe('mutations (development build)', () => {
     expect(issues.problems()).toEqual([]);
   });
 
-  test('STATIC: bursts sit under the HUD and keep the crosshair clear', async ({
+  test('Signal Glitch: the grain sits under the HUD and keeps the crosshair clear', async ({
     page,
     issues,
   }) => {
@@ -319,7 +471,123 @@ test.describe('mutations (development build)', () => {
     expect(issues.problems()).toEqual([]);
   });
 
-  test('DEATH CRY: a red ring at the body, nearby zombies hurry, no reinforcements', async ({
+  test('Signal Glitch: during a burst the image tears and zombies lag; the crosshair stays clear; then all is normal', async ({
+    page,
+    issues,
+  }) => {
+    test.setTimeout(120_000);
+    await play(page);
+    const programsBefore = await programs(page);
+    await startActive(page, 12, 'STATIC');
+    await page.evaluate(() => {
+      window.tls!.pauseSpawning(true);
+      window.tls!.clearEnemies();
+      window.tls!.teleportPlayer(0, 0, 14, 0);
+      window.tls!.look(0, 0);
+    });
+    // A Walker coming at the player, its drawing and its real position compared every frame.
+    const id = await page.evaluate(() => window.tls!.spawnEnemy('walker', 10));
+    await page.evaluate(() => window.tls!.alertEnemies());
+    await frames(page, 10);
+    await page.evaluate((walker) => {
+      const w = window as unknown as {
+        __glitch: {
+          active: number;
+          lag: number;
+          lastLag: number;
+          steps: number;
+          idleAfter: boolean;
+        };
+      };
+      w.__glitch = { active: 0, lag: 0, lastLag: 0, steps: 0, idleAfter: false };
+      const { enemyView, view } = window.tls!.inspect();
+      const canvas = document.querySelector<HTMLCanvasElement>('canvas');
+      const tick = (): void => {
+        const p = enemyView.drawnPosition(walker);
+        const lag = p ? Math.hypot(p.drawn[0]! - p.real[0]!, p.drawn[2]! - p.real[2]!) : 0;
+        const active = canvas?.dataset.glitch === 'active';
+        if (active) {
+          w.__glitch.active++;
+          w.__glitch.lag = Math.max(w.__glitch.lag, lag);
+          w.__glitch.steps = Math.max(w.__glitch.steps, view.glitch.state.steps);
+        } else if (w.__glitch.active > 0) {
+          w.__glitch.idleAfter = true;
+        }
+        w.__glitch.lastLag = lag;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, id);
+    await page.evaluate(() => window.tls!.staticBurst());
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () => (window as unknown as { __glitch: { idleAfter: boolean } }).__glitch.idleAfter,
+          ),
+        {
+          timeout: 30_000,
+        },
+      )
+      .toBe(true);
+    await frames(page, 3);
+    const seen = await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __glitch: { active: number; lag: number; lastLag: number; steps: number };
+          }
+        ).__glitch,
+    );
+    expect(seen.active).toBeGreaterThan(0);
+    // Drawn behind where it is (about speed × 0.18 s), and back in place after the burst.
+    expect(seen.lag).toBeGreaterThan(0.05);
+    expect(seen.lastLag).toBe(0);
+    // At most 3 tear patterns a second (photosensitivity).
+    expect(seen.steps).toBeGreaterThan(0);
+    // A burst lasts at most 0.8 s (its clamp): at 3 Hz, at most 3 patterns.
+    expect(seen.steps).toBeLessThanOrEqual(Math.ceil(0.8 * 3));
+    expect((await mutation(page)).glitch).toMatchObject({ active: false });
+
+    // A still scene, held mid-burst: the image tears away from the centre, not at the crosshair.
+    await page.evaluate(() => {
+      window.tls!.clearEnemies();
+    });
+    await frames(page, 4);
+    const before = await page.screenshot();
+    await page.evaluate(() => {
+      window.tls!.staticBurst();
+      const canvas = document.querySelector<HTMLCanvasElement>('canvas');
+      const { game } = window.tls!.inspect();
+      const hold = (): void => {
+        if (
+          canvas?.dataset.glitch === 'active' &&
+          window.tls!.inspect().view.glitch.state.intensity > 0.9
+        ) {
+          game.time.scale = 0;
+        } else {
+          requestAnimationFrame(hold);
+        }
+      };
+      requestAnimationFrame(hold);
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.tls!.inspect().game.time.scale), { timeout: 20_000 })
+      .toBe(0);
+    await frames(page, 3);
+    const during = await page.screenshot();
+    await page.evaluate(() => {
+      window.tls!.inspect().game.time.scale = 1;
+    });
+    const diff = await frameDifference(page, before, during);
+    expect(diff.outer).toBeGreaterThan(3);
+    expect(diff.centre).toBeLessThan(diff.outer / 2);
+    expect(diff.centre).toBeLessThan(4);
+    expect(await programs(page)).toBe(programsBefore);
+    expect(issues.problems()).toEqual([]);
+  });
+
+  test('DEATH CRY: a red echo at the body, nearby zombies frenzied toward where you stood, no reinforcements', async ({
     page,
     issues,
   }) => {
@@ -353,17 +621,26 @@ test.describe('mutations (development build)', () => {
 
     const seen = await page.evaluate(() => {
       const w = window as unknown as { __alarms: Record<string, unknown>[]; __pulled: number };
+      const view = window.tls!.inspect().enemyView;
+      const living = window.tls!.enemies().filter((e) => e.state !== 'DEAD');
       return {
-        alarms: w.__alarms.map((a) => [a.kind, a.reinforcements, a.radius]),
+        alarms: w.__alarms.map((a) => [a.kind, a.reinforcements, a.radius, a.alertMode]),
         pulled: w.__pulled,
-        rings: window.tls!.inspect().enemyView.activeRingColors,
-        hasted: window.tls!.enemies().filter((e) => e.hasted).length,
+        rings: view.activeRingColors,
+        columns: view.activeColumns,
+        hasted: living.filter((e) => e.hasted).length,
+        frenzied: living.filter((e) => e.frenzied === 'deathCry').length,
+        eyes: living.map((e) => view.eyes(e.id)?.color),
         pulses: document.querySelector<HTMLElement>('.alarm-pulse')?.dataset.pulses,
       };
     });
-    expect(seen.alarms).toEqual([['deathCry', false, 8]]);
-    expect(seen.rings).toEqual([0xff3b30]);
+    expect(seen.alarms).toEqual([['deathCry', false, 8, 'lastKnown']]);
+    // A red echo: two rings (the second a moment later) and a short flare at the body.
+    expect(seen.rings).toEqual([0xff3b30, 0xff3b30]);
+    expect(seen.columns).toEqual([{ color: 0xff3b30, height: 2.2 }]);
     expect(seen.hasted).toBe(ids.length - 1); // the others stand within 8 m
+    expect(seen.frenzied).toBe(ids.length - 1);
+    expect(new Set(seen.eyes)).toEqual(new Set([0xff2a1a])); // frenzied eyes flare red
     expect(seen.pulled).toBe(0);
     expect(seen.pulses).toBe(pulsesBefore); // no screen pulse: that is the Screamer's
     expect(issues.problems()).toEqual([]);
@@ -404,6 +681,30 @@ test.describe('mutations (development build)', () => {
     expect(region).not.toBe('');
     expect(maxAlive).toBeLessThanOrEqual(start.maxAlive);
     expect((await wave(page)).alive).toBeLessThanOrEqual(start.maxAlive);
+    expect(issues.problems()).toEqual([]);
+  });
+
+  test('BLOOD MOON first appears on one of waves 9–12 in every run; never before, never on 20', async ({
+    page,
+    issues,
+  }) => {
+    await play(page);
+    const firsts = await page.evaluate(() =>
+      Array.from({ length: 40 }, (_, i) => {
+        const schedule = window.tls!.mutationSchedule(1, 20, `e2e-${i}`);
+        const waves = Object.entries(schedule)
+          .filter(([, id]) => id === 'BLOOD_MOON')
+          .map(([n]) => Number(n));
+        return { first: waves[0] ?? 0, final: schedule[20] };
+      }),
+    );
+    for (const { first, final } of firsts) {
+      expect(first).toBeGreaterThanOrEqual(9);
+      expect(first).toBeLessThanOrEqual(12);
+      expect(final).toBe('—');
+    }
+    // Spread over the window, not always the same wave.
+    expect(new Set(firsts.map((f) => f.first)).size).toBeGreaterThanOrEqual(3);
     expect(issues.problems()).toEqual([]);
   });
 
