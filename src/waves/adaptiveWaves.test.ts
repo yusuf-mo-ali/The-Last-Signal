@@ -183,6 +183,39 @@ describe('adaptation shapes the mix and nothing else (D-026, D-047)', () => {
     expect(early).toBe(0);
   });
 
+  it('the adaptive clamp is its own: an over-weight is exactly the clamp; ignored fields change nothing', () => {
+    const [, hi] = WAVE_RULES.modifierClamp.adaptive.weight;
+    for (let i = 0; i < 60; i++) {
+      const seed = `exact-${i}`;
+      const n = 10 + (i % 15);
+      const over = generateWave(n, {
+        seed,
+        modifiers: [{ source: 'adaptive', archetypeWeights: { runner: 10 } }],
+      });
+      const atCap = generateWave(n, {
+        seed,
+        modifiers: [{ source: 'adaptive', archetypeWeights: { runner: hi } }],
+      });
+      expect(over.spawns, `${seed} wave ${n}`).toEqual(atCap.spawns);
+      // An Elite chance, a budget, Elite limits or surges from the adaptive source: no effect at all.
+      const plain = generateWave(n, { seed });
+      const ignored = generateWave(n, {
+        seed,
+        modifiers: [
+          {
+            source: 'adaptive',
+            traitChance: { elite: 0.5 },
+            budgetMultiplier: 1.5,
+            eliteMaxBonus: 3,
+            eliteMinimum: 2,
+          },
+        ],
+      });
+      expect(ignored.spawns, `${seed} wave ${n}`).toEqual(plain.spawns);
+      expect(ignored.surges).toEqual(plain.surges);
+    }
+  });
+
   it('the final wave ignores adaptation entirely', () => {
     for (const seed of ['a', 'b', 'c']) {
       const modifiers = composeModifiers(PAIRS[0] ?? [], { wave: 19, dwellRegions: ['west'] });

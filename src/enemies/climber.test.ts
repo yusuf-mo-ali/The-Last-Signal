@@ -107,12 +107,46 @@ describe('the Climber on a wall', () => {
     expect(climbed).toBe(true);
     expect(maxClimbY).toBeGreaterThan(CATWALK_HEIGHT - 0.05);
     expect(climber?.motor.position.y).toBeCloseTo(CATWALK_HEIGHT, 1);
-    // The Walker from the same spot has to go round by the stairs or the ramp.
+    // The Walker from the same spot has to go round by the stairs or the ramp: its route never
+    // takes a climb, and it gets there.
     const w = setup();
     const walker = w.t.manager.spawn('walker', [-9, 0, 4], { patrol: false, alertTo: w.target });
-    w.t.runUntil(() => (walker?.motor.position.y ?? 0) > CATWALK_HEIGHT - 0.1, 60);
+    let climbLeg = false;
+    const walked = w.t.runUntil(() => {
+      const to = walker?.route[walker.routeCursor];
+      if (
+        to !== undefined &&
+        w.t.manager.routes?.climbsInto(to).some((l) => walker?.route.includes(l.from))
+      ) {
+        climbLeg = true;
+      }
+      return (walker?.motor.position.y ?? 0) > CATWALK_HEIGHT - 0.1;
+    }, 60);
+    expect(climbLeg).toBe(false);
     expect(walker?.climbing).toBeNull();
+    expect(walked * DT).toBeLessThan(60);
     expect(steps * DT).toBeLessThan(15);
+  });
+
+  it('never attacks from the wall, even with the player at the top of the climb', () => {
+    const world = facility();
+    // Standing on the catwalk right over the climb: in reach once the Climber is half way up.
+    const target = targetAt(-20.7, CATWALK_HEIGHT, 1);
+    const t = enemyTestWorld({ level: FACILITY, world: world.collision, targets: [target] });
+    const climber = t.manager.spawn('climber', [-17, 0, 1], { patrol: false, alertTo: target });
+    let climbed = false;
+    const onWall: string[] = [];
+    t.manager.events.on('attackStarted', (e) => {
+      if (e.id === climber?.id && climber.climbing) {
+        onWall.push(climber.climbing.phase);
+      }
+    });
+    t.runUntil(() => {
+      climbed ||= climber?.climbing !== null;
+      return climbed && climber?.climbing === null;
+    }, 20);
+    expect(climbed).toBe(true);
+    expect(onWall).toEqual([]);
   });
 
   it('cannot attack while climbing; a stagger knocks it off; shot dead, it lies at the foot', () => {

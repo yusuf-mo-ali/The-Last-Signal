@@ -276,6 +276,23 @@ describe('the director: entering, staying, escalating, fading (D-026)', () => {
     );
   });
 
+  it('hysteresis, exactly: a mean between exit and enter keeps it, never starts it', () => {
+    const between = {
+      ...emptyProfile(),
+      wavesObserved: 4,
+      // Mean 0.4: under SKIRMISHER's enter (0.45), over its exit (0.3); confidence 0.75.
+      signals: { mobility: { mean: 0.4, mass: 2, above: 1.5 } },
+    };
+    const active: AdaptationState = {
+      active: [{ id: 'SKIRMISHER', key: 'default', level: 1, since: 8, levelSince: 8 }],
+      restUntil: {},
+    };
+    expect(decide(between, active, 9).state.active.map((a) => a.id)).toEqual(['SKIRMISHER']);
+    expect(decide(between, EMPTY_STATE, 9).state.active).toEqual([]);
+    const below = { ...between, signals: { mobility: { mean: 0.29, mass: 2, above: 1.5 } } };
+    expect(decide(below, active, 9).changes.map((c) => c.kind)).toEqual(['fade']);
+  });
+
   it('rest: an adaptation cannot re-enter before its cooldown ends', () => {
     const rested = { active: [], restUntil: { SKIRMISHER: 9 } };
     const strong = run(steady(5, 7, { mobility: [0.9, 1] }), { state: rested });

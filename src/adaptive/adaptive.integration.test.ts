@@ -96,6 +96,28 @@ describe('adaptive integration: a run, played two ways', () => {
     }
   }, 120_000);
 
+  it('counts only while a wave is fought: nothing while paused, in the intro or the breather', () => {
+    const g = headlessGame('counting');
+    g.playerHealth.godMode = true;
+    g.startRun();
+    g.until(() => g.game.state.current === 'WAVE_ACTIVE', 20);
+    g.until(() => g.adaptive.snapshot.telemetry.samples > 4, 30);
+    const during = g.adaptive.snapshot.telemetry.samples;
+    g.game.state.pause();
+    g.frames(240);
+    expect(g.adaptive.snapshot.telemetry.samples).toBe(during);
+    g.game.state.resume();
+    g.until(() => {
+      g.killWave();
+      return g.game.state.current === 'WAVE_COMPLETE';
+    }, 60);
+    const done = g.adaptive.snapshot.telemetry.samples;
+    // The breather: an enemy left standing (a debug spawn) is not a wave enemy, and nothing counts.
+    g.enemies.spawn('walker', [0, 0, 6], { patrol: false });
+    g.frames(240);
+    expect(g.adaptive.snapshot.telemetry.samples).toBe(done);
+  });
+
   it('a new run forgets everything', () => {
     const g = headlessGame('reset');
     play(g, 'camper', 6, { seconds: 46 });
