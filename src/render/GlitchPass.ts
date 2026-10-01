@@ -110,9 +110,11 @@ export class GlitchPass {
   private readonly material: ShaderMaterial;
   private readonly size = new Vector2();
   /** The scene, rendered here instead of the screen during a burst. */
-  private readonly target: WebGLRenderTarget;
+  private target: WebGLRenderTarget;
   /** The afterimage: `target` as it was when the tear pattern last stepped. */
-  private readonly history: WebGLRenderTarget;
+  private history: WebGLRenderTarget;
+  /** The WebGL context the targets belong to (`ContextLossMonitor.lossCount`). */
+  private generation: number;
   private lastBurst = Number.NaN;
   private lastStep = -1;
   private stepsThisBurst = 0;
@@ -125,6 +127,7 @@ export class GlitchPass {
     this.renderer = renderer;
     this.target = makeTarget(true);
     this.history = makeTarget(false);
+    this.generation = renderer.context.lossCount;
     this.material = new ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -167,6 +170,7 @@ export class GlitchPass {
   prewarm(scene: Scene, camera: PerspectiveCamera): void {
     const webgl = this.renderer.webgl;
     webgl.compile(this.scene, this.camera);
+    this.renewAfterContextLoss();
     this.fitToScreen();
     webgl.setRenderTarget(this.target);
     webgl.render(scene, camera);
@@ -193,6 +197,7 @@ export class GlitchPass {
     this.intensity = glitch.envelope;
     this.bands = glitch.bands;
     const webgl = this.renderer.webgl;
+    this.renewAfterContextLoss();
     this.fitToScreen();
     if (glitch.burstStart !== this.lastBurst) {
       this.lastBurst = glitch.burstStart;
@@ -250,6 +255,24 @@ export class GlitchPass {
     (u.tHistory as { value: Texture }).value = this.target.texture;
     webgl.setRenderTarget(this.history);
     webgl.render(this.scene, this.camera);
+    (u.tHistory as { value: Texture }).value = this.history.texture;
+  }
+
+  /**
+   * After a context loss, fresh targets. The old ones' GPU objects died with the old context, but
+   * three's dispose listeners on them still point at it: resizing or disposing them would delete
+   * objects of a dead context (WebGL warns). They are dropped without disposing.
+   */
+  private renewAfterContextLoss(): void {
+    const generation = this.renderer.context.lossCount;
+    if (generation === this.generation) {
+      return;
+    }
+    this.generation = generation;
+    this.target = makeTarget(true);
+    this.history = makeTarget(false);
+    const u = this.material.uniforms;
+    (u.tFrame as { value: Texture }).value = this.target.texture;
     (u.tHistory as { value: Texture }).value = this.history.texture;
   }
 

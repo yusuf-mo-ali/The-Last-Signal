@@ -173,16 +173,18 @@ test.describe('enemies (development build)', () => {
     await watchGlow(page, id);
 
     // Detection: in range and in sight, it notices the player, then walks straight at them.
+    // Polled together: in the step it enters CHASE its route is still 'none' until its next
+    // decision (a few steps later), and one snapshot can land in between.
     let chasing: EnemySnapshot | undefined;
     await expect
       .poll(
         async () => {
           chasing = await enemy(page, id);
-          return chasing?.state;
+          return `${chasing?.state}/${chasing?.nav}`;
         },
         { timeout: 10_000 },
       )
-      .toBe('CHASE');
+      .toBe('CHASE/direct');
     expect(chasing).toMatchObject({ target: 'player', canSeeTarget: true, nav: 'direct' });
 
     // It winds up only within attack range, stopping short of the player, and the wind-up glows.
