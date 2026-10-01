@@ -89,6 +89,12 @@ export interface CompositionModifier {
    * adaptive source and only for implemented archetypes; capped per wave.
    */
   readonly extraArchetypes?: readonly EnemyArchetypeId[];
+  /**
+   * Exactly this many of an archetype outside the roster (the Climber, D-047). Adaptive source
+   * only, from the archetype's `adaptiveUnlocks` wave, trait-free, within `extraArchetypeMax` and
+   * the budget (paid for out of it, never added to it).
+   */
+  readonly extraCounts?: Readonly<Partial<Record<EnemyArchetypeId, number>>>;
   /** Mutations only (clamped to `modifierClamp.budget`). */
   readonly budgetMultiplier?: number;
   /** Spawn regions to favour (flank spawns). */

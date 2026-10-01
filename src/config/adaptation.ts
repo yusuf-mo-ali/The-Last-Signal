@@ -476,12 +476,16 @@ export const ADAPTATION_GUARDRAILS = {
   /** Evidence from archetypes an active adaptation brought counts this much toward its own signal. */
   attribution: 0.25,
   /** No adaptation on the final wave (it is hand-tuned, like its mutation-free rule). */
-  noAdaptationOnFinale: true,
+  noAdaptationOnFinale: true as boolean,
   /**
    * The strain governor: while strain is high with this confidence, nothing enters, nothing
    * escalates and level 2 drops to level 1. Pressure only rises while the player copes.
    */
-  strain: { threshold: 0.5, confidence: 0.6 },
+  strain: {
+    threshold: 0.5,
+    confidence: 0.6,
+    text: 'You are bleeding. The horde hesitates, for now.',
+  },
   /** Hard caps on what adaptation may do to a wave, whatever is active. */
   caps: {
     /** Product of the active adaptive weight multipliers, per archetype. */
